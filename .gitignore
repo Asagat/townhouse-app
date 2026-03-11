@@ -1,7 +1,24 @@
-venv/
-.venv/
-node_modules/
+# Python
 __pycache__/
+*.py[cod]
+*.class
+venv/
+venv~/
+.pytest_cache/
+
+# Environment
 .env
+.flaskenv
+
+# Databases (Local)
+*.sqlite3
+*.db
+
+# OS
+.DS_Store
+.directory
+
+# IDEs
+.vscode/
+.idea/
 .zed/
-.next/
