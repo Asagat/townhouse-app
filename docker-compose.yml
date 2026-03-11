@@ -1,0 +1,24 @@
+services:
+  backend:
+    build: ./backend
+    container_name: townhouse-backend
+    volumes:
+      - ./backend:/app:z  # Добавлен :z
+    env_file: .env
+    ports:
+      - "8000:8000"
+    command: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build: ./frontend
+    container_name: townhouse-frontend
+    volumes:
+      - ./frontend:/app:z # Добавлен :z
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - CHOKIDAR_USEPOLLING=true
