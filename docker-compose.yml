@@ -8,7 +8,6 @@ services:
     volumes:
       - ./backend:/app:z
     env_file: .env
-    # В network_mode: host порты пробрасывать не нужно, они откроются на IP LXC
     command: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
     security_opt:
       - "apparmor:unconfined"
@@ -23,7 +22,7 @@ services:
       - ./frontend:/app:z
       - /app/node_modules
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=http://townhouse.sagacloud.kz/api
       - CHOKIDAR_USEPOLLING=true
     security_opt:
       - "apparmor:unconfined"
