@@ -133,6 +133,7 @@ class ServiceTypeAdmin(ModelView, model=ServiceType):
     category = "2. Справочники"
     name_plural = "Виды услуг"
     icon = "fa-solid fa-list-check"
+    column_list = ["id", "services_type"]
 
 
 class TariffTypeAdmin(ModelView, model=TariffType):

@@ -1,6 +1,6 @@
 import enum
 
-from database import Base, engine
+from database import Base
 from sqlalchemy import (
     TIMESTAMP,
     Boolean,
@@ -12,12 +12,12 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    func,
 )
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 
 
-# --- ПЕРЕЧИСЛЕНИЯ (ENUMS) ---
+# --- ENUMS ---
 class TransactionTypeEnum(enum.Enum):
     in_cash = "Приход в кассу"
     out_cash = "Расход из кассы"
@@ -43,9 +43,6 @@ class Owner(Base):
 
     apartments = relationship("Apartment", back_populates="owner")
 
-    def __str__(self):
-        return self.full_name
-
 
 class Apartment(Base):
     __tablename__ = "apartments"
@@ -59,9 +56,6 @@ class Apartment(Base):
     owner = relationship("Owner", back_populates="apartments")
     accounts = relationship("Account", back_populates="apartment")
     meters = relationship("Meter", back_populates="apartment")
-
-    def __str__(self):
-        return f"Кв. №{self.apartment_number}"
 
 
 class Account(Base):
@@ -79,8 +73,8 @@ class Account(Base):
 class CashPoint(Base):
     __tablename__ = "cash_points"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(255), nullable=False)
-    point_type = Column(String(50), nullable=False)
+    name = Column(String(255), nullable=False)  # Касса №1, Счет в банке
+    is_active = Column(Boolean, default=True)
 
 
 class ServiceType(Base):
@@ -88,16 +82,11 @@ class ServiceType(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     services_type = Column(String(255), nullable=False)
 
-    tariffs = relationship("Tariff", back_populates="service_type")
 
-
-# --- ДОБАВЛЕННЫЙ КЛАСС (Исправляет ошибку импорта в app.py) ---
 class TariffType(Base):
     __tablename__ = "tariff_types"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(100), nullable=False)  # "По счетчику", "По площади", "Фикс"
-
-    tariffs = relationship("Tariff", back_populates="tariff_type")
+    name = Column(String(100), nullable=False)
 
 
 class Tariff(Base):
@@ -106,14 +95,12 @@ class Tariff(Base):
     services_type_id = Column(
         Integer, ForeignKey("services_type.id", ondelete="RESTRICT"), nullable=False
     )
-    # Связь с типом тарифа
-    tariff_type_id = Column(Integer, ForeignKey("tariff_types.id", ondelete="RESTRICT"))
+    tariff_type_id = Column(
+        Integer, ForeignKey("tariff_types.id", ondelete="RESTRICT"), nullable=False
+    )
     price = Column(Numeric(15, 2), nullable=False)
-    valid_from = Column(Date, nullable=False)  # Исправлена опечатка Colaumn
+    valid_from = Column(Date, nullable=False)
     unit = Column(String(50))
-
-    service_type = relationship("ServiceType", back_populates="tariffs")
-    tariff_type = relationship("TariffType", back_populates="tariffs")
 
 
 class Meter(Base):
@@ -122,15 +109,15 @@ class Meter(Base):
     services_type_id = Column(
         Integer, ForeignKey("services_type.id", ondelete="RESTRICT"), nullable=False
     )
-    apartment_id = Column(Integer, ForeignKey("apartments.id", ondelete="RESTRICT"))
+    apartment_id = Column(Integer, ForeignKey("apartments.id", ondelete="CASCADE"))
     serial_number = Column(String(100), unique=True)
     installed_at = Column(Date)
 
-    apartment = relationship("Apartment", back_populates="meters")
     readings = relationship("MeterReading", back_populates="meter")
+    apartment = relationship("Apartment", back_populates="meters")
 
 
-# --- ДОКУМЕНТЫ И РЕГИСТРЫ ---
+# --- ДОКУМЕНТЫ ---
 
 
 class MeterReading(Base):
@@ -148,11 +135,14 @@ class Transaction(Base):
     __tablename__ = "transactions"
     id = Column(Integer, primary_key=True, autoincrement=True)
     transaction_date = Column(TIMESTAMP, server_default=func.now())
-    point_type_id = Column(Integer, ForeignKey("cash_points.id", ondelete="RESTRICT"))
     account_id = Column(Integer, ForeignKey("accounts.id", ondelete="RESTRICT"))
+    cash_point_id = Column(Integer, ForeignKey("cash_points.id", ondelete="RESTRICT"))
     transaction_type = Column(Enum(TransactionTypeEnum), nullable=False)
     amount = Column(Numeric(15, 2), nullable=False)
     notes = Column(String(255))
+
+
+# --- РЕГИСТРЫ ---
 
 
 class AccrualsRegister(Base):
@@ -168,6 +158,13 @@ class AccrualsRegister(Base):
     services_type_id = Column(
         Integer, ForeignKey("services_type.id", ondelete="RESTRICT"), nullable=False
     )
+
+    current_reading_id = Column(
+        Integer, ForeignKey("meter_readings.id", ondelete="SET NULL")
+    )
+    past_reading_value = Column(Numeric(12, 3))
+    current_reading_value = Column(Numeric(12, 3))
+
     consumption = Column(Numeric(12, 3), nullable=False)
     amount = Column(Numeric(15, 2), nullable=False)
 
@@ -179,17 +176,14 @@ class AccountsRegister(Base):
     account_id = Column(
         Integer, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
     )
-    # Положительное значение — доход/начисление, отрицательное — оплата/расход
+
+    transaction_id = Column(
+        Integer, ForeignKey("transactions.id", ondelete="CASCADE"), nullable=True
+    )
+    accrual_id = Column(
+        Integer, ForeignKey("accruals_register.id", ondelete="CASCADE"), nullable=True
+    )
+
     income = Column(Numeric(15, 2), default=0)
     expense = Column(Numeric(15, 2), default=0)
-    balance_after = Column(Numeric(15, 2))  # Остаток после операции
-
-    account = relationship("Account")
-
-
-def init_db():
-    Base.metadata.create_all(bind=engine)
-
-
-if __name__ == "__main__":
-    init_db()
+    balance_after = Column(Numeric(15, 2))
