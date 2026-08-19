@@ -41,7 +41,11 @@ class Owner(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
-    apartments = relationship("Apartment", back_populates="owner")
+    # passive_deletes=True: не подгружать/обнулять связанные квартиры в ORM при удалении владельца,
+    # а положиться на реальное ограничение ondelete="RESTRICT" в БД
+    apartments = relationship(
+        "Apartment", back_populates="owner", passive_deletes=True
+    )
 
 
 class Apartment(Base):
@@ -54,8 +58,12 @@ class Apartment(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     owner = relationship("Owner", back_populates="apartments")
-    accounts = relationship("Account", back_populates="apartment")
-    meters = relationship("Meter", back_populates="apartment")
+    # passive_deletes=True: доверяем БД самой применить ondelete (RESTRICT/CASCADE),
+    # вместо того чтобы SQLAlchemy предварительно обнуляла FK у дочерних записей
+    accounts = relationship(
+        "Account", back_populates="apartment", passive_deletes=True
+    )
+    meters = relationship("Meter", back_populates="apartment", passive_deletes=True)
 
 
 class Account(Base):
@@ -113,7 +121,9 @@ class Meter(Base):
     serial_number = Column(String(100), unique=True)
     installed_at = Column(Date)
 
-    readings = relationship("MeterReading", back_populates="meter")
+    readings = relationship(
+        "MeterReading", back_populates="meter", passive_deletes=True
+    )
     apartment = relationship("Apartment", back_populates="meters")
 
 
@@ -124,6 +134,11 @@ class MeterReading(Base):
     __tablename__ = "meter_readings"
     id = Column(Integer, primary_key=True, autoincrement=True)
     meter_id = Column(Integer, ForeignKey("meters.id", ondelete="CASCADE"))
+    # Денормализовано: вид услуги также хранится напрямую на показании,
+    # чтобы форма могла автоматически найти нужный счётчик по квартире + виду услуги
+    services_type_id = Column(
+        Integer, ForeignKey("services_type.id", ondelete="RESTRICT"), nullable=False
+    )
     reading = Column(Numeric(12, 3), nullable=False)
     reading_date = Column(Date, nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
@@ -140,6 +155,9 @@ class Transaction(Base):
     transaction_type = Column(Enum(TransactionTypeEnum), nullable=False)
     amount = Column(Numeric(15, 2), nullable=False)
     notes = Column(String(255))
+
+    # Однонаправленная связь для вывода квартиры в списке/форме (через account.apartment_id)
+    account = relationship("Account")
 
 
 # --- РЕГИСТРЫ ---

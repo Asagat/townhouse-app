@@ -1,5 +1,7 @@
-from pydantic import BaseModel
+from datetime import datetime
 from typing import Optional
+
+from pydantic import BaseModel
 
 class OwnerBase(BaseModel):
     full_name: str
@@ -24,5 +26,16 @@ class ApartmentCreate(ApartmentBase):
 class ApartmentOut(ApartmentBase):
     id: int
     owner_id: int
+    class Config:
+        from_attributes = True
+
+class TransactionOut(BaseModel):
+    id: int
+    amount: float
+    transaction_type: str
+    transaction_date: Optional[datetime] = None
+    account_id: Optional[int] = None
+    cash_point_id: Optional[int] = None
+    notes: Optional[str] = None
     class Config:
         from_attributes = True

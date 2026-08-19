@@ -1,7 +1,16 @@
 from datetime import date
 
 from database import SessionLocal
-from models import Apartment, Meter, Owner, ServiceType
+from models import (
+    Account,
+    Apartment,
+    CashPoint,
+    Meter,
+    Owner,
+    ServiceType,
+    Transaction,
+    TransactionTypeEnum,
+)
 
 
 def seed():
@@ -41,6 +50,31 @@ def seed():
             installed_at=date.today(),
         )
         db.add(meter)
+
+        # 5. Создаем Лицевой счёт
+        account = Account(
+            apartment_id=apt.id,
+            account_number="LS-000101",
+            account_name="Лицевой счёт кв. 101",
+            is_active=True,
+        )
+        db.add(account)
+        db.flush()
+
+        # 6. Создаем Кассу
+        cash_point = CashPoint(name="Касса №1", is_active=True)
+        db.add(cash_point)
+        db.flush()
+
+        # 7. Создаем тестовую Транзакцию (платёж)
+        transaction = Transaction(
+            account_id=account.id,
+            cash_point_id=cash_point.id,
+            transaction_type=TransactionTypeEnum.in_cash,
+            amount=15000,
+            notes="Оплата за коммунальные услуги",
+        )
+        db.add(transaction)
 
         db.commit()
         print("✅ Тестовые данные успешно загружены!")
