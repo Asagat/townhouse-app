@@ -1,3 +1,5 @@
+// --- App.tsx ---
+
 import { useEffect, useState } from "react";
 import {
     Refine,
@@ -17,8 +19,6 @@ import {
     Routes,
     Route,
     Outlet,
-    Link,
-    useLocation,
 } from "react-router-dom";
 import {
     ConfigProvider,
@@ -34,90 +34,19 @@ import {
     Popconfirm,
     Space,
     message,
+    Checkbox,
 } from "antd";
 import ruRU from "antd/locale/ru_RU";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import "dayjs/locale/ru";
 import "antd/dist/reset.css";
+import { allResources } from "./config/menu";
+import { Sidebar } from "./components/layout/Sidebar";
 
 // Русская локализация dayjs (дни недели/месяцы в календаре DatePicker) и формат даты в полях ввода
 dayjs.locale("ru");
 const DATE_FORMAT = "DD.MM.YYYY";
-
-// --- ЦВЕТА (взяты из тёмной темы Tabler, которую использует sqladmin) ---
-const COLORS = {
-    sidebarBg: "#0f172a",
-    border: "#1d273b",
-    textMuted: "#6c7a91",
-    textActive: "#ffffff",
-    iconMuted: "#4b5875",
-    accent: "#79a6dc",
-};
-
-// --- СТРУКТУРА МЕНЮ: соответствует разделам админ-панели (sqladmin) ---
-type ResourceItem = { key: string; label: string; icon: string };
-type Category = { title: string; items: ResourceItem[] };
-
-const categories: Category[] = [
-    {
-        title: "1. Операции",
-        items: [
-            {
-              key: "payments",
-              label: "Приход/Расход",
-              icon: "fa-solid fa-exchange-alt",
-            },
-
-            {
-              key: "meter_readings",
-              label: "Показания",
-              icon: "fa-solid fa-pen-to-square",
-            },
-
-            {
-              key: "accruals_register",
-              label: "Начисления",
-              icon: "fa-solid fa-calculator",
-            },
-        ],
-    },
-
-    {
-        title: "2. Справочники",
-        items: [
-
-            { key: "cash_points", label: "Кассы/Счета", icon: "fa-solid fa-vault" },
-
-            {
-              key: "accounts_register",
-              label: "Регистр взаиморасчетов",
-              icon: "fa-solid fa-book",
-            },
-
-            { key: "owners", label: "Контрагенты", icon: "fa-solid fa-user" },
-
-            { key: "apartments", label: "Квартиры", icon: "fa-solid fa-house" },
-
-            {
-                key: "accounts",
-                label: "Лицевые счета",
-                icon: "fa-solid fa-file-invoice-dollar",
-            },
-
-            {
-                key: "service_types",
-                label: "Виды услуг",
-                icon: "fa-solid fa-list-check",
-            },
-            { key: "tariffs", label: "Тарифы", icon: "fa-solid fa-money-bill-wave" },
-            { key: "meters", label: "Счетчики", icon: "fa-solid fa-gauge-high" },
-            { key: "tariff_types", label: "Типы тарифов", icon: "fa-solid fa-tags" },
-        ],
-    },
-];
-
-const allResources = categories.flatMap((c) => c.items);
 
 // --- КОЛОНКИ ТАБЛИЦ ПО РЕСУРСАМ (для чтения/отображения) ---
 type Column = { key: string; label: string; format?: (value: any) => string };
@@ -162,6 +91,8 @@ const columnsConfig: Record<string, Column[]> = {
     ],
     accruals_register: [
         { key: "accrual_date", label: "Дата начисления", format: formatDate },
+        { key: "past_reading_value", label: "Показание прошлое", format: formatNumber },
+        { key: "current_reading_value", label: "Показание текущее", format: formatNumber },
         { key: "consumption", label: "Потребление", format: formatNumber },
         { key: "amount", label: "Сумма", format: formatNumber },
         { key: "account_id_label", label: "Лицевой счёт" },
@@ -200,7 +131,7 @@ const columnsConfig: Record<string, Column[]> = {
 // --- Как красиво подписать запись справочника внутри выпадающего списка (FK) ---
 const referenceLabelFormatters: Record<string, (item: any) => string> = {
     owners: (item) => item.full_name ?? `#${item.id}`,
-    apartments: (item) => `№ ${item.apartment_number} — ${item.address}`,
+    apartments: (item) => `№ ${item.apartment_number} — ${item.owner?.full_name || "Без собственника"}`,
     accounts: (item) => `${item.account_number} (${item.account_name})`,
     cash_points: (item) => item.name,
     service_types: (item) => item.services_type,
@@ -260,7 +191,7 @@ const ReferenceSelect = ({
             }
             options={items.map((item: any) => ({
                 value: item.id,
-                label: `#${item.id} — ${formatter(item)}`,
+                label: formatter(item),  // <-- УБИРАЕМ `#${item.id} — `
             }))}
         />
     );
@@ -587,6 +518,256 @@ const BulkReadingsModal = ({
     );
 };
 
+// --- РАСЧЁТ НАЧИСЛЕНИЙ ЗА ПЕРИОД ---
+// Оператор выбирает месяц/год начисления — сервер рассчитывает по всем лицевым счетам
+// и видам услуг предварительные строки (тариф, показания, потребление, сумма).
+// Оператор может снять галочки с ненужных строк и сохранить только выбранные в регистр.
+type AccrualPreviewRow = {
+    row_number: number;
+    account_id: number;
+    account_id_label: string;
+    services_type_id: number;
+    services_type_id_label: string;
+    tariff_id: number;
+    tariff_id_label: string;
+    past_reading_value: number | null;
+    current_reading_value: number | null;
+    consumption: number;
+    amount: number;
+};
+
+const monthOptions = [
+    { value: 1, label: "Январь" },
+    { value: 2, label: "Февраль" },
+    { value: 3, label: "Март" },
+    { value: 4, label: "Апрель" },
+    { value: 5, label: "Май" },
+    { value: 6, label: "Июнь" },
+    { value: 7, label: "Июль" },
+    { value: 8, label: "Август" },
+    { value: 9, label: "Сентябрь" },
+    { value: 10, label: "Октябрь" },
+    { value: 11, label: "Ноябрь" },
+    { value: 12, label: "Декабрь" },
+];
+
+const AccrualsCalculationModal = ({
+    open,
+    onClose,
+    onSaved,
+}: {
+    open: boolean;
+    onClose: () => void;
+    onSaved: () => void;
+}) => {
+    const apiUrl = useApiUrl();
+    const now = dayjs();
+    const [year, setYear] = useState<number>(now.year());
+    const [month, setMonth] = useState<number>(now.month() + 1);
+    const [rows, setRows] = useState<AccrualPreviewRow[]>([]);
+    const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
+
+    const { refetch, isFetching } = useCustom<{ rows: AccrualPreviewRow[] }>({
+        url: `${apiUrl}/accruals_register/calculate`,
+        method: "get",
+        config: { query: { year, month } },
+        queryOptions: {
+            enabled: false,
+            onSuccess: (response) => {
+                const data = response.data.rows ?? [];
+                setRows(data);
+                setSelectedKeys(data.map((row) => row.row_number));
+            },
+            onError: (err: any) =>
+                message.error(
+                    err?.response?.data?.detail ?? "Не удалось рассчитать начисления",
+                ),
+        },
+    });
+
+    const { mutate: generate, isLoading: saving } = useCustomMutation();
+
+    useEffect(() => {
+        if (open) {
+            const n = dayjs();
+            setYear(n.year());
+            setMonth(n.month() + 1);
+            setRows([]);
+            setSelectedKeys([]);
+        }
+    }, [open]);
+
+    useEffect(() => {
+        if (open) {
+            refetch();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, year, month]);
+
+    const handleSave = () => {
+        const selectedRows = rows.filter((row) =>
+            selectedKeys.includes(row.row_number),
+        );
+        if (selectedRows.length === 0) {
+            message.error("Выберите хотя бы одну строку для начисления");
+            return;
+        }
+
+        generate(
+            {
+                url: `${apiUrl}/accruals_register/generate`,
+                method: "post",
+                values: {
+                    year,
+                    month,
+                    rows: selectedRows,
+                },
+            },
+            {
+                onSuccess: (response) => {
+                    const created = (response.data as any).created?.length ?? 0;
+                    message.success(`Начислено записей: ${created}`);
+                    onSaved();
+                    onClose();
+                },
+                onError: (err: any) =>
+                    message.error(
+                        err?.response?.data?.detail ?? "Не удалось сохранить начисления",
+                    ),
+            },
+        );
+    };
+
+    const allSelected = rows.length > 0 && selectedKeys.length === rows.length;
+    const someSelected = selectedKeys.length > 0 && !allSelected;
+
+    const columns = [
+        {
+            title: (
+                <Checkbox
+                    checked={allSelected}
+                    indeterminate={someSelected}
+                    onChange={(e) =>
+                        setSelectedKeys(
+                            e.target.checked ? rows.map((row) => row.row_number) : [],
+                        )
+                    }
+                />
+            ),
+            key: "select",
+            width: 50,
+            render: (_: unknown, record: AccrualPreviewRow) => (
+                <Checkbox
+                    checked={selectedKeys.includes(record.row_number)}
+                    onChange={(e) =>
+                        setSelectedKeys((prev) =>
+                            e.target.checked
+                                ? [...prev, record.row_number]
+                                : prev.filter((key) => key !== record.row_number),
+                        )
+                    }
+                />
+            ),
+        },
+        { title: "№", dataIndex: "row_number", key: "row_number", width: 60 },
+        {
+            title: "Квартира (Лицевой счёт)",
+            dataIndex: "account_id_label",
+            key: "account_id_label",
+        },
+        {
+            title: "Вид услуги",
+            dataIndex: "services_type_id_label",
+            key: "services_type_id_label",
+        },
+        {
+            title: "Показание прошлое",
+            dataIndex: "past_reading_value",
+            key: "past_reading_value",
+            render: formatNumber,
+        },
+        {
+            title: "Показание текущее",
+            dataIndex: "current_reading_value",
+            key: "current_reading_value",
+            render: formatNumber,
+        },
+        {
+            title: "Потребление",
+            dataIndex: "consumption",
+            key: "consumption",
+            render: formatNumber,
+        },
+        {
+            title: "Тариф",
+            dataIndex: "tariff_id_label",
+            key: "tariff_id_label",
+        },
+        {
+            title: "Сумма",
+            dataIndex: "amount",
+            key: "amount",
+            render: formatNumber,
+        },
+    ];
+
+    return (
+        <Modal
+            title="Начисление сумм по коммунальным услугам"
+            open={open}
+            onCancel={onClose}
+            width={1100}
+            destroyOnClose
+            footer={[
+                <Button key="cancel" onClick={onClose}>
+                    Отмена
+                </Button>,
+                <Button
+                    key="save"
+                    type="primary"
+                    loading={saving}
+                    disabled={selectedKeys.length === 0}
+                    onClick={handleSave}
+                >
+                    Начислить выбранные ({selectedKeys.length})
+                </Button>,
+            ]}
+        >
+            <Space style={{ marginBottom: 16 }} size="large" wrap>
+                <div>
+                    <div style={{ marginBottom: 4 }}>Месяц</div>
+                    <Select
+                        style={{ width: 160 }}
+                        value={month}
+                        onChange={setMonth}
+                        options={monthOptions}
+                    />
+                </div>
+                <div>
+                    <div style={{ marginBottom: 4 }}>Год</div>
+                    <InputNumber
+                        style={{ width: 120 }}
+                        value={year}
+                        min={2000}
+                        max={2100}
+                        onChange={(value) => value && setYear(Number(value))}
+                    />
+                </div>
+            </Space>
+
+            <Table
+                rowKey="row_number"
+                dataSource={rows}
+                columns={columns}
+                loading={isFetching}
+                pagination={false}
+                size="small"
+                scroll={{ y: 450 }}
+            />
+        </Modal>
+    );
+};
+
 // --- СПИСОК (правая панель контента): таблица + Добавить/Редактировать/Удалить
 const GenericList = ({ resourceName }: { resourceName: string }) => {
     const apiUrl = useApiUrl();
@@ -610,6 +791,12 @@ const GenericList = ({ resourceName }: { resourceName: string }) => {
 
     const [modalState, setModalState] = useState<ModalState | null>(null);
     const [bulkModalOpen, setBulkModalOpen] = useState(false);
+    const [accrualsModalOpen, setAccrualsModalOpen] = useState(false);
+
+    const isAccrualsRegister = resourceName === "accruals_register";
+
+    // --- ЗАПРЕТ НА УДАЛЕНИЕ И РЕДАКТИРОВАНИЕ ---
+    const isReadOnly = resourceName === "accounts_register";
 
     const columns = columnsConfig[resourceName] ?? defaultColumns;
     const meta = allResources.find((r) => r.key === resourceName);
@@ -658,38 +845,41 @@ const GenericList = ({ resourceName }: { resourceName: string }) => {
             title: "Действия",
             key: "actions",
             width: 200,
-            render: (_: unknown, record: any) => (
-                <Space>
-                    <Button
-                        size="small"
-                        onClick={() => setModalState({ mode: "edit", record })}
-                    >
-                        Редактировать
-                    </Button>
-                    <Popconfirm
-                        title="Удалить запись?"
-                        okText="Удалить"
-                        cancelText="Отмена"
-                        onConfirm={() =>
-                            deleteRecord(
-                                { resource: resourceName, id: record.id },
-                                {
-                                    onSuccess: () => message.success("Запись удалена"),
-                                    onError: (err: any) =>
-                                        message.error(
-                                            err?.response?.data?.detail ??
-                                                "Не удалось удалить запись",
-                                        ),
-                                },
-                            )
-                        }
-                    >
-                        <Button size="small" danger>
-                            Удалить
+            render: (_: unknown, record: any) =>
+                !isReadOnly ? (
+                    <Space>
+                        <Button
+                            size="small"
+                            onClick={() => setModalState({ mode: "edit", record })}
+                        >
+                            Редактировать
                         </Button>
-                    </Popconfirm>
-                </Space>
-            ),
+                        <Popconfirm
+                            title="Удалить запись?"
+                            okText="Удалить"
+                            cancelText="Отмена"
+                            onConfirm={() =>
+                                deleteRecord(
+                                    { resource: resourceName, id: record.id },
+                                    {
+                                        onSuccess: () => message.success("Запись удалена"),
+                                        onError: (err: any) =>
+                                            message.error(
+                                                err?.response?.data?.detail ??
+                                                    "Не удалось удалить запись",
+                                            ),
+                                    },
+                                )
+                            }
+                        >
+                            <Button size="small" danger>
+                                Удалить
+                            </Button>
+                        </Popconfirm>
+                    </Space>
+                ) : (
+                    <span style={{ color: "#999", fontSize: "12px" }}>Только чтение</span>
+                ),
         },
     ];
 
@@ -720,13 +910,23 @@ const GenericList = ({ resourceName }: { resourceName: string }) => {
                             Массовый ввод показаний
                         </Button>
                     )}
-                    <Button
-                        type="primary"
-                        disabled={metaLoading}
-                        onClick={() => setModalState({ mode: "create" })}
-                    >
-                        Добавить
-                    </Button>
+                    {!isReadOnly && isAccrualsRegister && (
+                        <Button
+                            type="primary"
+                            onClick={() => setAccrualsModalOpen(true)}
+                        >
+                            Добавить
+                        </Button>
+                    )}
+                    {!isReadOnly && !isAccrualsRegister && (
+                        <Button
+                            type="primary"
+                            disabled={metaLoading}
+                            onClick={() => setModalState({ mode: "create" })}
+                        >
+                            Добавить
+                        </Button>
+                    )}
                 </Space>
             </div>
 
@@ -768,119 +968,14 @@ const GenericList = ({ resourceName }: { resourceName: string }) => {
                     onSaved={() => tableQuery.refetch()}
                 />
             )}
-        </div>
-    );
-};
 
-// --- БОКОВОЕ МЕНЮ (визуально повторяет админ-панель sqladmin) ---
-const Sidebar = () => {
-    const location = useLocation();
-    const [openCategories, setOpenCategories] = useState<Record<string, boolean>>(
-        () => Object.fromEntries(categories.map((c) => [c.title, true])),
-    );
-
-    const toggleCategory = (title: string) =>
-        setOpenCategories((prev) => ({ ...prev, [title]: !prev[title] }));
-
-    return (
-        <div
-            style={{
-                width: 260,
-                flexShrink: 0,
-                minHeight: "100vh",
-                background: COLORS.sidebarBg,
-                borderRight: `1px solid ${COLORS.border}`,
-                padding: "24px 0",
-                boxSizing: "border-box",
-            }}
-        >
-            <div
-                style={{
-                    color: COLORS.textActive,
-                    fontWeight: 700,
-                    fontSize: 18,
-                    textAlign: "center",
-                    marginBottom: 28,
-                }}
-            >
-                Family Townhouse
-            </div>
-
-            <nav>
-                {categories.map((category) => {
-                    const isOpen = openCategories[category.title];
-                    const hasActiveItem = category.items.some(
-                        (item) => location.pathname === `/${item.key}`,
-                    );
-
-                    return (
-                        <div key={category.title} style={{ marginBottom: 4 }}>
-                            <div
-                                onClick={() => toggleCategory(category.title)}
-                                style={{
-                                    display: "flex",
-                                    justifyContent: "space-between",
-                                    alignItems: "center",
-                                    padding: "10px 24px",
-                                    fontSize: 13,
-                                    cursor: "pointer",
-                                    userSelect: "none",
-                                    color: hasActiveItem ? COLORS.textActive : COLORS.textMuted,
-                                    fontWeight: hasActiveItem ? 600 : 500,
-                                }}
-                            >
-                                <span>{category.title}</span>
-                                <i
-                                    className="fa-solid fa-chevron-down"
-                                    style={{
-                                        fontSize: 11,
-                                        color: COLORS.textMuted,
-                                        transform: isOpen ? "rotate(0deg)" : "rotate(-90deg)",
-                                        transition: "transform 0.15s ease",
-                                    }}
-                                />
-                            </div>
-
-                            {isOpen && (
-                                <div>
-                                    {category.items.map((item) => {
-                                        const isActive = location.pathname === `/${item.key}`;
-                                        return (
-                                            <Link
-                                                key={item.key}
-                                                to={`/${item.key}`}
-                                                style={{
-                                                    display: "flex",
-                                                    alignItems: "center",
-                                                    gap: 12,
-                                                    padding: "9px 24px 9px 32px",
-                                                    fontSize: 14,
-                                                    color: isActive
-                                                        ? COLORS.textActive
-                                                        : COLORS.textMuted,
-                                                    fontWeight: isActive ? 600 : 400,
-                                                }}
-                                            >
-                                                <i
-                                                    className={item.icon}
-                                                    style={{
-                                                        width: 16,
-                                                        textAlign: "center",
-                                                        color: isActive
-                                                            ? COLORS.accent
-                                                            : COLORS.iconMuted,
-                                                    }}
-                                                />
-                                                <span>{item.label}</span>
-                                            </Link>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
-            </nav>
+            {isAccrualsRegister && (
+                <AccrualsCalculationModal
+                    open={accrualsModalOpen}
+                    onClose={() => setAccrualsModalOpen(false)}
+                    onSaved={() => tableQuery.refetch()}
+                />
+            )}
         </div>
     );
 };

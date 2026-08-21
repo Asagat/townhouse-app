@@ -205,3 +205,104 @@ class AccountsRegister(Base):
     income = Column(Numeric(15, 2), default=0)
     expense = Column(Numeric(15, 2), default=0)
     balance_after = Column(Numeric(15, 2))
+
+
+# --- ОБРАБОТЧИКИ ---
+
+from sqlalchemy import event, text
+from datetime import datetime
+
+# --- ОБРАБОТЧИКИ СОБЫТИЙ ДЛЯ АВТОМАТИЧЕСКОГО СОЗДАНИЯ/УДАЛЕНИЯ ЗАПИСЕЙ В РЕГИСТРЕ ---
+
+@event.listens_for(Transaction, "after_insert")
+def create_accounts_register_entry(mapper, connection, target):
+    """
+    Создает запись в регистре взаиморасчетов после создания транзакции
+    """
+    # Получаем последний баланс для этого аккаунта
+    result = connection.execute(
+        text("SELECT balance_after FROM accounts_register WHERE account_id = :account_id ORDER BY operation_date DESC, id DESC LIMIT 1"),
+        {"account_id": target.account_id}
+    ).scalar()
+
+    previous_balance = result if result is not None else 0
+
+    income = 0
+    expense = 0
+    if target.transaction_type in [TransactionTypeEnum.in_cash, TransactionTypeEnum.in_bank]:
+        income = target.amount
+    else:
+        expense = target.amount
+
+    new_balance = previous_balance + income - expense
+
+    connection.execute(
+        text("INSERT INTO accounts_register (operation_date, account_id, transaction_id, income, expense, balance_after) VALUES (:operation_date, :account_id, :transaction_id, :income, :expense, :balance_after)"),
+        {
+            "operation_date": target.transaction_date or datetime.now(),
+            "account_id": target.account_id,
+            "transaction_id": target.id,
+            "income": income,
+            "expense": expense,
+            "balance_after": new_balance
+        }
+    )
+
+
+@event.listens_for(Transaction, "after_delete")
+def delete_accounts_register_entry(mapper, connection, target):
+    """Удаляет запись из регистра взаиморасчетов при удалении транзакции"""
+    connection.execute(
+        text("DELETE FROM accounts_register WHERE transaction_id = :transaction_id"),
+        {"transaction_id": target.id}
+    )
+
+
+@event.listens_for(Transaction, "after_update")
+def update_accounts_register_entry(mapper, connection, target):
+    """При обновлении транзакции пересчитываем запись в регистре"""
+    # Проверяем, есть ли запись в регистре для этой транзакции
+    old_entry = connection.execute(
+        text("SELECT id FROM accounts_register WHERE transaction_id = :transaction_id"),
+        {"transaction_id": target.id}
+    ).first()
+
+    if not old_entry:
+        create_accounts_register_entry(mapper, connection, target)
+        return
+
+    # Удаляем старую запись
+    connection.execute(
+        text("DELETE FROM accounts_register WHERE transaction_id = :transaction_id"),
+        {"transaction_id": target.id}
+    )
+
+    # Получаем баланс до этой транзакции
+    previous_balance_result = connection.execute(
+        text("SELECT balance_after FROM accounts_register WHERE account_id = :account_id ORDER BY operation_date DESC, id DESC LIMIT 1"),
+        {"account_id": target.account_id}
+    ).scalar()
+
+    previous_balance = previous_balance_result if previous_balance_result is not None else 0
+
+    income = 0
+    expense = 0
+    if target.transaction_type in [TransactionTypeEnum.in_cash, TransactionTypeEnum.in_bank]:
+        income = target.amount
+    else:
+        expense = target.amount
+
+    new_balance = previous_balance + income - expense
+
+    # Создаем новую запись в регистре
+    connection.execute(
+        text("INSERT INTO accounts_register (operation_date, account_id, transaction_id, income, expense, balance_after) VALUES (:operation_date, :account_id, :transaction_id, :income, :expense, :balance_after)"),
+        {
+            "operation_date": target.transaction_date or datetime.now(),
+            "account_id": target.account_id,
+            "transaction_id": target.id,
+            "income": income,
+            "expense": expense,
+            "balance_after": new_balance
+        }
+    )

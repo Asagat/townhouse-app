@@ -1,6 +1,8 @@
+# --- app.py ---
+import calendar
 import enum
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 # Импортируем подключение к базе
@@ -42,6 +44,9 @@ app.add_middleware(
 
 # --- НАСТРОЙКА API РОУТЕРА ---
 api_router = APIRouter(prefix="/api")
+
+# --- ЗАЩИЩЕННЫЕ РЕСУРСЫ (только для чтения) ---
+PROTECTED_RESOURCES = ["accounts_register"]
 
 
 @api_router.get("/")
@@ -102,6 +107,28 @@ def make_serializer(fields: list[str]):
     return serializer
 
 
+def apartment_serializer(item: Apartment) -> dict:
+    """Сериализация квартиры с вложенным объектом owner"""
+    result = {
+        "id": item.id,
+        "apartment_number": item.apartment_number,
+        "address": item.address,
+        "square": float(item.square) if item.square else None,
+        "owner_id": item.owner_id,
+    }
+    # Добавляем данные о владельце
+    if item.owner:
+        result["owner"] = {
+            "id": item.owner.id,
+            "full_name": item.owner.full_name,
+            "phone": item.owner.phone,
+        }
+    else:
+        result["owner"] = None
+
+    return result
+
+
 def meter_reading_serializer(item: MeterReading) -> dict:
     """Показания вводятся по квартире + виду услуги, поэтому apartment_id
     выводится из связанного счётчика (он не хранится напрямую в таблице).
@@ -158,7 +185,8 @@ SERIALIZERS = {
             "is_active",
         ]
     ),
-    Apartment: make_serializer(["apartment_number", "address", "square", "owner_id"]),
+    # ИСПОЛЬЗУЕМ КАСТОМНЫЙ СЕРИАЛИЗАТОР ДЛЯ КВАРТИР
+    Apartment: apartment_serializer,
     Account: make_serializer(
         ["account_number", "account_name", "is_active", "apartment_id"]
     ),
@@ -179,6 +207,8 @@ SERIALIZERS = {
             "account_id",
             "tariff_id",
             "services_type_id",
+            "past_reading_value",
+            "current_reading_value",
             "consumption",
             "amount",
         ]
@@ -350,6 +380,8 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "reference": "service_types",
             "required": True,
         },
+        {"name": "past_reading_value", "label": "Показание прошлое", "type": "decimal"},
+        {"name": "current_reading_value", "label": "Показание текущее", "type": "decimal"},
         {"name": "consumption", "label": "Потребление", "type": "decimal", "required": True},
         {"name": "amount", "label": "Сумма", "type": "decimal", "required": True},
     ],
@@ -418,7 +450,7 @@ def coerce_field_value(raw_value: Any, field: dict[str, Any]) -> Any:
 # Как подписать запись справочника, если на неё ссылаются через reference-поле
 REFERENCE_LABEL_BUILDERS: dict[str, Any] = {
     "owners": lambda row: row.get("full_name") or f"#{row['id']}",
-    "apartments": lambda row: f"№ {row.get('apartment_number')} — {row.get('address')}",
+    "apartments": lambda row: f"№ {row.get('apartment_number')} — {row.get('owner', {}).get('full_name') or 'Без собственника'}",
     "accounts": lambda row: f"{row.get('account_number')} ({row.get('account_name')})",
     "cash_points": lambda row: row.get("name") or f"#{row['id']}",
     "service_types": lambda row: row.get("services_type") or f"#{row['id']}",
@@ -626,6 +658,235 @@ CUSTOM_VALUE_BUILDERS: dict[str, Any] = {
 }
 
 
+# --- Названия типов тарифа, определяющих формулу начисления ---
+# "Постоянный" — фиксированная сумма (значение тарифа == сумма начисления)
+# "Переменный" — сумма = потребление * цена тарифа
+CONSTANT_TARIFF_TYPE_NAME = "Постоянный"
+VARIABLE_TARIFF_TYPE_NAME = "Переменный"
+
+
+def quantize_amount(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def calculate_accruals_preview(db: Session, period_year: int, period_month: int) -> list[dict[str, Any]]:
+    """Рассчитывает предварительные начисления по всем лицевым счетам и видам услуг
+    за указанный период (месяц/год), не сохраняя ничего в БД.
+
+    Логика:
+    1. Берём все виды услуг.
+    2. По каждому виду услуги находим последний (по дате) зарегистрированный тариф,
+       действующий не позднее конца выбранного периода.
+    3. По каждому лицевому счёту (через его квартиру) находим счётчик по этому виду
+       услуги и берём последнее показание на конец периода (current) и предыдущее к нему (past).
+    4. Потребление = current - past.
+    5. Если тип тарифа "Постоянный" — сумма = цена тарифа.
+       Если "Переменный" — сумма = потребление * цена тарифа.
+    """
+    period_end = date(period_year, period_month, calendar.monthrange(period_year, period_month)[1])
+
+    service_types = db.query(ServiceType).order_by(ServiceType.id).all()
+    accounts = (
+        db.query(Account)
+        .filter(Account.is_active.is_(True))
+        .order_by(Account.id)
+        .all()
+    )
+
+    rows: list[dict[str, Any]] = []
+    row_number = 1
+
+    for service_type in service_types:
+        tariff = (
+            db.query(Tariff)
+            .filter(
+                Tariff.services_type_id == service_type.id,
+                Tariff.valid_from <= period_end,
+            )
+            .order_by(Tariff.valid_from.desc(), Tariff.id.desc())
+            .first()
+        )
+        if not tariff:
+            continue  # нет тарифа, действующего на этот период — услугу пропускаем
+
+        tariff_type = db.get(TariffType, tariff.tariff_type_id)
+        tariff_type_name = tariff_type.name if tariff_type else ""
+
+        for account in accounts:
+            if not account.apartment_id:
+                continue
+
+            meter = (
+                db.query(Meter)
+                .filter(
+                    Meter.apartment_id == account.apartment_id,
+                    Meter.services_type_id == service_type.id,
+                )
+                .order_by(Meter.installed_at.desc().nullslast(), Meter.id.desc())
+                .first()
+            )
+
+            past_value: Decimal | None = None
+            current_value: Decimal | None = None
+            consumption = Decimal("0")
+
+            if meter:
+                current_reading = (
+                    db.query(MeterReading)
+                    .filter(
+                        MeterReading.meter_id == meter.id,
+                        MeterReading.reading_date <= period_end,
+                    )
+                    .order_by(MeterReading.reading_date.desc(), MeterReading.id.desc())
+                    .first()
+                )
+                if current_reading:
+                    current_value = current_reading.reading
+                    past_reading = (
+                        db.query(MeterReading)
+                        .filter(
+                            MeterReading.meter_id == meter.id,
+                            MeterReading.reading_date <= current_reading.reading_date,
+                            MeterReading.id != current_reading.id,
+                        )
+                        .order_by(MeterReading.reading_date.desc(), MeterReading.id.desc())
+                        .first()
+                    )
+                    if past_reading:
+                        past_value = past_reading.reading
+                    else:
+                        past_value = Decimal("0")
+                    consumption = current_value - past_value
+
+            if tariff_type_name == CONSTANT_TARIFF_TYPE_NAME:
+                amount = tariff.price
+            elif tariff_type_name == VARIABLE_TARIFF_TYPE_NAME:
+                # Для переменного тарифа без показаний начислять нечего
+                if current_value is None:
+                    continue
+                amount = consumption * tariff.price
+            else:
+                # Неизвестный/не настроенный тип тарифа — пропускаем услугу для этого счёта
+                continue
+
+            apartment = account.apartment
+            apartment_label = (
+                f"№ {apartment.apartment_number} ({account.account_number})"
+                if apartment
+                else account.account_number
+            )
+
+            rows.append(
+                {
+                    "row_number": row_number,
+                    "account_id": account.id,
+                    "account_id_label": apartment_label,
+                    "services_type_id": service_type.id,
+                    "services_type_id_label": service_type.services_type,
+                    "tariff_id": tariff.id,
+                    "tariff_id_label": f"{tariff.price} ₸" + (f" / {tariff.unit}" if tariff.unit else ""),
+                    "past_reading_value": float(past_value) if past_value is not None else None,
+                    "current_reading_value": float(current_value) if current_value is not None else None,
+                    "consumption": float(consumption),
+                    "amount": float(quantize_amount(amount)),
+                }
+            )
+            row_number += 1
+
+    return rows
+
+
+@api_router.get("/accruals_register/calculate")
+async def calculate_accruals(
+    year: int,
+    month: int,
+    db: Session = Depends(get_db),
+):
+    """Рассчитывает предварительные начисления за указанный месяц/год
+    и возвращает их для отображения на форме, не сохраняя в БД.
+    """
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=422, detail="Некорректный месяц")
+
+    rows = calculate_accruals_preview(db, year, month)
+    return {"rows": rows}
+
+
+@api_router.post("/accruals_register/generate", status_code=201)
+async def generate_accruals(
+    payload: dict[str, Any] = Body(...), db: Session = Depends(get_db)
+):
+    """Сохраняет выбранные оператором строки расчёта в регистр начислений.
+    Дата начисления — последний день выбранного месяца.
+    """
+    year = payload.get("year")
+    month = payload.get("month")
+    rows = payload.get("rows") or []
+
+    if year in (None, "") or month in (None, ""):
+        raise HTTPException(status_code=422, detail="Укажите месяц и год начисления")
+    if not isinstance(rows, list) or not rows:
+        raise HTTPException(status_code=422, detail="Нет строк для начисления")
+
+    year = int(year)
+    month = int(month)
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=422, detail="Некорректный месяц")
+
+    accrual_date = date(year, month, calendar.monthrange(year, month)[1])
+
+    items = []
+    for row in rows:
+        account_id = row.get("account_id")
+        services_type_id = row.get("services_type_id")
+        tariff_id = row.get("tariff_id")
+        amount = row.get("amount")
+        consumption = row.get("consumption")
+
+        if account_id in (None, "") or services_type_id in (None, "") or tariff_id in (None, ""):
+            continue
+        if amount in (None, ""):
+            continue
+
+        items.append(
+            AccrualsRegister(
+                accrual_date=accrual_date,
+                account_id=int(account_id),
+                services_type_id=int(services_type_id),
+                tariff_id=int(tariff_id),
+                past_reading_value=coerce_field_value(
+                    row.get("past_reading_value"), {"type": "decimal", "label": "Показание прошлое"}
+                ),
+                current_reading_value=coerce_field_value(
+                    row.get("current_reading_value"), {"type": "decimal", "label": "Показание текущее"}
+                ),
+                consumption=coerce_field_value(
+                    consumption, {"type": "decimal", "label": "Потребление"}
+                ) or Decimal("0"),
+                amount=coerce_field_value(amount, {"type": "decimal", "label": "Сумма"}),
+            )
+        )
+
+    if not items:
+        raise HTTPException(status_code=422, detail="Нет корректных строк для начисления")
+
+    db.add_all(items)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Нарушение целостности данных при сохранении начислений",
+        ) from exc
+
+    serializer = SERIALIZERS.get(AccrualsRegister, default_serializer)
+    created_rows = [serializer(item) for item in items]
+    created_rows = enrich_with_reference_labels(db, "accruals_register", created_rows)
+
+    return {"created": created_rows}
+
+
 @api_router.get("/meta/{resource}")
 async def get_resource_meta(resource: str):
     """Описание полей ресурса для построения динамической формы на фронтенде."""
@@ -779,6 +1040,13 @@ async def create_resource_item(
     resource: str, payload: dict[str, Any] = Body(...), db: Session = Depends(get_db)
 ):
     """Создаёт новую запись в ресурсе (кнопка «Добавить»)."""
+    # Запрещаем создание в защищенных ресурсах
+    if resource in PROTECTED_RESOURCES:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Создание записей в '{resource}' запрещено. Записи создаются автоматически."
+        )
+
     model = MODEL_MAP.get(resource)
     fields = FIELD_CONFIG.get(resource)
     if not model or fields is None:
@@ -823,6 +1091,13 @@ async def update_resource_item(
     db: Session = Depends(get_db),
 ):
     """Обновляет запись в ресурсе (кнопка «Редактировать»)."""
+    # Запрещаем обновление защищенных ресурсов
+    if resource in PROTECTED_RESOURCES:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Обновление записей в '{resource}' запрещено. Записи обновляются автоматически."
+        )
+
     model = MODEL_MAP.get(resource)
     fields = FIELD_CONFIG.get(resource)
     if not model or fields is None:
@@ -865,6 +1140,13 @@ async def delete_resource_item(
     resource: str, item_id: int, db: Session = Depends(get_db)
 ):
     """Удаляет запись из ресурса (кнопка «Удалить»)."""
+    # Запрещаем удаление защищенных ресурсов
+    if resource in PROTECTED_RESOURCES:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Удаление записей из '{resource}' запрещено. Записи удаляются автоматически при удалении транзакций."
+        )
+
     model = MODEL_MAP.get(resource)
     if not model:
         raise HTTPException(status_code=404, detail="Resource not found")
@@ -872,6 +1154,12 @@ async def delete_resource_item(
     item = db.get(model, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+
+    # Специальная логика для транзакций - удаляем запись из регистра
+    if resource in ["transactions", "payments"]:
+        db.query(AccountsRegister).filter(
+            AccountsRegister.transaction_id == item_id
+        ).delete()
 
     db.delete(item)
     try:
@@ -983,7 +1271,13 @@ class CashPointAdmin(ModelView, model=CashPoint):
 class AccrualsRegisterAdmin(ModelView, model=AccrualsRegister):
     category = "3. Учет"
     name_plural = "Регистр начислений"
-    column_list = ["id", "accrual_date", "amount"]
+    column_list = [
+        "id",
+        "accrual_date",
+        "past_reading_value",
+        "current_reading_value",
+        "amount",
+    ]
     icon = "fa-solid fa-calculator"
 
 
@@ -992,6 +1286,9 @@ class AccountsRegisterAdmin(ModelView, model=AccountsRegister):
     name_plural = "Регистр взаиморасчетов"
     column_list = ["id", "operation_date", "income", "expense"]
     icon = "fa-solid fa-book"
+    can_create = False
+    can_edit = False
+    can_delete = False
 
 
 # Регистрация представлений в админке
