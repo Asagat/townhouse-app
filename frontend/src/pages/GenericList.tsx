@@ -22,16 +22,117 @@ import { allResources } from "../config/menu";
 import { RecordFormModal } from "../components/common/RecordFormModal";
 import { BulkReadingsModal } from "../components/meter-readings/BulkReadingsModal";
 import { AccrualsCalculationModal } from "../components/accruals/AccrualsCalculationModal";
+import type { SortOrder } from "antd/es/table/interface";
 
 interface GenericListProps {
     resourceName: string;
 }
 
+// Конфигурация сортировки для всех полей (включая вложенные пути для бэкенда)
+const sortMapping: Record<string, string> = {
+    // ID и прямые поля
+    'id': 'id',
+    'apartment_number': 'apartment_number',
+    'address': 'address',
+    'square': 'square',
+    'account_number': 'account_number',
+    'account_name': 'account_name',
+    'is_active': 'is_active',
+    'name': 'name',
+    'transaction_date': 'transaction_date',
+    'amount': 'amount',
+    'transaction_type': 'transaction_type',
+    'notes': 'notes',
+    'accrual_date': 'accrual_date',
+    'past_reading_value': 'past_reading_value',
+    'current_reading_value': 'current_reading_value',
+    'consumption': 'consumption',
+    'operation_date': 'operation_date',
+    'income': 'income',
+    'expense': 'expense',
+    'balance_after': 'balance_after',
+    'price': 'price',
+    'unit': 'unit',
+    'valid_from': 'valid_from',
+    'serial_number': 'serial_number',
+    'installed_at': 'installed_at',
+    'full_name': 'full_name',
+    'phone': 'phone',
+
+    // Вложенные поля и _label для серверной сортировки через JOIN
+    'owner.full_name': 'owner.full_name',
+    'owner_id_label': 'owner.full_name',
+    'apartment.apartment_number': 'apartment.apartment_number',
+    'apartment_id_label': 'apartment.apartment_number',
+    'services_type.services_type': 'services_type.services_type',
+    'services_type_id_label': 'services_type.services_type',
+    'meter.serial_number': 'meter.serial_number',
+    'meter_label': 'meter.serial_number',
+    'account.account_number': 'account.account_number',
+    'account_label': 'account.account_number',
+    'account_id_label': 'account.account_number',
+    'cash_point.name': 'cash_point.name',
+    'cash_point_id_label': 'cash_point.name',
+    'tariff_type.name': 'tariff_type.name',
+    'tariff_type_id_label': 'tariff_type.name',
+};
+
+// Проверяем, можно ли сортировать по полю
+const isSortableField = (dataIndex: string): boolean => {
+    if (dataIndex === 'id') return true;
+    return !!sortMapping[dataIndex];
+};
+
+// Теперь вся сортировка происходит на сервере, массив пустой
+const clientSideSortFields: string[] = [];
+
+// Получение поля для сортировки
+const getSortField = (dataIndex: string): string => {
+    if (sortMapping[dataIndex]) {
+        return sortMapping[dataIndex];
+    }
+    return dataIndex;
+};
+
+// Функция для получения значения из вложенного объекта (для рендеринга ячеек)
+const getValueByPath = (obj: any, path: string): any => {
+    if (!obj || !path) return undefined;
+    const keys = path.split('.');
+    let result = obj;
+    for (const key of keys) {
+        if (result === null || result === undefined) return undefined;
+        result = result[key];
+    }
+    return result;
+};
+
 export const GenericList = ({ resourceName }: GenericListProps) => {
     const apiUrl = useApiUrl();
-    const { tableQuery, current, setCurrent, pageSize, setPageSize } = useTable({
+
+    const {
+        tableQuery,
+        current,
+        setCurrent,
+        pageSize,
+        setPageSize,
+        sorters,
+        setSorters,
+    } = useTable({
         resource: resourceName,
+        pagination: {
+            current: 1,
+            pageSize: 10,
+        },
+        sorters: {
+            initial: [
+                {
+                    field: "id",
+                    order: "desc",
+                },
+            ],
+        },
     });
+
     const data = tableQuery?.data?.data ?? [];
     const total = tableQuery?.data?.total ?? 0;
 
@@ -56,6 +157,38 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
 
     const columns = getColumnsForResource(resourceName);
     const meta = allResources.find((r) => r.key === resourceName);
+
+    const getColumnSortOrder = (dataIndex: string): SortOrder | undefined => {
+        if (!isSortableField(dataIndex)) return undefined;
+
+        const sortField = getSortField(dataIndex);
+        const sorter = sorters?.find(s => s.field === sortField || s.field === dataIndex);
+        if (!sorter) return undefined;
+        return sorter.order === 'asc' ? 'ascend' : 'descend';
+    };
+
+    const handleTableChange = (pagination: any, filters: any, sorter: any) => {
+        // Сброс сортировки
+        if (!sorter || !sorter.field) {
+            setSorters([]);
+            return;
+        }
+
+        // Если поле не сортируемое - сбрасываем
+        if (!isSortableField(sorter.field)) {
+            setSorters([]);
+            return;
+        }
+
+        // Передаем параметры серверной сортировки в Refine
+        const order = sorter.order === 'ascend' ? 'asc' : 'desc';
+        const sortField = getSortField(sorter.field);
+
+        setSorters([{
+            field: sortField,
+            order: order,
+        }]);
+    };
 
     const handleSubmit = (values: Record<string, any>) => {
         if (modalState?.mode === "create") {
@@ -90,17 +223,42 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     };
 
     const tableColumns = [
-        { title: "ID", dataIndex: "id", key: "id", width: 70 },
-        ...columns.map((col) => ({
-            title: col.label,
-            dataIndex: col.key,
-            key: col.key,
-            render: (value: any) => (col.format ? col.format(value) : value ?? "—"),
-        })),
+        {
+            title: "ID",
+            dataIndex: "id",
+            key: "id",
+            width: 70,
+            sorter: true,
+            sortOrder: getColumnSortOrder('id'),
+            defaultSortOrder: 'descend' as const,
+        },
+        ...columns.map((col) => {
+            const sortable = isSortableField(col.key);
+            const isNested = col.key.includes('.');
+
+            return {
+                title: col.label,
+                dataIndex: col.key,
+                key: col.key,
+                render: (value: any, record: any) => {
+                    const val = isNested ? getValueByPath(record, col.key) : value;
+                    return col.format ? col.format(val) : val ?? "—";
+                },
+                sorter: sortable,
+                sortOrder: getColumnSortOrder(col.key),
+                ...(sortable && {
+                    onHeaderCell: () => ({
+                        style: { cursor: 'pointer' },
+                        title: 'Кликните для сортировки',
+                    }),
+                }),
+            };
+        }),
         {
             title: "Действия",
             key: "actions",
             width: 200,
+            fixed: 'right' as const,
             render: (_: unknown, record: any) =>
                 !isReadOnly ? (
                     <Space>
@@ -191,16 +349,19 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 dataSource={data}
                 columns={tableColumns}
                 loading={tableQuery.isLoading}
+                onChange={handleTableChange}
                 pagination={{
                     current,
                     pageSize,
                     total,
                     showSizeChanger: true,
+                    showTotal: (total) => `Всего ${total} записей`,
                     onChange: (page, size) => {
                         setCurrent(page);
                         if (size) setPageSize(size);
                     },
                 }}
+                scroll={{ x: 'max-content' }}
             />
 
             {modalState && (
@@ -214,6 +375,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     confirmLoading={creating || updating}
                     onCancel={() => setModalState(null)}
                     onSubmit={handleSubmit}
+                    resourceName={resourceName}
                 />
             )}
 

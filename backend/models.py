@@ -41,8 +41,6 @@ class Owner(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
-    # passive_deletes=True: не подгружать/обнулять связанные квартиры в ORM при удалении владельца,
-    # а положиться на реальное ограничение ondelete="RESTRICT" в БД
     apartments = relationship(
         "Apartment", back_populates="owner", passive_deletes=True
     )
@@ -58,8 +56,6 @@ class Apartment(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     owner = relationship("Owner", back_populates="apartments")
-    # passive_deletes=True: доверяем БД самой применить ondelete (RESTRICT/CASCADE),
-    # вместо того чтобы SQLAlchemy предварительно обнуляла FK у дочерних записей
     accounts = relationship(
         "Account", back_populates="apartment", passive_deletes=True
     )
@@ -76,13 +72,18 @@ class Account(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     apartment = relationship("Apartment", back_populates="accounts")
+    transactions = relationship("Transaction", back_populates="account", passive_deletes=True)
+    accruals = relationship("AccrualsRegister", back_populates="account", passive_deletes=True)
+    accounts_register = relationship("AccountsRegister", back_populates="account", passive_deletes=True)
 
 
 class CashPoint(Base):
     __tablename__ = "cash_points"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(255), nullable=False)  # Касса №1, Счет в банке
+    name = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
+
+    transactions = relationship("Transaction", back_populates="cash_point", passive_deletes=True)
 
 
 class ServiceType(Base):
@@ -90,11 +91,18 @@ class ServiceType(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     services_type = Column(String(255), nullable=False)
 
+    tariffs = relationship("Tariff", back_populates="services_type", passive_deletes=True)
+    meters = relationship("Meter", back_populates="services_type", passive_deletes=True)
+    meter_readings = relationship("MeterReading", back_populates="services_type", passive_deletes=True)
+    accruals = relationship("AccrualsRegister", back_populates="services_type", passive_deletes=True)
+
 
 class TariffType(Base):
     __tablename__ = "tariff_types"
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
+
+    tariffs = relationship("Tariff", back_populates="tariff_type", passive_deletes=True)
 
 
 class Tariff(Base):
@@ -109,6 +117,10 @@ class Tariff(Base):
     price = Column(Numeric(15, 2), nullable=False)
     valid_from = Column(Date, nullable=False)
     unit = Column(String(50))
+
+    services_type = relationship("ServiceType", back_populates="tariffs")
+    tariff_type = relationship("TariffType", back_populates="tariffs")
+    accruals = relationship("AccrualsRegister", back_populates="tariff", passive_deletes=True)
 
 
 class Meter(Base):
@@ -125,6 +137,7 @@ class Meter(Base):
         "MeterReading", back_populates="meter", passive_deletes=True
     )
     apartment = relationship("Apartment", back_populates="meters")
+    services_type = relationship("ServiceType", back_populates="meters")
 
 
 # --- ДОКУМЕНТЫ ---
@@ -134,8 +147,6 @@ class MeterReading(Base):
     __tablename__ = "meter_readings"
     id = Column(Integer, primary_key=True, autoincrement=True)
     meter_id = Column(Integer, ForeignKey("meters.id", ondelete="CASCADE"))
-    # Денормализовано: вид услуги также хранится напрямую на показании,
-    # чтобы форма могла автоматически найти нужный счётчик по квартире + виду услуги
     services_type_id = Column(
         Integer, ForeignKey("services_type.id", ondelete="RESTRICT"), nullable=False
     )
@@ -144,6 +155,8 @@ class MeterReading(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     meter = relationship("Meter", back_populates="readings")
+    services_type = relationship("ServiceType", back_populates="meter_readings")
+    accruals = relationship("AccrualsRegister", back_populates="current_reading", passive_deletes=True)
 
 
 class Transaction(Base):
@@ -156,8 +169,9 @@ class Transaction(Base):
     amount = Column(Numeric(15, 2), nullable=False)
     notes = Column(String(255))
 
-    # Однонаправленная связь для вывода квартиры в списке/форме (через account.apartment_id)
-    account = relationship("Account")
+    account = relationship("Account", back_populates="transactions")
+    cash_point = relationship("CashPoint", back_populates="transactions")
+    accounts_register = relationship("AccountsRegister", back_populates="transaction", passive_deletes=True)
 
 
 # --- РЕГИСТРЫ ---
@@ -186,6 +200,12 @@ class AccrualsRegister(Base):
     consumption = Column(Numeric(12, 3), nullable=False)
     amount = Column(Numeric(15, 2), nullable=False)
 
+    account = relationship("Account", back_populates="accruals")
+    tariff = relationship("Tariff", back_populates="accruals")
+    services_type = relationship("ServiceType", back_populates="accruals")
+    current_reading = relationship("MeterReading", back_populates="accruals")
+    accounts_register = relationship("AccountsRegister", back_populates="accrual", passive_deletes=True)
+
 
 class AccountsRegister(Base):
     __tablename__ = "accounts_register"
@@ -206,20 +226,18 @@ class AccountsRegister(Base):
     expense = Column(Numeric(15, 2), default=0)
     balance_after = Column(Numeric(15, 2))
 
+    account = relationship("Account", back_populates="accounts_register")
+    transaction = relationship("Transaction", back_populates="accounts_register")
+    accrual = relationship("AccrualsRegister", back_populates="accounts_register")
+
 
 # --- ОБРАБОТЧИКИ ---
 
 from sqlalchemy import event, text
 from datetime import datetime
 
-# --- ОБРАБОТЧИКИ СОБЫТИЙ ДЛЯ АВТОМАТИЧЕСКОГО СОЗДАНИЯ/УДАЛЕНИЯ ЗАПИСЕЙ В РЕГИСТРЕ ---
-
 @event.listens_for(Transaction, "after_insert")
 def create_accounts_register_entry(mapper, connection, target):
-    """
-    Создает запись в регистре взаиморасчетов после создания транзакции
-    """
-    # Получаем последний баланс для этого аккаунта
     result = connection.execute(
         text("SELECT balance_after FROM accounts_register WHERE account_id = :account_id ORDER BY operation_date DESC, id DESC LIMIT 1"),
         {"account_id": target.account_id}
@@ -251,7 +269,6 @@ def create_accounts_register_entry(mapper, connection, target):
 
 @event.listens_for(Transaction, "after_delete")
 def delete_accounts_register_entry(mapper, connection, target):
-    """Удаляет запись из регистра взаиморасчетов при удалении транзакции"""
     connection.execute(
         text("DELETE FROM accounts_register WHERE transaction_id = :transaction_id"),
         {"transaction_id": target.id}
@@ -260,8 +277,6 @@ def delete_accounts_register_entry(mapper, connection, target):
 
 @event.listens_for(Transaction, "after_update")
 def update_accounts_register_entry(mapper, connection, target):
-    """При обновлении транзакции пересчитываем запись в регистре"""
-    # Проверяем, есть ли запись в регистре для этой транзакции
     old_entry = connection.execute(
         text("SELECT id FROM accounts_register WHERE transaction_id = :transaction_id"),
         {"transaction_id": target.id}
@@ -271,13 +286,11 @@ def update_accounts_register_entry(mapper, connection, target):
         create_accounts_register_entry(mapper, connection, target)
         return
 
-    # Удаляем старую запись
     connection.execute(
         text("DELETE FROM accounts_register WHERE transaction_id = :transaction_id"),
         {"transaction_id": target.id}
     )
 
-    # Получаем баланс до этой транзакции
     previous_balance_result = connection.execute(
         text("SELECT balance_after FROM accounts_register WHERE account_id = :account_id ORDER BY operation_date DESC, id DESC LIMIT 1"),
         {"account_id": target.account_id}
@@ -294,7 +307,6 @@ def update_accounts_register_entry(mapper, connection, target):
 
     new_balance = previous_balance + income - expense
 
-    # Создаем новую запись в регистре
     connection.execute(
         text("INSERT INTO accounts_register (operation_date, account_id, transaction_id, income, expense, balance_after) VALUES (:operation_date, :account_id, :transaction_id, :income, :expense, :balance_after)"),
         {

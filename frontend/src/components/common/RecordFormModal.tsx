@@ -5,6 +5,7 @@ import { Modal, Form } from "antd";
 import dayjs from "dayjs";
 import type { FieldMeta } from "../../types";
 import { renderFieldControl } from "./renderFieldControl";
+import { sortFieldsForForm } from "../../config/columns";
 
 interface RecordFormModalProps {
     /** Открыто ли модальное окно */
@@ -21,6 +22,8 @@ interface RecordFormModalProps {
     onCancel: () => void;
     /** Обработчик отправки формы */
     onSubmit: (values: Record<string, any>) => void;
+    /** Имя ресурса для сортировки полей */
+    resourceName?: string;
 }
 
 /**
@@ -35,14 +38,18 @@ export const RecordFormModal = ({
     confirmLoading,
     onCancel,
     onSubmit,
+    resourceName,
 }: RecordFormModalProps) => {
     const [form] = Form.useForm();
+
+    // Сортируем поля в соответствии с конфигурацией
+    const sortedFields = resourceName ? sortFieldsForForm(fields, resourceName) : fields;
 
     useEffect(() => {
         if (!open) return;
 
         const prepared: Record<string, any> = {};
-        fields.forEach((field) => {
+        sortedFields.forEach((field) => {
             const raw = initialValues?.[field.name];
 
             if (field.type === "date") {
@@ -62,12 +69,12 @@ export const RecordFormModal = ({
 
         form.resetFields();
         form.setFieldsValue(prepared);
-    }, [open, initialValues, fields, form]);
+    }, [open, initialValues, sortedFields, form]);
 
     const handleOk = () => {
         form.validateFields().then((values) => {
             const payload: Record<string, any> = {};
-            fields.forEach((field) => {
+            sortedFields.forEach((field) => {
                 const value = values[field.name];
                 payload[field.name] =
                     field.type === "date" && value ? value.format("YYYY-MM-DD") : value;
@@ -88,7 +95,7 @@ export const RecordFormModal = ({
             destroyOnClose
         >
             <Form form={form} layout="vertical">
-                {fields.map((field) => (
+                {sortedFields.map((field) => (
                     <Form.Item
                         key={field.name}
                         name={field.name}
