@@ -1,4 +1,4 @@
-// --- СТРУКТУРА МЕНЮ: соответствует разделам админ-панели (sqladmin) ---
+// frontend/src/config/menu.ts
 export type ResourceItem = { key: string; label: string; icon: string };
 export type Category = { title: string; items: ResourceItem[] };
 
@@ -11,21 +11,23 @@ export const categories: Category[] = [
               label: "Приход/Расход",
               icon: "fa-solid fa-exchange-alt",
             },
-
             {
               key: "meter_readings",
               label: "Показания",
               icon: "fa-solid fa-pen-to-square",
             },
-
             {
               key: "accruals_register",
-              label: "Начисления",
+              label: "Регистр начислений",
               icon: "fa-solid fa-calculator",
+            },
+            {
+              key: 'accrual_documents',
+              label: 'Начисления',
+              icon: 'fa-solid fa-file-invoice',
             },
         ],
     },
-
     {
         title: "2. Справочники",
         items: [
@@ -34,25 +36,21 @@ export const categories: Category[] = [
               label: "Тарифы",
               icon: "fa-solid fa-money-bill-wave",
             },
-
             {
               key: "cash_points",
               label: "Кассы/Счета",
               icon: "fa-solid fa-vault"
             },
-
             {
               key: "owners",
               label: "Контрагенты",
               icon: "fa-solid fa-user",
             },
-
             {
               key: "apartments",
               label: "Квартиры",
               icon: "fa-solid fa-house",
             },
-
             {
               key: "accounts",
               label: "Лицевые счета",
@@ -78,13 +76,11 @@ export const categories: Category[] = [
             label: "Типы тарифов",
             icon: "fa-solid fa-tags",
             },
-
             {
-              key: "service_types",
+              key: "services_type",
               label: "Виды услуг",
               icon: "fa-solid fa-list-check",
             },
-
             {
               key: "meters",
               label: "Счетчики",

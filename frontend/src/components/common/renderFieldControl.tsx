@@ -5,11 +5,6 @@ import type { FieldMeta } from "../../types";
 import { ReferenceSelect } from "./ReferenceSelect";
 import { DATE_FORMAT } from "../../config/formatters";
 
-/**
- * Рендерит поле формы в зависимости от его типа
- * @param field - метаданные поля
- * @returns React-компонент для редактирования поля
- */
 export const renderFieldControl = (field: FieldMeta) => {
     switch (field.type) {
         case "text":
@@ -25,6 +20,7 @@ export const renderFieldControl = (field: FieldMeta) => {
         case "enum":
             return (
                 <Select
+                    style={{ width: "100%" }}
                     options={(field.choices ?? []).map((c) => ({
                         value: c.value,
                         label: c.label,

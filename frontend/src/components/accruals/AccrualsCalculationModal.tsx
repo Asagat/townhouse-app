@@ -1,4 +1,4 @@
-// src/components/accruals/AccrualsCalculationModal.tsx
+// AccrualsCalculationModal.tsx
 
 import { useEffect, useState } from "react";
 import { Modal, Button, Space, Select, InputNumber, Table, Checkbox, message } from "antd";
@@ -44,6 +44,7 @@ export const AccrualsCalculationModal = ({
     const [month, setMonth] = useState<number>(now.month() + 1);
     const [rows, setRows] = useState<AccrualPreviewRow[]>([]);
     const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
+    const [isSaving, setIsSaving] = useState(false);
 
     const { refetch, isFetching } = useCustom<{ rows: AccrualPreviewRow[] }>({
         url: `${apiUrl}/accruals_register/calculate`,
@@ -82,7 +83,7 @@ export const AccrualsCalculationModal = ({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, year, month]);
 
-    const handleSave = () => {
+    const handleSave = async () => {
         const selectedRows = rows.filter((row) =>
             selectedKeys.includes(row.row_number),
         );
@@ -91,29 +92,58 @@ export const AccrualsCalculationModal = ({
             return;
         }
 
-        generate(
-            {
-                url: `${apiUrl}/accruals_register/generate`,
-                method: "post",
-                values: {
-                    year,
-                    month,
-                    rows: selectedRows,
+        setIsSaving(true);
+
+        try {
+            // 1. Создаем документ начислений
+            const docResponse = await fetch(`${apiUrl}/accrual_documents`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    accrual_date: `${year}-${String(month).padStart(2, '0')}-01`
+                })
+            });
+
+            if (!docResponse.ok) {
+                throw new Error("Не удалось создать документ начислений");
+            }
+
+            const docData = await docResponse.json();
+            const documentId = docData.id;
+            message.info(`Создан документ начислений №${documentId}`);
+
+            // 2. Сохраняем начисления с document_id
+            generate(
+                {
+                    url: `${apiUrl}/accruals_register/generate`,
+                    method: "post",
+                    values: {
+                        year,
+                        month,
+                        document_id: documentId,
+                        rows: selectedRows,
+                    },
                 },
-            },
-            {
-                onSuccess: (response) => {
-                    const created = (response.data as any).created?.length ?? 0;
-                    message.success(`Начислено записей: ${created}`);
-                    onSaved();
-                    onClose();
+                {
+                    onSuccess: (response) => {
+                        const created = (response.data as any).created?.length ?? 0;
+                        message.success(`Начислено записей: ${created}`);
+                        onSaved();
+                        onClose();
+                        setIsSaving(false);
+                    },
+                    onError: (err: any) => {
+                        message.error(
+                            err?.response?.data?.detail ?? "Не удалось сохранить начисления",
+                        );
+                        setIsSaving(false);
+                    },
                 },
-                onError: (err: any) =>
-                    message.error(
-                        err?.response?.data?.detail ?? "Не удалось сохранить начисления",
-                    ),
-            },
-        );
+            );
+        } catch (error) {
+            message.error("Не удалось создать документ начислений");
+            setIsSaving(false);
+        }
     };
 
     const allSelected = rows.length > 0 && selectedKeys.length === rows.length;
@@ -203,7 +233,7 @@ export const AccrualsCalculationModal = ({
                 <Button
                     key="save"
                     type="primary"
-                    loading={saving}
+                    loading={saving || isSaving}
                     disabled={selectedKeys.length === 0}
                     onClick={handleSave}
                 >

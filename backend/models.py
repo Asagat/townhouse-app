@@ -1,3 +1,5 @@
+#/opt/townhouse/backend/models.py
+
 import enum
 
 from database import Base
@@ -174,13 +176,35 @@ class Transaction(Base):
     accounts_register = relationship("AccountsRegister", back_populates="transaction", passive_deletes=True)
 
 
+class AccrualDocument(Base):
+    __tablename__ = "accrual_documents"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    accrual_date = Column(Date, nullable=False)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    # Связь с детальными строками регистра начислений
+    accruals = relationship(
+        "AccrualsRegister",
+        back_populates="accrual_document",
+        passive_deletes=True
+    )
+
+
 # --- РЕГИСТРЫ ---
 
 
 class AccrualsRegister(Base):
     __tablename__ = "accruals_register"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    accrual_date = Column(Date, nullable=False)
+
+    # Ссылка на документ-шапку с каскадным удалением
+    accrual_document_id = Column(
+        Integer, ForeignKey("accrual_documents.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # Добавляем поле даты начисления
+    accrual_date = Column(Date, nullable=False)  # <-- ДОБАВИТЬ ЭТУ СТРОКУ
+
     account_id = Column(
         Integer, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
     )
@@ -200,6 +224,8 @@ class AccrualsRegister(Base):
     consumption = Column(Numeric(12, 3), nullable=False)
     amount = Column(Numeric(15, 2), nullable=False)
 
+    # Связи
+    accrual_document = relationship("AccrualDocument", back_populates="accruals")
     account = relationship("Account", back_populates="accruals")
     tariff = relationship("Tariff", back_populates="accruals")
     services_type = relationship("ServiceType", back_populates="accruals")

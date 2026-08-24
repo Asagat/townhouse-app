@@ -1,28 +1,20 @@
 // src/components/common/RecordFormModal.tsx
 
-import { useEffect } from "react";
-import { Modal, Form } from "antd";
+import { useEffect, useMemo } from "react";
+import { Modal, Form, Input } from "antd";
 import dayjs from "dayjs";
 import type { FieldMeta } from "../../types";
 import { renderFieldControl } from "./renderFieldControl";
 import { sortFieldsForForm } from "../../config/columns";
 
 interface RecordFormModalProps {
-    /** Открыто ли модальное окно */
     open: boolean;
-    /** Заголовок модального окна */
     title: string;
-    /** Список полей формы */
     fields: FieldMeta[];
-    /** Начальные значения для формы (при редактировании) */
     initialValues?: Record<string, any>;
-    /** Состояние загрузки при сохранении */
     confirmLoading: boolean;
-    /** Обработчик отмены */
     onCancel: () => void;
-    /** Обработчик отправки формы */
     onSubmit: (values: Record<string, any>) => void;
-    /** Имя ресурса для сортировки полей */
     resourceName?: string;
 }
 
@@ -43,7 +35,15 @@ export const RecordFormModal = ({
     const [form] = Form.useForm();
 
     // Сортируем поля в соответствии с конфигурацией
-    const sortedFields = resourceName ? sortFieldsForForm(fields, resourceName) : fields;
+    const sortedFields = useMemo(() => {
+        return resourceName ? sortFieldsForForm(fields, resourceName) : fields;
+    }, [fields, resourceName]);
+
+    // Определяем, является ли поле readonly (только для просмотра)
+    const isReadonlyField = (field: FieldMeta): boolean => {
+        const readonlyFields = ['id', 'created_at', 'accruals_count', 'total_amount'];
+        return readonlyFields.includes(field.name);
+    };
 
     useEffect(() => {
         if (!open) return;
@@ -51,6 +51,12 @@ export const RecordFormModal = ({
         const prepared: Record<string, any> = {};
         sortedFields.forEach((field) => {
             const raw = initialValues?.[field.name];
+
+            // Для reference полей - используем raw значение (это ID)
+            if (field.type === "reference") {
+                prepared[field.name] = raw ?? undefined;
+                return;
+            }
 
             if (field.type === "date") {
                 if (raw) {
@@ -75,13 +81,25 @@ export const RecordFormModal = ({
         form.validateFields().then((values) => {
             const payload: Record<string, any> = {};
             sortedFields.forEach((field) => {
+                // Пропускаем readonly поля при отправке
+                if (isReadonlyField(field)) return;
+
                 const value = values[field.name];
-                payload[field.name] =
-                    field.type === "date" && value ? value.format("YYYY-MM-DD") : value;
+                if (field.type === "date" && value) {
+                    payload[field.name] = value.format("YYYY-MM-DD");
+                } else {
+                    payload[field.name] = value;
+                }
             });
             onSubmit(payload);
         });
     };
+
+    // Фильтруем поля для отображения
+    const visibleFields = sortedFields.filter((field) => {
+        // Пропускаем служебные поля, которые не нужно показывать в форме
+        return true;
+    });
 
     return (
         <Modal
@@ -93,23 +111,33 @@ export const RecordFormModal = ({
             okText="Сохранить"
             cancelText="Отмена"
             destroyOnClose
+            width={800}
         >
             <Form form={form} layout="vertical">
-                {sortedFields.map((field) => (
-                    <Form.Item
-                        key={field.name}
-                        name={field.name}
-                        label={field.label}
-                        valuePropName={field.type === "boolean" ? "checked" : "value"}
-                        rules={
-                            field.required
-                                ? [{ required: true, message: `Поле «${field.label}» обязательно` }]
-                                : []
-                        }
-                    >
-                        {renderFieldControl(field)}
-                    </Form.Item>
-                ))}
+                {visibleFields.map((field) => {
+                    const readonly = isReadonlyField(field);
+
+                    return (
+                        <Form.Item
+                            key={field.name}
+                            name={field.name}
+                            label={field.label}
+                            valuePropName={field.type === "boolean" ? "checked" : "value"}
+                            rules={
+                                !readonly && field.required
+                                    ? [{ required: true, message: `Поле «${field.label}» обязательно` }]
+                                    : []
+                            }
+                        >
+                            {readonly ? (
+                                // Для readonly полей показываем просто текст
+                                <Input disabled value={initialValues?.[field.name] ?? "—"} />
+                            ) : (
+                                renderFieldControl(field)
+                            )}
+                        </Form.Item>
+                    );
+                })}
             </Form>
         </Modal>
     );

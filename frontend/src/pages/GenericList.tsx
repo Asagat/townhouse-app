@@ -28,9 +28,8 @@ interface GenericListProps {
     resourceName: string;
 }
 
-// Конфигурация сортировки для всех полей (включая вложенные пути для бэкенда)
+// Конфигурация сортировки для всех полей
 const sortMapping: Record<string, string> = {
-    // ID и прямые поля
     'id': 'id',
     'apartment_number': 'apartment_number',
     'address': 'address',
@@ -43,7 +42,6 @@ const sortMapping: Record<string, string> = {
     'amount': 'amount',
     'transaction_type': 'transaction_type',
     'notes': 'notes',
-    'accrual_date': 'accrual_date',
     'past_reading_value': 'past_reading_value',
     'current_reading_value': 'current_reading_value',
     'consumption': 'consumption',
@@ -59,7 +57,7 @@ const sortMapping: Record<string, string> = {
     'full_name': 'full_name',
     'phone': 'phone',
 
-    // Вложенные поля и _label для серверной сортировки через JOIN
+    // Вложенные поля
     'owner.full_name': 'owner.full_name',
     'owner_id_label': 'owner.full_name',
     'apartment.apartment_number': 'apartment.apartment_number',
@@ -75,18 +73,20 @@ const sortMapping: Record<string, string> = {
     'cash_point_id_label': 'cash_point.name',
     'tariff_type.name': 'tariff_type.name',
     'tariff_type_id_label': 'tariff_type.name',
+
+    // Поля начислений и документов
+    'accrual_date': 'accrual_date',
+    'accrual_document_id': 'accrual_document_id',
+    'created_at': 'created_at',
+    'accruals_count': 'accruals_count',
+    'total_amount': 'total_amount',
 };
 
-// Проверяем, можно ли сортировать по полю
 const isSortableField = (dataIndex: string): boolean => {
     if (dataIndex === 'id') return true;
     return !!sortMapping[dataIndex];
 };
 
-// Теперь вся сортировка происходит на сервере, массив пустой
-const clientSideSortFields: string[] = [];
-
-// Получение поля для сортировки
 const getSortField = (dataIndex: string): string => {
     if (sortMapping[dataIndex]) {
         return sortMapping[dataIndex];
@@ -94,7 +94,6 @@ const getSortField = (dataIndex: string): string => {
     return dataIndex;
 };
 
-// Функция для получения значения из вложенного объекта (для рендеринга ячеек)
 const getValueByPath = (obj: any, path: string): any => {
     if (!obj || !path) return undefined;
     const keys = path.split('.');
@@ -153,6 +152,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const [accrualsModalOpen, setAccrualsModalOpen] = useState(false);
 
     const isAccrualsRegister = resourceName === "accruals_register";
+    const isAccrualDocuments = resourceName === "accrual_documents";
     const isReadOnly = resourceName === "accounts_register";
 
     const columns = getColumnsForResource(resourceName);
@@ -160,30 +160,23 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
 
     const getColumnSortOrder = (dataIndex: string): SortOrder | undefined => {
         if (!isSortableField(dataIndex)) return undefined;
-
         const sortField = getSortField(dataIndex);
         const sorter = sorters?.find(s => s.field === sortField || s.field === dataIndex);
         if (!sorter) return undefined;
         return sorter.order === 'asc' ? 'ascend' : 'descend';
     };
 
-    const handleTableChange = (pagination: any, filters: any, sorter: any) => {
-        // Сброс сортировки
+    const handleTableChange = (_pagination: any, _filters: any, sorter: any) => {
         if (!sorter || !sorter.field) {
             setSorters([]);
             return;
         }
-
-        // Если поле не сортируемое - сбрасываем
         if (!isSortableField(sorter.field)) {
             setSorters([]);
             return;
         }
-
-        // Передаем параметры серверной сортировки в Refine
         const order = sorter.order === 'ascend' ? 'asc' : 'desc';
         const sortField = getSortField(sorter.field);
-
         setSorters([{
             field: sortField,
             order: order,
@@ -235,14 +228,17 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         ...columns.map((col) => {
             const sortable = isSortableField(col.key);
             const isNested = col.key.includes('.');
-
             return {
                 title: col.label,
                 dataIndex: col.key,
                 key: col.key,
                 render: (value: any, record: any) => {
-                    const val = isNested ? getValueByPath(record, col.key) : value;
-                    return col.format ? col.format(val) : val ?? "—";
+                    try {
+                        const val = isNested ? getValueByPath(record, col.key) : value;
+                        return col.format ? col.format(val) : val ?? "—";
+                    } catch {
+                        return "—";
+                    }
                 },
                 sorter: sortable,
                 sortOrder: getColumnSortOrder(col.key),
@@ -259,41 +255,118 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             key: "actions",
             width: 200,
             fixed: 'right' as const,
-            render: (_: unknown, record: any) =>
-                !isReadOnly ? (
-                    <Space>
-                        <Button
-                            size="small"
-                            onClick={() => setModalState({ mode: "edit", record })}
-                        >
-                            Редактировать
-                        </Button>
-                        <Popconfirm
-                            title="Удалить запись?"
-                            okText="Удалить"
-                            cancelText="Отмена"
-                            onConfirm={() =>
-                                deleteRecord(
-                                    { resource: resourceName, id: record.id },
-                                    {
-                                        onSuccess: () => message.success("Запись удалена"),
-                                        onError: (err: any) =>
-                                            message.error(
-                                                err?.response?.data?.detail ??
-                                                    "Не удалось удалить запись",
-                                            ),
-                                    },
-                                )
-                            }
-                        >
-                            <Button size="small" danger>
-                                Удалить
+            render: (_: unknown, record: any) => {
+                if (isAccrualsRegister) {
+                    return (
+                        <Space>
+                            <Button
+                                size="small"
+                                onClick={() => setModalState({ mode: "edit", record })}
+                            >
+                                Редактировать
                             </Button>
-                        </Popconfirm>
-                    </Space>
-                ) : (
+                            <Popconfirm
+                                title="Удалить запись?"
+                                okText="Удалить"
+                                cancelText="Отмена"
+                                onConfirm={() =>
+                                    deleteRecord(
+                                        { resource: resourceName, id: record.id },
+                                        {
+                                            onSuccess: () => message.success("Запись удалена"),
+                                            onError: (err: any) =>
+                                                message.error(
+                                                    err?.response?.data?.detail ??
+                                                        "Не удалось удалить запись",
+                                                ),
+                                        },
+                                    )
+                                }
+                            >
+                                <Button size="small" danger>
+                                    Удалить
+                                </Button>
+                            </Popconfirm>
+                        </Space>
+                    );
+                }
+
+                if (isAccrualDocuments) {
+                    return (
+                        <Space>
+                            <Button
+                                size="small"
+                                onClick={() => setModalState({ mode: "edit", record })}
+                            >
+                                Редактировать
+                            </Button>
+                            <Popconfirm
+                                title="Удалить документ начислений? Все связанные записи в регистре начислений также будут удалены."
+                                okText="Удалить"
+                                cancelText="Отмена"
+                                onConfirm={() =>
+                                    deleteRecord(
+                                        { resource: resourceName, id: record.id },
+                                        {
+                                            onSuccess: () => {
+                                                message.success("Документ начислений удален");
+                                                tableQuery.refetch();
+                                            },
+                                            onError: (err: any) =>
+                                                message.error(
+                                                    err?.response?.data?.detail ??
+                                                        "Не удалось удалить документ",
+                                                ),
+                                        },
+                                    )
+                                }
+                            >
+                                <Button size="small" danger>
+                                    Удалить
+                                </Button>
+                            </Popconfirm>
+                        </Space>
+                    );
+                }
+
+                if (!isReadOnly) {
+                    return (
+                        <Space>
+                            <Button
+                                size="small"
+                                onClick={() => setModalState({ mode: "edit", record })}
+                            >
+                                Редактировать
+                            </Button>
+                            <Popconfirm
+                                title="Удалить запись?"
+                                okText="Удалить"
+                                cancelText="Отмена"
+                                onConfirm={() =>
+                                    deleteRecord(
+                                        { resource: resourceName, id: record.id },
+                                        {
+                                            onSuccess: () => message.success("Запись удалена"),
+                                            onError: (err: any) =>
+                                                message.error(
+                                                    err?.response?.data?.detail ??
+                                                        "Не удалось удалить запись",
+                                                ),
+                                        },
+                                    )
+                                }
+                            >
+                                <Button size="small" danger>
+                                    Удалить
+                                </Button>
+                            </Popconfirm>
+                        </Space>
+                    );
+                }
+                return (
                     <span style={{ color: "#999", fontSize: "12px" }}>Только чтение</span>
-                ),
+                );
+            },
         },
     ];
 
@@ -324,7 +397,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                             Массовый ввод показаний
                         </Button>
                     )}
-                    {!isReadOnly && isAccrualsRegister && (
+
+                    {isAccrualDocuments && (
                         <Button
                             type="primary"
                             onClick={() => setAccrualsModalOpen(true)}
@@ -332,7 +406,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                             Добавить
                         </Button>
                     )}
-                    {!isReadOnly && !isAccrualsRegister && (
+
+                    {!isReadOnly && !isAccrualsRegister && !isAccrualDocuments && (
                         <Button
                             type="primary"
                             disabled={metaLoading}
@@ -387,7 +462,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 />
             )}
 
-            {isAccrualsRegister && (
+            {isAccrualDocuments && (
                 <AccrualsCalculationModal
                     open={accrualsModalOpen}
                     onClose={() => setAccrualsModalOpen(false)}

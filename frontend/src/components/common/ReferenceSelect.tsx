@@ -9,10 +9,15 @@ import { useList } from "@refinedev/core";
  */
 const referenceLabelFormatters: Record<string, (item: any) => string> = {
     owners: (item) => item.full_name ?? `#${item.id}`,
-    apartments: (item) => `№ ${item.apartment_number} — ${item.owner?.full_name || "Без собственника"}`,
+    apartments: (item) => {
+        const apt = item.apartment_number || item.apartment?.apartment_number;
+        const owner = item.owner?.full_name || item.full_name || 'Без собственника';
+        return `№ ${apt} — ${owner}`;
+    },
     accounts: (item) => `${item.account_number} (${item.account_name})`,
     cash_points: (item) => item.name,
     service_types: (item) => item.services_type,
+    services_type: (item) => item.services_type,
     tariff_types: (item) => item.name,
     tariffs: (item) => `${item.price} ₸${item.unit ? " / " + item.unit : ""}`,
     meters: (item) => item.serial_number,
@@ -29,15 +34,10 @@ export const ReferenceSelect = ({
     placeholder,
     allowClear = true,
 }: {
-    /** Название ресурса (справочника) */
     resource: string;
-    /** Текущее выбранное значение (ID записи) */
     value?: number;
-    /** Обработчик изменения значения */
     onChange?: (value: number | undefined) => void;
-    /** Плейсхолдер для Select */
     placeholder?: string;
-    /** Разрешить очистку значения */
     allowClear?: boolean;
 }) => {
     const { data, isLoading } = useList({
@@ -47,7 +47,6 @@ export const ReferenceSelect = ({
 
     const items = data?.data ?? [];
 
-    // Получаем форматтер для конкретного ресурса или используем стандартный
     const formatter =
         referenceLabelFormatters[resource] ??
         ((item: any) => item.full_name ?? item.name ?? item.label ?? `#${item.id}`);

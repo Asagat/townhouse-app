@@ -39,13 +39,32 @@ export const columnsConfig: Record<string, Column[]> = {
 
     payments: [
         { key: 'transaction_date', label: 'Дата', format: formatDateTime },
-        { key: 'apartment.apartment_number', label: '№ квартиры' },
-        { key: 'apartment.address', label: 'Адрес' },
-        { key: 'amount', label: 'Сумма', format: formatNumber },
-        { key: 'transaction_type', label: 'Тип операции' },
-        { key: 'account.account_number', label: 'Лицевой счёт' },
         { key: 'cash_point.name', label: 'Касса/Счёт' },
+        { key: 'apartment.apartment_number', label: '№ квартиры' },
+        { key: 'account.account_number', label: 'Лицевой счёт' },
+        { key: 'owner.full_name', label: 'Собственник' },
+        { key: 'transaction_type', label: 'Тип операции' },
+        { key: 'amount', label: 'Сумма', format: formatNumber },
         { key: 'notes', label: 'Примечание' },
+    ],
+
+    transactions: [
+        { key: 'transaction_date', label: 'Дата', format: formatDateTime },
+        { key: 'cash_point.name', label: 'Касса/Счёт' },
+        { key: 'apartment.apartment_number', label: '№ квартиры' },
+        { key: 'account.account_number', label: 'Лицевой счёт' },
+        { key: 'owner.full_name', label: 'Собственник' },
+        { key: 'transaction_type', label: 'Тип операции' },
+        { key: 'amount', label: 'Сумма', format: formatNumber },
+        { key: 'notes', label: 'Примечание' },
+    ],
+
+    accrual_documents: [
+        { key: 'id', label: 'ID' },
+        { key: 'accrual_date', label: 'Дата начисления', format: formatDate },
+        { key: 'created_at', label: 'Дата создания', format: formatDateTime },
+        { key: 'accruals_count', label: 'Количество записей' },
+        { key: 'total_amount', label: 'Общая сумма', format: formatNumber },
     ],
 
     accruals_register: [
@@ -60,13 +79,13 @@ export const columnsConfig: Record<string, Column[]> = {
 
     accounts_register: [
         { key: 'operation_date', label: 'Дата операции', format: formatDateTime },
+        { key: 'account.account_number', label: 'Лицевой счёт' },
         { key: 'income', label: 'Приход', format: formatNumber },
         { key: 'expense', label: 'Расход', format: formatNumber },
         { key: 'balance_after', label: 'Баланс', format: formatNumber },
-        { key: 'account.account_number', label: 'Лицевой счёт' },
     ],
 
-    service_types: [
+    services_type: [
         { key: 'services_type', label: 'Вид услуги' },
     ],
 
@@ -105,14 +124,16 @@ export const formFieldConfig: Record<string, string[]> = {
     apartments: ['apartment_number', 'address', 'square', 'owner_id'],
     accounts: ['account_number', 'account_name', 'is_active', 'apartment_id'],
     cash_points: ['name', 'is_active'],
-    payments: ['transaction_date', 'apartment_id', 'amount', 'transaction_type', 'account_id', 'cash_point_id', 'notes'],
+    payments: ['apartment_id', 'cash_point_id', 'transaction_type', 'amount', 'notes'],
+    transactions: ['apartment_id', 'cash_point_id', 'transaction_type', 'amount', 'notes'],
     accruals_register: ['accrual_date', 'account_id', 'services_type_id', 'past_reading_value', 'current_reading_value', 'consumption', 'amount'],
-    accounts_register: ['operation_date', 'income', 'expense', 'balance_after', 'account_id'],
-    service_types: ['services_type'],
+    accounts_register: ['account_id', 'income', 'expense', 'balance_after'],
+    services_type: ['services_type'],
     tariff_types: ['name'],
-    tariffs: ['price', 'unit', 'valid_from', 'services_type_id', 'tariff_type_id'],
-    meters: ['serial_number', 'installed_at', 'apartment_id', 'services_type_id'],
-    meter_readings: ['apartment_id', 'services_type_id', 'reading', 'reading_date', 'meter_id'],
+    tariffs: ['services_type_id', 'tariff_type_id', 'price', 'unit', 'valid_from'],
+    meters: ['serial_number', 'apartment_id', 'services_type_id', 'installed_at'],
+    meter_readings: ['apartment_id', 'services_type_id', 'reading', 'reading_date'],
+    accrual_documents: ['accrual_date'],
 };
 
 /**

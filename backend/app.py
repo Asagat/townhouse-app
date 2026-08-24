@@ -1,6 +1,9 @@
-# --- app.py ---
+# backend/app.py
+
 import calendar
 import enum
+import json
+import logging
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
@@ -12,6 +15,7 @@ from models import (
     Account,
     AccountsRegister,
     AccrualsRegister,
+    AccrualDocument,
     Apartment,
     CashPoint,
     Meter,
@@ -23,13 +27,13 @@ from models import (
     Transaction,
     TransactionTypeEnum,
 )
-from sqladmin import Admin, ModelView
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc, asc
+from sqlalchemy import desc, asc, text
 
 # Инициализация основного приложения
 app = FastAPI(title="Townhouse ERP System")
+logger = logging.getLogger(__name__)
 
 # --- НАСТРОЙКА CORS ---
 app.add_middleware(
@@ -44,183 +48,85 @@ app.add_middleware(
 # --- НАСТРОЙКА API РОУТЕРА ---
 api_router = APIRouter(prefix="/api")
 
-# --- ЗАЩИЩЕННЫЕ РЕСУРСЫ (только для чтения) ---
-PROTECTED_RESOURCES = ["accounts_register"]
 
-
-@api_router.get("/")
-def api_index():
-    return {"status": "API is Online"}
-
-
-MODEL_MAP = {
-    "owners": Owner,
-    "apartments": Apartment,
-    "accounts": Account,
-    "cash_points": CashPoint,
-    "transactions": Transaction,
-    "payments": Transaction,
-    "accruals_register": AccrualsRegister,
-    "accounts_register": AccountsRegister,
-    "service_types": ServiceType,
-    "tariff_types": TariffType,
-    "tariffs": Tariff,
-    "meters": Meter,
-    "meter_readings": MeterReading,
-}
-
-
-def default_serializer(item) -> dict:
-    name_val = (
-        getattr(item, "full_name", None)
-        or getattr(item, "number", None)
-        or getattr(item, "name", None)
-        or "—"
-    )
-    return {"id": item.id, "full_name": name_val, "phone": getattr(item, "phone", "—")}
-
+# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ СЕРИАЛИЗАЦИИ ---
 
 def make_serializer(fields: list[str]):
-    def serializer(item) -> dict:
-        result: dict = {"id": item.id}
+    def serialize(item: Any) -> dict:
+        result = {}
         for field in fields:
-            value = getattr(item, field, None)
-            if isinstance(value, Decimal):
-                value = float(value)
-            elif isinstance(value, (datetime, date)):
-                value = value.isoformat()
-            elif isinstance(value, enum.Enum):
-                value = value.value
-            result[field] = value
+            val = getattr(item, field, None)
+            if isinstance(val, (datetime, date)):
+                result[field] = val.isoformat()
+            elif isinstance(val, Decimal):
+                result[field] = float(val)
+            else:
+                result[field] = val
+        result["id"] = getattr(item, "id", None)
         return result
-    return serializer
+    return serialize
 
 
 def apartment_serializer(item: Apartment) -> dict:
-    result = {
+    owner = item.owner
+    return {
         "id": item.id,
+        "owner_id": item.owner_id,
         "apartment_number": item.apartment_number,
         "address": item.address,
-        "square": float(item.square) if item.square else None,
-        "owner_id": item.owner_id,
+        "square": float(item.square) if item.square is not None else 0.0,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "owner": {
+            "id": owner.id,
+            "full_name": owner.full_name,
+            "phone": owner.phone,
+        } if owner else None
     }
-    if item.owner:
-        result["owner"] = {
-            "id": item.owner.id,
-            "full_name": item.owner.full_name,
-            "phone": item.owner.phone,
-        }
-    else:
-        result["owner"] = None
-    return result
-
-def meter_serializer(item: Meter) -> dict:
-    apartment = item.apartment
-    services_type = item.services_type
-
-    result = {
-        "id": item.id,
-        "serial_number": item.serial_number,
-        "apartment_id": item.apartment_id,
-        "services_type_id": item.services_type_id,
-        "installed_at": item.installed_at.isoformat() if item.installed_at else None,
-    }
-
-    if apartment:
-        result["apartment"] = {
-            "id": apartment.id,
-            "apartment_number": apartment.apartment_number,
-            "address": apartment.address,
-        }
-    else:
-        result["apartment"] = None
-
-    if services_type:
-        result["services_type"] = {
-            "id": services_type.id,
-            "services_type": services_type.services_type,
-        }
-    else:
-        result["services_type"] = None
-
-    return result
 
 
 def account_serializer(item: Account) -> dict:
-    result = {
+    apartment = item.apartment
+    return {
         "id": item.id,
+        "apartment_id": item.apartment_id,
         "account_number": item.account_number,
         "account_name": item.account_name,
         "is_active": item.is_active,
-        "apartment_id": item.apartment_id,
-    }
-    if item.apartment:
-        result["apartment"] = {
-            "id": item.apartment.id,
-            "apartment_number": item.apartment.apartment_number,
-            "address": item.apartment.address,
-            "square": float(item.apartment.square) if item.apartment.square else None,
-        }
-    else:
-        result["apartment"] = None
-    return result
-
-
-def meter_reading_serializer(item: MeterReading) -> dict:
-    meter = item.meter
-    services_type = item.services_type
-    apartment = meter.apartment if meter else None
-
-    result = {
-        "id": item.id,
-        "reading": float(item.reading) if item.reading is not None else None,
-        "reading_date": item.reading_date.isoformat() if item.reading_date else None,
-        "meter_id": item.meter_id,
-    }
-
-    if apartment:
-        result["apartment"] = {
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "apartment": {
             "id": apartment.id,
             "apartment_number": apartment.apartment_number,
             "address": apartment.address,
-        }
-    else:
-        result["apartment"] = None
+        } if apartment else None
+    }
 
-    if services_type:
-        result["services_type"] = {
-            "id": services_type.id,
-            "services_type": services_type.services_type,
-        }
-    else:
-        result["services_type"] = None
 
-    if meter:
-        result["meter"] = {
-            "id": meter.id,
-            "serial_number": meter.serial_number,
-        }
-    else:
-        result["meter"] = None
-
-    result["meter_label"] = meter.serial_number if meter else None
-    result["apartment_id"] = meter.apartment_id if meter else None
-    result["services_type_id"] = item.services_type_id
-
-    return result
+def cash_point_serializer(item: CashPoint) -> dict:
+    return {
+        "id": item.id,
+        "name": item.name,
+        "is_active": item.is_active,
+    }
 
 
 def transaction_serializer(item: Transaction) -> dict:
     account = item.account
+    cash_point = item.cash_point
+
     result = {
         "id": item.id,
-        "amount": float(item.amount) if item.amount is not None else None,
-        "transaction_type": item.transaction_type.value if item.transaction_type else None,
         "transaction_date": item.transaction_date.isoformat() if item.transaction_date else None,
         "account_id": item.account_id,
         "cash_point_id": item.cash_point_id,
+        "transaction_type": item.transaction_type.value if hasattr(item.transaction_type, "value") else item.transaction_type,
+        "amount": float(item.amount) if item.amount is not None else 0.0,
         "notes": item.notes,
     }
+
+    if account and account.apartment:
+        result["apartment_id"] = account.apartment.id
+    else:
+        result["apartment_id"] = None
 
     if account:
         result["account"] = {
@@ -234,139 +140,202 @@ def transaction_serializer(item: Transaction) -> dict:
                 "apartment_number": account.apartment.apartment_number,
                 "address": account.apartment.address,
             }
+            if account.apartment.owner:
+                result["owner"] = {
+                    "id": account.apartment.owner.id,
+                    "full_name": account.apartment.owner.full_name,
+                    "phone": account.apartment.owner.phone,
+                }
+            else:
+                result["owner"] = None
         else:
             result["apartment"] = None
+            result["owner"] = None
     else:
         result["account"] = None
         result["apartment"] = None
+        result["owner"] = None
 
-    if item.cash_point:
+    if cash_point:
         result["cash_point"] = {
-            "id": item.cash_point.id,
-            "name": item.cash_point.name,
+            "id": cash_point.id,
+            "name": cash_point.name,
         }
     else:
         result["cash_point"] = None
 
-    result["account_label"] = account.account_number if account else None
-    result["apartment_id"] = account.apartment_id if account else None
+    return result
+
+
+def tariff_serializer(item: Tariff) -> dict:
+    st = item.services_type
+    tt = item.tariff_type
+    return {
+        "id": item.id,
+        "services_type_id": item.services_type_id,
+        "tariff_type_id": item.tariff_type_id,
+        "price": float(item.price) if item.price is not None else 0.0,
+        "valid_from": item.valid_from.isoformat() if item.valid_from else None,
+        "unit": item.unit,
+        "services_type": {"id": st.id, "services_type": st.services_type} if st else None,
+        "tariff_type": {"id": tt.id, "name": tt.name} if tt else None,
+    }
+
+
+def meter_serializer(item: Meter) -> dict:
+    apartment = item.apartment
+    services_type = item.services_type
+    return {
+        "id": item.id,
+        "services_type_id": item.services_type_id,
+        "apartment_id": item.apartment_id,
+        "serial_number": item.serial_number,
+        "installed_at": item.installed_at.isoformat() if item.installed_at else None,
+        "apartment": {
+            "id": apartment.id,
+            "apartment_number": apartment.apartment_number,
+            "address": apartment.address,
+        } if apartment else None,
+        "services_type": {
+            "id": services_type.id,
+            "services_type": services_type.services_type,
+        } if services_type else None,
+    }
+
+
+def meter_reading_serializer(item: MeterReading) -> dict:
+    meter = item.meter
+    services_type = item.services_type
+    apartment = meter.apartment if meter else None
+
+    result = {
+        "id": item.id,
+        "meter_id": item.meter_id,
+        "services_type_id": item.services_type_id,
+        "reading": float(item.reading) if item.reading is not None else 0.0,
+        "reading_date": item.reading_date.isoformat() if item.reading_date else None,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+    }
+
+    if apartment:
+        result["apartment_id"] = apartment.id
+    else:
+        result["apartment_id"] = None
+
+    if meter:
+        result["meter"] = {
+            "id": meter.id,
+            "serial_number": meter.serial_number,
+        }
+    else:
+        result["meter"] = None
+
+    if services_type:
+        result["services_type"] = {
+            "id": services_type.id,
+            "services_type": services_type.services_type,
+        }
+    else:
+        result["services_type"] = None
+
+    if apartment:
+        result["apartment"] = {
+            "id": apartment.id,
+            "apartment_number": apartment.apartment_number,
+            "address": apartment.address,
+        }
+    else:
+        result["apartment"] = None
 
     return result
 
 
 def accruals_register_serializer(item: AccrualsRegister) -> dict:
-    account = item.account
-    services_type = item.services_type
-
     result = {
         "id": item.id,
+        "accrual_document_id": item.accrual_document_id,
         "accrual_date": item.accrual_date.isoformat() if item.accrual_date else None,
         "account_id": item.account_id,
         "tariff_id": item.tariff_id,
         "services_type_id": item.services_type_id,
+        "current_reading_id": item.current_reading_id,
         "past_reading_value": float(item.past_reading_value) if item.past_reading_value is not None else None,
         "current_reading_value": float(item.current_reading_value) if item.current_reading_value is not None else None,
         "consumption": float(item.consumption) if item.consumption is not None else 0.0,
         "amount": float(item.amount) if item.amount is not None else 0.0,
     }
 
-    if account:
+    if item.account:
         result["account"] = {
-            "id": account.id,
-            "account_number": account.account_number,
-            "account_name": account.account_name,
+            "id": item.account.id,
+            "account_number": item.account.account_number,
+            "account_name": item.account.account_name,
         }
     else:
         result["account"] = None
 
-    if services_type:
+    if item.services_type:
         result["services_type"] = {
-            "id": services_type.id,
-            "services_type": services_type.services_type,
+            "id": item.services_type.id,
+            "services_type": item.services_type.services_type,
         }
     else:
         result["services_type"] = None
 
+    if item.tariff:
+        result["tariff"] = {
+            "id": item.tariff.id,
+            "price": float(item.tariff.price) if item.tariff.price else 0,
+            "unit": item.tariff.unit,
+        }
+    else:
+        result["tariff"] = None
+
     return result
 
 
+def accrual_document_serializer(item: AccrualDocument) -> dict:
+    return {
+        "id": item.id,
+        "accrual_date": item.accrual_date.isoformat() if item.accrual_date else None,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "accruals_count": len(item.accruals) if item.accruals else 0,
+        "total_amount": sum(float(a.amount) for a in item.accruals) if item.accruals else 0.0,
+    }
+
+
 def accounts_register_serializer(item: AccountsRegister) -> dict:
-    account = item.account
     result = {
         "id": item.id,
         "operation_date": item.operation_date.isoformat() if item.operation_date else None,
         "account_id": item.account_id,
+        "transaction_id": item.transaction_id,
+        "accrual_id": item.accrual_id,
         "income": float(item.income) if item.income is not None else 0.0,
         "expense": float(item.expense) if item.expense is not None else 0.0,
         "balance_after": float(item.balance_after) if item.balance_after is not None else 0.0,
     }
 
-    if account:
+    if item.account:
         result["account"] = {
-            "id": account.id,
-            "account_number": account.account_number,
-            "account_name": account.account_name,
+            "id": item.account.id,
+            "account_number": item.account.account_number,
+            "account_name": item.account.account_name,
         }
-        result["account_label"] = f"{account.account_number} ({account.account_name})"
     else:
         result["account"] = None
-        result["account_label"] = None
-
-    return result
-
-
-def tariff_serializer(item: Tariff) -> dict:
-    services_type = item.services_type
-    tariff_type = item.tariff_type
-
-    result = {
-        "id": item.id,
-        "services_type_id": item.services_type_id,
-        "tariff_type_id": item.tariff_type_id,
-        "price": float(item.price) if item.price is not None else 0.0,
-        "unit": item.unit,
-        "valid_from": item.valid_from.isoformat() if item.valid_from else None,
-    }
-
-    if services_type:
-        result["services_type"] = {
-            "id": services_type.id,
-            "services_type": services_type.services_type,
-        }
-        result["services_type_id_label"] = services_type.services_type
-    else:
-        result["services_type"] = None
-        result["services_type_id_label"] = None
-
-    if tariff_type:
-        result["tariff_type"] = {
-            "id": tariff_type.id,
-            "name": tariff_type.name,
-        }
-        result["tariff_type_id_label"] = tariff_type.name
-    else:
-        result["tariff_type"] = None
-        result["tariff_type_id_label"] = None
 
     return result
 
 
 SERIALIZERS = {
-    Owner: make_serializer(
-        [
-            "full_name",
-            "first_name",
-            "last_name",
-            "middle_name",
-            "phone",
-            "email",
-            "contact_info",
-            "is_active",
-        ]
-    ),
+    Owner: make_serializer([
+        "full_name", "first_name", "last_name", "middle_name",
+        "phone", "email", "contact_info", "is_active"
+    ]),
     Apartment: apartment_serializer,
     Account: account_serializer,
-    CashPoint: make_serializer(["name", "is_active"]),
+    CashPoint: cash_point_serializer,
     Transaction: transaction_serializer,
     ServiceType: make_serializer(["services_type"]),
     TariffType: make_serializer(["name"]),
@@ -375,9 +344,28 @@ SERIALIZERS = {
     MeterReading: meter_reading_serializer,
     AccrualsRegister: accruals_register_serializer,
     AccountsRegister: accounts_register_serializer,
+    AccrualDocument: accrual_document_serializer,
+}
+
+MODEL_MAP = {
+    "owners": Owner,
+    "apartments": Apartment,
+    "accounts": Account,
+    "cash_points": CashPoint,
+    "transactions": Transaction,
+    "payments": Transaction,
+    "services_type": ServiceType,
+    "tariff_types": TariffType,
+    "tariffs": Tariff,
+    "meters": Meter,
+    "meter_readings": MeterReading,
+    "accruals_register": AccrualsRegister,
+    "accounts_register": AccountsRegister,
+    "accrual_documents": AccrualDocument,
 }
 
 
+# --- МЕТАДАННЫЕ О ПОЛЯХ (для динамической формы на фронтенде) ---
 FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
     "owners": [
         {"name": "full_name", "label": "ФИО (полное)", "type": "string", "required": True},
@@ -442,7 +430,35 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         {"name": "amount", "label": "Сумма", "type": "decimal", "required": True},
         {"name": "notes", "label": "Примечание", "type": "string"},
     ],
+    "payments": [
+        {
+            "name": "apartment_id",
+            "label": "Квартира",
+            "type": "reference",
+            "reference": "apartments",
+            "required": True,
+        },
+        {
+            "name": "cash_point_id",
+            "label": "Касса/Счёт",
+            "type": "reference",
+            "reference": "cash_points",
+            "required": True,
+        },
+        {
+            "name": "transaction_type",
+            "label": "Тип операции",
+            "type": "enum",
+            "enum_class": TransactionTypeEnum,
+            "required": True,
+        },
+        {"name": "amount", "label": "Сумма", "type": "decimal", "required": True},
+        {"name": "notes", "label": "Примечание", "type": "string"},
+    ],
     "service_types": [
+        {"name": "services_type", "label": "Вид услуги", "type": "string", "required": True},
+    ],
+    "services_type": [
         {"name": "services_type", "label": "Вид услуги", "type": "string", "required": True},
     ],
     "tariff_types": [
@@ -453,7 +469,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "name": "services_type_id",
             "label": "Вид услуги",
             "type": "reference",
-            "reference": "service_types",
+            "reference": "services_type",
             "required": True,
         },
         {
@@ -480,7 +496,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "name": "services_type_id",
             "label": "Вид услуги",
             "type": "reference",
-            "reference": "service_types",
+            "reference": "services_type",
             "required": True,
         },
         {"name": "installed_at", "label": "Дата установки", "type": "date"},
@@ -497,7 +513,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "name": "services_type_id",
             "label": "Вид услуги",
             "type": "reference",
-            "reference": "service_types",
+            "reference": "services_type",
             "required": True,
         },
         {"name": "reading", "label": "Показание", "type": "decimal", "required": True},
@@ -519,17 +535,10 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "required": True,
         },
         {
-            "name": "tariff_id",
-            "label": "Тариф",
-            "type": "reference",
-            "reference": "tariffs",
-            "required": True,
-        },
-        {
             "name": "services_type_id",
             "label": "Вид услуги",
             "type": "reference",
-            "reference": "service_types",
+            "reference": "services_type",
             "required": True,
         },
         {"name": "past_reading_value", "label": "Показание прошлое", "type": "decimal"},
@@ -549,9 +558,17 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         {"name": "expense", "label": "Расход", "type": "decimal"},
         {"name": "balance_after", "label": "Баланс после", "type": "decimal"},
     ],
+    "accrual_documents": [
+        {"name": "id", "label": "ID документа", "type": "integer", "required": False},
+        {"name": "accrual_date", "label": "Дата начисления", "type": "date", "required": True},
+        {"name": "created_at", "label": "Дата создания", "type": "datetime", "required": False},
+        {"name": "accruals_count", "label": "Количество записей", "type": "integer", "required": False},
+        {"name": "total_amount", "label": "Общая сумма", "type": "decimal", "required": False},
+    ],
 }
-FIELD_CONFIG["payments"] = FIELD_CONFIG["transactions"]
 
+
+# --- КАСТОМНЫЕ БИЛДЕРЫ ДЛЯ СОЗДАНИЯ/ОБНОВЛЕНИЯ ЗАПИСЕЙ ---
 
 def coerce_field_value(raw_value: Any, field: dict[str, Any]) -> Any:
     if raw_value is None or raw_value == "":
@@ -595,136 +612,6 @@ def coerce_field_value(raw_value: Any, field: dict[str, Any]) -> Any:
         )
 
     return raw_value
-
-
-REFERENCE_LABEL_BUILDERS: dict[str, Any] = {
-    "owners": lambda row: row.get("full_name") or f"#{row['id']}",
-    "apartments": lambda row: f"№ {row.get('apartment_number')} — {row.get('owner', {}).get('full_name') or 'Без собственника'}",
-    "accounts": lambda row: f"{row.get('account_number')} ({row.get('account_name')})",
-    "cash_points": lambda row: row.get("name") or f"#{row['id']}",
-    "service_types": lambda row: row.get("services_type") or f"#{row['id']}",
-    "tariff_types": lambda row: row.get("name") or f"#{row['id']}",
-    "tariffs": lambda row: f"{row.get('price')} ₸" + (f" / {row['unit']}" if row.get("unit") else ""),
-    "meters": lambda row: row.get("serial_number") or f"#{row['id']}",
-}
-
-
-def enrich_with_reference_labels(
-    db: Session, resource: str, rows: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    if not rows:
-        return rows
-
-    reference_fields = [
-        field for field in FIELD_CONFIG.get(resource, []) if field["type"] == "reference"
-    ]
-    if not reference_fields:
-        return rows
-
-    for field in reference_fields:
-        field_name = field["name"]
-        target_resource = field["reference"]
-        target_model = MODEL_MAP.get(target_resource)
-        if not target_model:
-            continue
-
-        ids = {row.get(field_name) for row in rows if row.get(field_name) is not None}
-        if not ids:
-            continue
-
-        target_serializer = SERIALIZERS.get(target_model, default_serializer)
-        target_items = db.query(target_model).filter(target_model.id.in_(ids)).all()
-        label_builder = REFERENCE_LABEL_BUILDERS.get(
-            target_resource,
-            lambda row: row.get("full_name") or row.get("name") or f"#{row['id']}",
-        )
-        labels_by_id = {
-            item.id: label_builder(target_serializer(item)) for item in target_items
-        }
-
-        label_key = f"{field_name}_label"
-        for row in rows:
-            fk_value = row.get(field_name)
-            row[label_key] = labels_by_id.get(fk_value) if fk_value is not None else None
-
-    return rows
-
-
-def get_previous_reading(
-    db: Session,
-    meter_id: int,
-    reading_date_value: date,
-    exclude_id: int | None = None,
-) -> MeterReading | None:
-    query = db.query(MeterReading).filter(
-        MeterReading.meter_id == meter_id,
-        MeterReading.reading_date <= reading_date_value,
-    )
-    if exclude_id is not None:
-        query = query.filter(MeterReading.id != exclude_id)
-    return query.order_by(
-        MeterReading.reading_date.desc(), MeterReading.id.desc()
-    ).first()
-
-
-def resolve_meter_reading_values(
-    db: Session, payload: dict[str, Any], exclude_id: int | None = None
-) -> dict[str, Any]:
-    apartment_id = payload.get("apartment_id")
-    services_type_id = payload.get("services_type_id")
-    reading = payload.get("reading")
-    reading_date = payload.get("reading_date")
-
-    if apartment_id in (None, "") or services_type_id in (None, ""):
-        raise HTTPException(
-            status_code=422, detail="Укажите квартиру и вид услуги"
-        )
-    if reading in (None, ""):
-        raise HTTPException(status_code=422, detail="Поле 'Показание' обязательно")
-
-    meter = (
-        db.query(Meter)
-        .filter(
-            Meter.apartment_id == int(apartment_id),
-            Meter.services_type_id == int(services_type_id),
-        )
-        .order_by(Meter.installed_at.desc().nullslast(), Meter.id.desc())
-        .first()
-    )
-    if not meter:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Не найден счётчик для указанной квартиры и вида услуги. "
-                "Сначала зарегистрируйте счётчик в разделе «Счетчики»."
-            ),
-        )
-
-    coerced_reading = coerce_field_value(
-        reading, {"type": "decimal", "label": "Показание"}
-    )
-    coerced_date = coerce_field_value(
-        reading_date or date.today().isoformat(),
-        {"type": "date", "label": "Дата показания"},
-    )
-
-    previous = get_previous_reading(db, meter.id, coerced_date, exclude_id)
-    if previous is not None and coerced_reading < previous.reading:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Показание ({coerced_reading}) меньше предыдущего "
-                f"({previous.reading} от {previous.reading_date.strftime('%d.%m.%Y')}). "
-                "Проверьте введённое значение."
-            ),
-        )
-
-    return {
-        "meter_id": meter.id,
-        "services_type_id": int(services_type_id),
-        "reading": coerced_reading,
-        "reading_date": coerced_date,
-    }
 
 
 def resolve_transaction_values(
@@ -776,6 +663,55 @@ def resolve_transaction_values(
     }
 
 
+def resolve_meter_reading_values(
+    db: Session, payload: dict[str, Any], exclude_id: int | None = None
+) -> dict[str, Any]:
+    apartment_id = payload.get("apartment_id")
+    services_type_id = payload.get("services_type_id")
+    reading = payload.get("reading")
+    reading_date = payload.get("reading_date")
+
+    if apartment_id in (None, "") or services_type_id in (None, ""):
+        raise HTTPException(
+            status_code=422, detail="Укажите квартиру и вид услуги"
+        )
+    if reading in (None, ""):
+        raise HTTPException(status_code=422, detail="Поле 'Показание' обязательно")
+
+    meter = (
+        db.query(Meter)
+        .filter(
+            Meter.apartment_id == int(apartment_id),
+            Meter.services_type_id == int(services_type_id),
+        )
+        .order_by(Meter.installed_at.desc().nullslast(), Meter.id.desc())
+        .first()
+    )
+    if not meter:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Не найден счётчик для указанной квартиры и вида услуги. "
+                "Сначала зарегистрируйте счётчик в разделе «Счетчики»."
+            ),
+        )
+
+    coerced_reading = coerce_field_value(
+        reading, {"type": "decimal", "label": "Показание"}
+    )
+    coerced_date = coerce_field_value(
+        reading_date or date.today().isoformat(),
+        {"type": "date", "label": "Дата показания"},
+    )
+
+    return {
+        "meter_id": meter.id,
+        "services_type_id": int(services_type_id),
+        "reading": coerced_reading,
+        "reading_date": coerced_date,
+    }
+
+
 CUSTOM_VALUE_BUILDERS: dict[str, Any] = {
     "meter_readings": resolve_meter_reading_values,
     "transactions": resolve_transaction_values,
@@ -783,244 +719,93 @@ CUSTOM_VALUE_BUILDERS: dict[str, Any] = {
 }
 
 
-CONSTANT_TARIFF_TYPE_NAME = "Постоянный"
-VARIABLE_TARIFF_TYPE_NAME = "Переменный"
+# --- ФУНКЦИЯ РАСЧЕТА НАЧИСЛЕНИЙ ---
 
+def calculate_accruals_preview(db: Session, year: int, month: int) -> list[dict[str, Any]]:
+    period_end = date(year, month, calendar.monthrange(year, month)[1])
 
-def quantize_amount(value: Decimal) -> Decimal:
-    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    accounts = db.query(Account).filter(Account.is_active == True).all()
+    service_types = db.query(ServiceType).all()
 
-
-def calculate_accruals_preview(db: Session, period_year: int, period_month: int) -> list[dict[str, Any]]:
-    period_end = date(period_year, period_month, calendar.monthrange(period_year, period_month)[1])
-
-    service_types = db.query(ServiceType).order_by(ServiceType.id).all()
-    accounts = (
-        db.query(Account)
-        .filter(Account.is_active.is_(True))
-        .order_by(Account.id)
-        .all()
-    )
-
-    rows: list[dict[str, Any]] = []
+    rows = []
     row_number = 1
 
-    for service_type in service_types:
-        tariff = (
-            db.query(Tariff)
-            .filter(
-                Tariff.services_type_id == service_type.id,
-                Tariff.valid_from <= period_end,
-            )
-            .order_by(Tariff.valid_from.desc(), Tariff.id.desc())
-            .first()
-        )
-        if not tariff:
+    for account in accounts:
+        apartment = account.apartment
+        if not apartment:
             continue
 
-        tariff_type = db.get(TariffType, tariff.tariff_type_id)
-        tariff_type_name = tariff_type.name if tariff_type else ""
+        for service_type in service_types:
+            tariff = db.query(Tariff).filter(
+                Tariff.services_type_id == service_type.id,
+                Tariff.valid_from <= period_end
+            ).order_by(Tariff.valid_from.desc()).first()
 
-        for account in accounts:
-            if not account.apartment_id:
+            if not tariff:
                 continue
 
-            meter = (
-                db.query(Meter)
-                .filter(
-                    Meter.apartment_id == account.apartment_id,
-                    Meter.services_type_id == service_type.id,
-                )
-                .order_by(Meter.installed_at.desc().nullslast(), Meter.id.desc())
-                .first()
-            )
+            meter = db.query(Meter).filter(
+                Meter.apartment_id == apartment.id,
+                Meter.services_type_id == service_type.id
+            ).first()
 
-            past_value: Decimal | None = None
-            current_value: Decimal | None = None
-            consumption = Decimal("0")
+            past_reading = None
+            current_reading = None
+            consumption = 0
 
             if meter:
-                current_reading = (
-                    db.query(MeterReading)
-                    .filter(
+                current_reading_obj = db.query(MeterReading).filter(
+                    MeterReading.meter_id == meter.id,
+                    MeterReading.reading_date <= period_end
+                ).order_by(MeterReading.reading_date.desc()).first()
+
+                if current_reading_obj:
+                    current_reading = float(current_reading_obj.reading)
+
+                    past_reading_obj = db.query(MeterReading).filter(
                         MeterReading.meter_id == meter.id,
-                        MeterReading.reading_date <= period_end,
-                    )
-                    .order_by(MeterReading.reading_date.desc(), MeterReading.id.desc())
-                    .first()
-                )
-                if current_reading:
-                    current_value = current_reading.reading
-                    past_reading = (
-                        db.query(MeterReading)
-                        .filter(
-                            MeterReading.meter_id == meter.id,
-                            MeterReading.reading_date <= current_reading.reading_date,
-                            MeterReading.id != current_reading.id,
-                        )
-                        .order_by(MeterReading.reading_date.desc(), MeterReading.id.desc())
-                        .first()
-                    )
-                    if past_reading:
-                        past_value = past_reading.reading
+                        MeterReading.reading_date < current_reading_obj.reading_date,
+                        MeterReading.id != current_reading_obj.id
+                    ).order_by(MeterReading.reading_date.desc()).first()
+
+                    if past_reading_obj:
+                        past_reading = float(past_reading_obj.reading)
                     else:
-                        past_value = Decimal("0")
-                    consumption = current_value - past_value
+                        past_reading = 0
 
-            if tariff_type_name == CONSTANT_TARIFF_TYPE_NAME:
-                amount = tariff.price
-            elif tariff_type_name == VARIABLE_TARIFF_TYPE_NAME:
-                if current_value is None:
-                    continue
-                amount = consumption * tariff.price
+                    consumption = current_reading - past_reading
+
+            tariff_type = db.query(TariffType).filter(TariffType.id == tariff.tariff_type_id).first()
+            tariff_type_name = tariff_type.name if tariff_type else ""
+
+            if tariff_type_name == "Постоянный":
+                amount = float(tariff.price)
             else:
-                continue
+                amount = consumption * float(tariff.price)
 
-            apartment = account.apartment
-            apartment_label = (
-                f"№ {apartment.apartment_number} ({account.account_number})"
-                if apartment
-                else account.account_number
-            )
-
-            rows.append(
-                {
+            if consumption > 0 or tariff_type_name == "Постоянный":
+                rows.append({
                     "row_number": row_number,
                     "account_id": account.id,
-                    "account_id_label": apartment_label,
+                    "account_id_label": f"№ {apartment.apartment_number} — {apartment.address}",
                     "services_type_id": service_type.id,
                     "services_type_id_label": service_type.services_type,
                     "tariff_id": tariff.id,
-                    "tariff_id_label": f"{tariff.price} ₸" + (f" / {tariff.unit}" if tariff.unit else ""),
-                    "past_reading_value": float(past_value) if past_value is not None else None,
-                    "current_reading_value": float(current_value) if current_value is not None else None,
-                    "consumption": float(consumption),
-                    "amount": float(quantize_amount(amount)),
-                }
-            )
-            row_number += 1
+                    "tariff_id_label": f"{float(tariff.price)} ₸",
+                    "past_reading_value": past_reading,
+                    "current_reading_value": current_reading,
+                    "consumption": consumption,
+                    "amount": amount
+                })
+                row_number += 1
 
     return rows
 
 
-@api_router.get("/accruals_register/calculate")
-async def calculate_accruals(
-    year: int,
-    month: int,
-    db: Session = Depends(get_db),
-):
-    if month < 1 or month > 12:
-        raise HTTPException(status_code=422, detail="Некорректный месяц")
-
-    rows = calculate_accruals_preview(db, year, month)
-    return {"rows": rows}
-
-
-@api_router.post("/accruals_register/generate", status_code=201)
-async def generate_accruals(
-    payload: dict[str, Any] = Body(...), db: Session = Depends(get_db)
-):
-    year = payload.get("year")
-    month = payload.get("month")
-    rows = payload.get("rows") or []
-
-    if year in (None, "") or month in (None, ""):
-        raise HTTPException(status_code=422, detail="Укажите месяц и год начисления")
-    if not isinstance(rows, list) or not rows:
-        raise HTTPException(status_code=422, detail="Нет строк для начисления")
-
-    year = int(year)
-    month = int(month)
-    if month < 1 or month > 12:
-        raise HTTPException(status_code=422, detail="Некорректный месяц")
-
-    accrual_date = date(year, month, calendar.monthrange(year, month)[1])
-
-    accrual_items = []
-    register_items = []
-
-    for row in rows:
-        account_id = row.get("account_id")
-        services_type_id = row.get("services_type_id")
-        tariff_id = row.get("tariff_id")
-        amount = row.get("amount")
-        consumption = row.get("consumption")
-
-        if account_id in (None, "") or services_type_id in (None, "") or tariff_id in (None, ""):
-            continue
-        if amount in (None, ""):
-            continue
-
-        coerced_amount = coerce_field_value(amount, {"type": "decimal", "label": "Сумма"})
-        if not coerced_amount or coerced_amount <= 0:
-            continue
-
-        acc_id = int(account_id)
-
-        # 1. Создаем запись начисления
-        accrual_item = AccrualsRegister(
-            accrual_date=accrual_date,
-            account_id=acc_id,
-            services_type_id=int(services_type_id),
-            tariff_id=int(tariff_id),
-            past_reading_value=coerce_field_value(
-                row.get("past_reading_value"), {"type": "decimal", "label": "Показание прошлое"}
-            ),
-            current_reading_value=coerce_field_value(
-                row.get("current_reading_value"), {"type": "decimal", "label": "Показание текущее"}
-            ),
-            consumption=coerce_field_value(
-                consumption, {"type": "decimal", "label": "Потребление"}
-            ) or Decimal("0"),
-            amount=coerced_amount,
-        )
-        accrual_items.append(accrual_item)
-
-        # 2. Получаем последний баланс лицевого счета из регистра взаиморасчетов
-        last_reg = (
-            db.query(AccountsRegister)
-            .filter(AccountsRegister.account_id == acc_id)
-            .order_by(AccountsRegister.operation_date.desc(), AccountsRegister.id.desc())
-            .first()
-        )
-        current_balance = last_reg.balance_after if last_reg and last_reg.balance_after is not None else Decimal("0.00")
-
-        # Начисление увеличивает долг абонента (уменьшает баланс лицевого счета)
-        new_balance = current_balance - coerced_amount
-
-        # 3. Создаем запись во взаиморасчетах (AccountsRegister)
-        register_item = AccountsRegister(
-            operation_date=accrual_date,
-            account_id=acc_id,
-            income=Decimal("0.00"),
-            expense=coerced_amount,
-            balance_after=new_balance,
-        )
-        register_items.append(register_item)
-
-    if not accrual_items:
-        raise HTTPException(status_code=422, detail="Нет корректных строк для начисления")
-
-    db.add_all(accrual_items)
-    db.add_all(register_items)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="Нарушение целостности данных при сохранении начислений и взаиморасчетов",
-        ) from exc
-
-    serializer = SERIALIZERS.get(AccrualsRegister, default_serializer)
-    created_rows = [serializer(item) for item in accrual_items]
-    created_rows = enrich_with_reference_labels(db, "accruals_register", created_rows)
-
-    return {"created": created_rows}
-
-
+# --- ЭНДПОИНТ МЕТАДАННЫХ РЕСУРСОВ ---
+# ВАЖНО: должен быть ПЕРВЫМ среди универсальных эндпоинтов!
 @api_router.get("/meta/{resource}")
-async def get_resource_meta(resource: str):
+def get_resource_meta(resource: str):
     if resource not in MODEL_MAP:
         raise HTTPException(status_code=404, detail="Resource not found")
 
@@ -1047,213 +832,330 @@ async def get_resource_meta(resource: str):
     return {"fields": result}
 
 
-@api_router.get("/{resource}")
-async def get_resource(
-    resource: str,
-    response: Response,
-    _start: int | None = None,
-    _end: int | None = None,
-    _sort: str | None = None,
-    _order: str | None = None,
+# --- ЭНДПОИНТЫ ДЛЯ ДОКУМЕНТОВ НАЧИСЛЕНИЙ ---
+
+@api_router.post("/accrual_documents", status_code=201)
+def create_accrual_document(
+    payload: dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    accrual_date = payload.get("accrual_date")
+    if not accrual_date:
+        raise HTTPException(status_code=422, detail="Укажите дату начисления")
+
+    document = AccrualDocument(
+        accrual_date=datetime.strptime(accrual_date, "%Y-%m-%d").date()
+    )
+    db.add(document)
+    db.commit()
+    db.refresh(document)
+
+    return accrual_document_serializer(document)
+
+
+@api_router.get("/accrual_documents/{document_id}")
+def get_accrual_document(
+    document_id: int,
+    db: Session = Depends(get_db)
+):
+    document = db.query(AccrualDocument).filter(AccrualDocument.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    return accrual_document_serializer(document)
+
+
+@api_router.patch("/accrual_documents/{document_id}")
+def update_accrual_document(
+    document_id: int,
+    payload: dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    document = db.query(AccrualDocument).filter(AccrualDocument.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+
+    if "accrual_date" in payload:
+        document.accrual_date = datetime.strptime(payload["accrual_date"], "%Y-%m-%d").date()
+
+    db.commit()
+    db.refresh(document)
+    return accrual_document_serializer(document)
+
+
+@api_router.delete("/accrual_documents/{document_id}", status_code=204)
+def delete_accrual_document(
+    document_id: int,
+    db: Session = Depends(get_db)
+):
+    document = db.query(AccrualDocument).filter(AccrualDocument.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+
+    db.delete(document)
+    db.commit()
+    return Response(status_code=204)
+
+
+# --- ЭНДПОИНТЫ ДЛЯ НАЧИСЛЕНИЙ ---
+
+@api_router.get("/accruals_register/calculate")
+async def calculate_accruals(
+    year: int,
+    month: int,
     db: Session = Depends(get_db),
 ):
-    model = MODEL_MAP.get(resource)
-    if not model:
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=422, detail="Некорректный месяц")
+
+    rows = calculate_accruals_preview(db, year, month)
+    return {"rows": rows}
+
+
+@api_router.post("/accruals_register/generate", status_code=201)
+async def generate_accruals(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    year = payload.get("year")
+    month = payload.get("month")
+    document_id = payload.get("document_id")
+    rows = payload.get("rows") or []
+
+    if year in (None, "") or month in (None, ""):
+        raise HTTPException(status_code=422, detail="Укажите месяц и год начисления")
+    if not document_id:
+        raise HTTPException(status_code=422, detail="Укажите ID документа начислений")
+    if not isinstance(rows, list) or not rows:
+        raise HTTPException(status_code=422, detail="Нет строк для начисления")
+
+    year = int(year)
+    month = int(month)
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=422, detail="Некорректный месяц")
+
+    accrual_date = date(year, month, calendar.monthrange(year, month)[1])
+
+    document = db.query(AccrualDocument).filter(AccrualDocument.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail=f"Документ начислений с ID {document_id} не найден")
+
+    items = []
+    for row in rows:
+        account_id = row.get("account_id")
+        services_type_id = row.get("services_type_id")
+        tariff_id = row.get("tariff_id")
+        amount = row.get("amount")
+        consumption = row.get("consumption")
+
+        if account_id in (None, "") or services_type_id in (None, "") or tariff_id in (None, ""):
+            continue
+        if amount in (None, ""):
+            continue
+
+        past_reading = row.get("past_reading_value")
+        current_reading = row.get("current_reading_value")
+
+        items.append(
+            AccrualsRegister(
+                accrual_document_id=int(document_id),
+                accrual_date=accrual_date,
+                account_id=int(account_id),
+                services_type_id=int(services_type_id),
+                tariff_id=int(tariff_id),
+                past_reading_value=Decimal(str(past_reading)) if past_reading is not None else None,
+                current_reading_value=Decimal(str(current_reading)) if current_reading is not None else None,
+                consumption=Decimal(str(consumption)) if consumption is not None else Decimal("0"),
+                amount=Decimal(str(amount)) if amount is not None else Decimal("0"),
+            )
+        )
+
+    if not items:
+        raise HTTPException(status_code=422, detail="Нет корректных строк для начисления")
+
+    db.add_all(items)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"Нарушение целостности данных при сохранении начислений: {str(exc)}",
+        ) from exc
+
+    try:
+        for item in items:
+            last_balance_result = db.execute(
+                text("SELECT balance_after FROM accounts_register WHERE account_id = :account_id ORDER BY operation_date DESC, id DESC LIMIT 1"),
+                {"account_id": item.account_id}
+            ).scalar()
+
+            previous_balance = last_balance_result if last_balance_result is not None else 0
+            previous_balance = float(previous_balance)
+
+            expense = float(item.amount)
+            income = 0.0
+            new_balance = previous_balance - expense
+
+            db.execute(
+                text("""
+                    INSERT INTO accounts_register (
+                        operation_date,
+                        account_id,
+                        accrual_id,
+                        income,
+                        expense,
+                        balance_after
+                    ) VALUES (
+                        :operation_date,
+                        :account_id,
+                        :accrual_id,
+                        :income,
+                        :expense,
+                        :balance_after
+                    )
+                """),
+                {
+                    "operation_date": datetime.now(),
+                    "account_id": item.account_id,
+                    "accrual_id": item.id,
+                    "income": income,
+                    "expense": expense,
+                    "balance_after": new_balance
+                }
+            )
+
+        db.commit()
+
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"Не удалось создать записи в регистре взаиморасчетов: {str(exc)}",
+        ) from exc
+
+    serializer = SERIALIZERS.get(AccrualsRegister)
+    created_rows = [serializer(item) for item in items]
+
+    return {"created": created_rows}
+
+
+# --- УНИВЕРСАЛЬНЫЕ CRUD ЭНДПОИНТЫ ---
+# ВАЖНО: должны быть ПОСЛЕ эндпоинтов /meta, /accrual_documents, /accruals_register
+
+@api_router.get("/{resource}")
+def get_list(
+    resource: str,
+    _start: int = 0,
+    _end: int = 10,
+    _sort: str | None = None,
+    _order: str | None = None,
+    db: Session = Depends(get_db)
+):
+    if resource not in MODEL_MAP:
         raise HTTPException(status_code=404, detail="Resource not found")
 
+    model = MODEL_MAP[resource]
     query = db.query(model)
 
-    # Подгружаем связанные данные для конкретных ресурсов
-    if resource == "apartments":
-        query = query.options(joinedload(Apartment.owner))
-    elif resource == "accounts":
-        query = query.options(joinedload(Account.apartment))
-    elif resource in ["transactions", "payments"]:
+    if resource == "accounts_register":
         query = query.options(
-            joinedload(Transaction.account).joinedload(Account.apartment),
-            joinedload(Transaction.cash_point)
+            joinedload(AccountsRegister.account)
         )
-    elif resource == "meters":
-        query = query.options(joinedload(Meter.apartment), joinedload(Meter.services_type))
-    elif resource == "meter_readings":
-        query = query.options(
-            joinedload(MeterReading.meter).joinedload(Meter.apartment),
-            joinedload(MeterReading.services_type)
-        )
-    elif resource == "tariffs":
-        query = query.options(joinedload(Tariff.services_type), joinedload(Tariff.tariff_type))
     elif resource == "accruals_register":
         query = query.options(
             joinedload(AccrualsRegister.account),
-            joinedload(AccrualsRegister.services_type)
+            joinedload(AccrualsRegister.services_type),
+            joinedload(AccrualsRegister.tariff)
         )
-    elif resource == "accounts_register":
-        query = query.options(joinedload(AccountsRegister.account))
+    elif resource == "accrual_documents":
+        query = query.options(
+            joinedload(AccrualDocument.accruals)
+        )
+    elif resource in ["transactions", "payments"]:
+        query = query.options(
+            joinedload(Transaction.account)
+            .joinedload(Account.apartment)
+            .joinedload(Apartment.owner),
+            joinedload(Transaction.cash_point)
+        )
 
-    total = query.count()
-
-    # --- РАСШИРЕННАЯ СЕРВЕРНАЯ СОРТИРОВКА (включая вложенные поля и _label) ---
     if _sort:
         order_func = desc if (_order or "").lower() == "desc" else asc
+        if hasattr(model, _sort):
+            query = query.order_by(order_func(getattr(model, _sort)))
+        elif hasattr(model, "id"):
+            query = query.order_by(order_func(model.id))
 
-        sorted_applied = False
+    total_count = query.count()
+    items = query.offset(_start).limit(_end - _start).all()
 
-        if resource == "apartments":
-            if _sort in ["owner.full_name", "owner_id_label"]:
-                query = query.join(Owner, isouter=True).order_by(order_func(Owner.full_name))
-                sorted_applied = True
+    serializer = SERIALIZERS.get(model)
+    if serializer:
+        serialized_data = [serializer(item) for item in items]
+    else:
+        serialized_data = [{"id": getattr(i, "id", None)} for i in items]
 
-        elif resource == "accounts":
-            if _sort in ["apartment.apartment_number", "apartment_id_label"]:
-                query = query.join(Apartment, isouter=True).order_by(order_func(Apartment.apartment_number))
-                sorted_applied = True
-
-        elif resource == "meters":
-            if _sort in ["apartment.apartment_number", "apartment_id_label"]:
-                query = query.join(Apartment, isouter=True).order_by(order_func(Apartment.apartment_number))
-                sorted_applied = True
-            elif _sort in ["services_type.services_type", "services_type_id_label"]:
-                query = query.join(ServiceType, isouter=True).order_by(order_func(ServiceType.services_type))
-                sorted_applied = True
-
-        elif resource == "meter_readings":
-            if _sort in ["apartment.apartment_number", "apartment_id_label"]:
-                query = query.join(Meter, isouter=True).join(Apartment, isouter=True).order_by(order_func(Apartment.apartment_number))
-                sorted_applied = True
-            elif _sort in ["services_type.services_type", "services_type_id_label"]:
-                query = query.join(ServiceType, isouter=True).order_by(order_func(ServiceType.services_type))
-                sorted_applied = True
-            elif _sort in ["meter.serial_number", "meter_label"]:
-                query = query.join(Meter, isouter=True).order_by(order_func(Meter.serial_number))
-                sorted_applied = True
-
-        elif resource in ["transactions", "payments"]:
-            if _sort in ["apartment.apartment_number", "apartment_id_label"]:
-                query = query.join(Account, isouter=True).join(Apartment, isouter=True).order_by(order_func(Apartment.apartment_number))
-                sorted_applied = True
-            elif _sort in ["account.account_number", "account_label"]:
-                query = query.join(Account, isouter=True).order_by(order_func(Account.account_number))
-                sorted_applied = True
-            elif _sort in ["cash_point.name", "cash_point_id_label"]:
-                query = query.join(CashPoint, isouter=True).order_by(order_func(CashPoint.name))
-                sorted_applied = True
-
-        elif resource == "tariffs":
-            if _sort in ["services_type.services_type", "services_type_id_label"]:
-                query = query.join(ServiceType, isouter=True).order_by(order_func(ServiceType.services_type))
-                sorted_applied = True
-            elif _sort in ["tariff_type.name", "tariff_type_id_label"]:
-                query = query.join(TariffType, isouter=True).order_by(order_func(TariffType.name))
-                sorted_applied = True
-
-        elif resource == "accruals_register":
-            if _sort in ["account.account_number", "account_id_label"]:
-                query = query.join(Account, isouter=True).order_by(order_func(Account.account_number))
-                sorted_applied = True
-            elif _sort in ["services_type.services_type", "services_type_id_label"]:
-                query = query.join(ServiceType, isouter=True).order_by(order_func(ServiceType.services_type))
-                sorted_applied = True
-
-        elif resource == "accounts_register":
-            if _sort in ["account.account_number", "account_id_label"]:
-                query = query.join(Account, isouter=True).order_by(order_func(Account.account_number))
-                sorted_applied = True
-
-        if not sorted_applied and hasattr(model, _sort):
-            column = getattr(model, _sort)
-            query = query.order_by(order_func(column))
-
-    if _start is not None and _end is not None:
-        query = query.offset(_start).limit(max(_end - _start, 0))
-
-    items = query.all()
-    serializer = SERIALIZERS.get(model, default_serializer)
-    rows = [serializer(item) for item in items]
-    rows = enrich_with_reference_labels(db, resource, rows)
-
-    response.headers["X-Total-Count"] = str(total)
-    return rows
+    return Response(
+        content=json.dumps(serialized_data, default=str, ensure_ascii=False),
+        media_type="application/json",
+        headers={"X-Total-Count": str(total_count)}
+    )
 
 
 @api_router.get("/{resource}/{item_id}")
-async def get_resource_item(resource: str, item_id: int, db: Session = Depends(get_db)):
+async def get_resource_item(
+    resource: str,
+    item_id: int,
+    db: Session = Depends(get_db)
+):
     model = MODEL_MAP.get(resource)
     if not model:
         raise HTTPException(status_code=404, detail="Resource not found")
 
-    item = db.get(model, item_id)
+    if resource == "accounts_register":
+        item = db.query(model).options(
+            joinedload(AccountsRegister.account)
+        ).filter(model.id == item_id).first()
+    elif resource == "accruals_register":
+        item = db.query(model).options(
+            joinedload(AccrualsRegister.account),
+            joinedload(AccrualsRegister.services_type),
+            joinedload(AccrualsRegister.tariff)
+        ).filter(model.id == item_id).first()
+    elif resource == "accrual_documents":
+        item = db.query(model).options(
+            joinedload(AccrualDocument.accruals)
+        ).filter(model.id == item_id).first()
+    elif resource in ["transactions", "payments"]:
+        item = db.query(model).options(
+            joinedload(Transaction.account)
+            .joinedload(Account.apartment)
+            .joinedload(Apartment.owner),
+            joinedload(Transaction.cash_point)
+        ).filter(model.id == item_id).first()
+    else:
+        item = db.get(model, item_id)
+
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    serializer = SERIALIZERS.get(model, default_serializer)
-    row = serializer(item)
-    return enrich_with_reference_labels(db, resource, [row])[0]
+    serializer = SERIALIZERS.get(model)
+    if serializer:
+        row = serializer(item)
+    else:
+        row = {"id": item.id}
 
-
-@api_router.post("/meter_readings/bulk", status_code=201)
-async def bulk_create_meter_readings(
-    payload: dict[str, Any] = Body(...), db: Session = Depends(get_db)
-):
-    services_type_id = payload.get("services_type_id")
-    reading_date = payload.get("reading_date") or date.today().isoformat()
-    entries = payload.get("entries") or []
-
-    if services_type_id in (None, ""):
-        raise HTTPException(status_code=422, detail="Укажите вид услуги")
-    if not isinstance(entries, list) or not entries:
-        raise HTTPException(
-            status_code=422, detail="Нет ни одной заполненной строки с показаниями"
-        )
-
-    to_create: list[dict[str, Any]] = []
-    errors: list[dict[str, Any]] = []
-
-    for entry in entries:
-        apartment_id = entry.get("apartment_id")
-        reading = entry.get("reading")
-        if reading in (None, ""):
-            continue
-
-        row_payload = {
-            "apartment_id": apartment_id,
-            "services_type_id": services_type_id,
-            "reading": reading,
-            "reading_date": reading_date,
-        }
-        try:
-            values = resolve_meter_reading_values(db, row_payload)
-            to_create.append(values)
-        except HTTPException as exc:
-            errors.append({"apartment_id": apartment_id, "detail": exc.detail})
-
-    created_rows: list[dict[str, Any]] = []
-    if to_create:
-        items = [MeterReading(**values) for values in to_create]
-        db.add_all(items)
-        try:
-            db.commit()
-        except IntegrityError as exc:
-            db.rollback()
-            raise HTTPException(
-                status_code=409,
-                detail="Нарушение целостности данных при сохранении показаний",
-            ) from exc
-
-        serializer = SERIALIZERS.get(MeterReading, default_serializer)
-        created_rows = [serializer(item) for item in items]
-        created_rows = enrich_with_reference_labels(db, "meter_readings", created_rows)
-
-    return {"created": created_rows, "errors": errors}
+    return row
 
 
 @api_router.post("/{resource}", status_code=201)
 async def create_resource_item(
     resource: str, payload: dict[str, Any] = Body(...), db: Session = Depends(get_db)
 ):
-    if resource in PROTECTED_RESOURCES:
+    if resource in ["accounts_register"]:
         raise HTTPException(
             status_code=403,
-            detail=f"Создание записей в '{resource}' запрещено. Записи создаются автоматически."
+            detail=f"Создание записей в '{resource}' запрещено."
         )
 
     model = MODEL_MAP.get(resource)
@@ -1287,9 +1189,9 @@ async def create_resource_item(
         ) from exc
     db.refresh(item)
 
-    serializer = SERIALIZERS.get(model, default_serializer)
-    row = serializer(item)
-    return enrich_with_reference_labels(db, resource, [row])[0]
+    serializer = SERIALIZERS.get(model)
+    row = serializer(item) if serializer else {"id": item.id}
+    return row
 
 
 @api_router.patch("/{resource}/{item_id}")
@@ -1299,10 +1201,10 @@ async def update_resource_item(
     payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
 ):
-    if resource in PROTECTED_RESOURCES:
+    if resource in ["accounts_register"]:
         raise HTTPException(
             status_code=403,
-            detail=f"Обновление записей в '{resource}' запрещено. Записи обновляются автоматически."
+            detail=f"Обновление записей в '{resource}' запрещено."
         )
 
     model = MODEL_MAP.get(resource)
@@ -1337,19 +1239,19 @@ async def update_resource_item(
         ) from exc
     db.refresh(item)
 
-    serializer = SERIALIZERS.get(model, default_serializer)
-    row = serializer(item)
-    return enrich_with_reference_labels(db, resource, [row])[0]
+    serializer = SERIALIZERS.get(model)
+    row = serializer(item) if serializer else {"id": item.id}
+    return row
 
 
 @api_router.delete("/{resource}/{item_id}", status_code=204)
 async def delete_resource_item(
     resource: str, item_id: int, db: Session = Depends(get_db)
 ):
-    if resource in PROTECTED_RESOURCES:
+    if resource in ["accounts_register"]:
         raise HTTPException(
             status_code=403,
-            detail=f"Удаление записей из '{resource}' запрещено. Записи удаляются автоматически при удалении транзакций."
+            detail=f"Удаление записей из '{resource}' запрещено."
         )
 
     model = MODEL_MAP.get(resource)
@@ -1359,11 +1261,6 @@ async def delete_resource_item(
     item = db.get(model, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-
-    if resource in ["transactions", "payments"]:
-        db.query(AccountsRegister).filter(
-            AccountsRegister.transaction_id == item_id
-        ).delete()
 
     db.delete(item)
     try:
@@ -1379,133 +1276,3 @@ async def delete_resource_item(
 
 
 app.include_router(api_router)
-
-# --- НАСТРОЙКА АДМИН-ПАНЕЛИ ---
-admin = Admin(app, engine, title="Family Townhouse")
-
-admin.templates.env.globals.update(
-    {
-        "gettext": lambda s: {
-            "Save": "Сохранить",
-            "Delete": "Удалить",
-            "Add": "Добавить",
-            "Edit": "Изменить",
-            "Search": "Поиск",
-            "Cancel": "Отмена",
-            "Create": "Создать",
-            "Are you sure you want to delete this item?": "Вы уверены, что хотите удалить этот элемент?",
-            "Home": "Главная",
-            "Actions": "Действия",
-            "Apply": "Применить",
-            "Reset": "Сброс",
-        }.get(s, s)
-    }
-)
-
-
-class OwnerAdmin(ModelView, model=Owner):
-    category = "1. Основные"
-    name_plural = "Собственники"
-    column_list = ["id", "full_name", "phone"]
-    icon = "fa-solid fa-user"
-
-
-class ApartmentAdmin(ModelView, model=Apartment):
-    category = "1. Основные"
-    name_plural = "Квартиры/Дома"
-    column_list = ["id", "number", "area"]
-    icon = "fa-solid fa-house"
-
-
-class AccountAdmin(ModelView, model=Account):
-    category = "1. Основные"
-    name_plural = "Лицевые счета"
-    column_list = ["id", "number", "balance"]
-    icon = "fa-solid fa-file-invoice-dollar"
-
-
-class ServiceTypeAdmin(ModelView, model=ServiceType):
-    category = "2. Справочники"
-    name_plural = "Виды услуг"
-    icon = "fa-solid fa-list-check"
-    column_list = ["id", "services_type"]
-
-
-class TariffTypeAdmin(ModelView, model=TariffType):
-    category = "2. Справочники"
-    name_plural = "Типы тарифов"
-    icon = "fa-solid fa-tags"
-
-
-class TariffAdmin(ModelView, model=Tariff):
-    category = "2. Справочники"
-    name_plural = "Тарифы"
-    icon = "fa-solid fa-money-bill-wave"
-
-
-class MeterAdmin(ModelView, model=Meter):
-    category = "2. Справочники"
-    name_plural = "Счетчики"
-    icon = "fa-solid fa-gauge-high"
-
-
-class MeterReadingAdmin(ModelView, model=MeterReading):
-    category = "2. Справочники"
-    name_plural = "Показания"
-    icon = "fa-solid fa-pen-to-square"
-
-
-class TransactionAdmin(ModelView, model=Transaction):
-    category = "3. Учет"
-    name_plural = "Транзакции"
-    column_list = ["id", "amount", "transaction_type", "date"]
-    icon = "fa-solid fa-exchange-alt"
-
-
-class CashPointAdmin(ModelView, model=CashPoint):
-    category = "3. Учет"
-    name_plural = "Кассы/Счета"
-    column_list = ["id", "name", "point_type"]
-    icon = "fa-solid fa-vault"
-
-
-class AccrualsRegisterAdmin(ModelView, model=AccrualsRegister):
-    category = "3. Учет"
-    name_plural = "Регистр начислений"
-    column_list = [
-        "id",
-        "accrual_date",
-        "past_reading_value",
-        "current_reading_value",
-        "amount",
-    ]
-    icon = "fa-solid fa-calculator"
-
-
-class AccountsRegisterAdmin(ModelView, model=AccountsRegister):
-    category = "3. Учет"
-    name_plural = "Регистр взаиморасчетов"
-    column_list = ["id", "operation_date", "income", "expense"]
-    icon = "fa-solid fa-book"
-    can_create = False
-    can_edit = False
-    can_delete = False
-
-
-admin.add_view(OwnerAdmin)
-admin.add_view(ApartmentAdmin)
-admin.add_view(AccountAdmin)
-admin.add_view(CashPointAdmin)
-admin.add_view(ServiceTypeAdmin)
-admin.add_view(TariffAdmin)
-admin.add_view(MeterAdmin)
-admin.add_view(MeterReadingAdmin)
-admin.add_view(TransactionAdmin)
-admin.add_view(AccrualsRegisterAdmin)
-admin.add_view(AccountsRegisterAdmin)
-admin.add_view(TariffTypeAdmin)
-
-
-@app.get("/")
-def index():
-    return {"status": "Online", "admin_panel": "/admin", "api_v1": "/api"}
