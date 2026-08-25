@@ -52,6 +52,17 @@ api_router = APIRouter(prefix="/api")
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ СЕРИАЛИЗАЦИИ ---
 
+MONTH_NAMES_RU = [
+    "январь", "февраль", "март", "апрель", "май", "июнь",
+    "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+]
+
+
+def default_accrual_document_title(accrual_date: date) -> str:
+    """Авто-генерирует название документа начислений по его дате."""
+    return f"Начисление за {MONTH_NAMES_RU[accrual_date.month - 1]} {accrual_date.year}"
+
+
 def make_serializer(fields: list[str]):
     def serialize(item: Any) -> dict:
         result = {}
@@ -329,6 +340,7 @@ def accrual_document_serializer(item: AccrualDocument) -> dict:
     return {
         "id": item.id,
         "accrual_date": item.accrual_date.isoformat() if item.accrual_date else None,
+        "title": item.title,
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "accruals_count": len(item.accruals) if item.accruals else 0,
         "total_amount": sum(float(a.amount) for a in item.accruals) if item.accruals else 0.0,
@@ -614,6 +626,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
     "accrual_documents": [
         {"name": "id", "label": "ID документа", "type": "integer", "required": False},
         {"name": "accrual_date", "label": "Дата начисления", "type": "date", "required": True},
+        {"name": "title", "label": "Название документа", "type": "string", "required": False},
         {"name": "created_at", "label": "Дата создания", "type": "datetime", "required": False},
         {"name": "accruals_count", "label": "Количество записей", "type": "integer", "required": False},
         {"name": "total_amount", "label": "Общая сумма", "type": "decimal", "required": False},
@@ -995,8 +1008,12 @@ def create_accrual_document(
     if not accrual_date:
         raise HTTPException(status_code=422, detail="Укажите дату начисления")
 
+    parsed_date = datetime.strptime(accrual_date, "%Y-%m-%d").date()
+    title = payload.get("title") or default_accrual_document_title(parsed_date)
+
     document = AccrualDocument(
-        accrual_date=datetime.strptime(accrual_date, "%Y-%m-%d").date()
+        accrual_date=parsed_date,
+        title=title,
     )
     db.add(document)
     db.commit()
@@ -1028,6 +1045,14 @@ def update_accrual_document(
 
     if "accrual_date" in payload:
         document.accrual_date = datetime.strptime(payload["accrual_date"], "%Y-%m-%d").date()
+
+    if "title" in payload:
+        title = payload["title"]
+        document.title = (
+            title
+            if title not in (None, "")
+            else default_accrual_document_title(document.accrual_date)
+        )
 
     db.commit()
     db.refresh(document)
@@ -1299,7 +1324,8 @@ async def generate_accruals(
     accrual_date = date(year, month, calendar.monthrange(year, month)[1])
 
     # Создаём документ начислений в той же транзакции, чтобы исключить документы-сирот
-    document = AccrualDocument(accrual_date=accrual_date)
+    title = payload.get("title") or default_accrual_document_title(accrual_date)
+    document = AccrualDocument(accrual_date=accrual_date, title=title)
     db.add(document)
     db.flush()  # получаем document.id до commit
 
@@ -1416,6 +1442,16 @@ async def update_accrual_document_full(
         db.flush()
 
     document.accrual_date = accrual_date
+
+    if "title" in payload:
+        title_value = payload["title"]
+        document.title = (
+            title_value
+            if title_value not in (None, "")
+            else default_accrual_document_title(accrual_date)
+        )
+    elif document.title in (None, ""):
+        document.title = default_accrual_document_title(accrual_date)
 
     new_items = build_accrual_register_items(db, document, period_end, accrual_date, requested_pairs)
     if not new_items:

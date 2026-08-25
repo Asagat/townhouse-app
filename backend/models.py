@@ -212,7 +212,10 @@ class AccrualDocument(Base):
     __tablename__ = "accrual_documents"
     id = Column(Integer, primary_key=True, autoincrement=True)
     accrual_date = Column(Date, nullable=False)
-    title = Column(String(255), nullable=True)  # <-- ДОБАВИТЬ ПОЛЕ
+    # Название документа начислений; опционально в БД (поле добавлено позже,
+    # существующие строки могут хранить NULL), но приложение всегда заполняет его,
+    # при отсутствии — авто-генерирует по accrual_date.
+    title = Column(String(255), nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     accruals = relationship(

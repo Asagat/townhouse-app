@@ -60,6 +60,7 @@ export const columnsConfig: Record<string, Column[]> = {
     ],
 
     accrual_documents: [
+        { key: 'title', label: 'Название' },
         { key: 'accrual_date', label: 'Дата начисления', format: formatDate },
         { key: 'created_at', label: 'Дата создания', format: formatDateTime },
         { key: 'accruals_count', label: 'Количество записей' },

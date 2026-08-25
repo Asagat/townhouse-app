@@ -363,7 +363,7 @@ POST /api/accruals_register/generate
 |-------|--------|------|
 | `MeterReadingDocument` | `meter_reading_documents` | Документ-шапка: название, дата, вид услуги |
 | `MeterReading` | `meter_readings` | Строка регистра: конкретное показание, ссылается на `document_id` |
-| `AccrualDocument` | `accrual_documents` | Документ-шапка начислений |
+| `AccrualDocument` | `accrual_documents` | Документ-шапка начислений: дата, `title` (название) |
 | `AccrualsRegister` | `accruals_register` | Строка регистра начислений, ссылается на `accrual_document_id` |
 
 `MeterReading` также хранит `apartment_id` напрямую (не только через `meter_id`), что позволяет вносить показания даже без привязанного счётчика.
@@ -380,6 +380,8 @@ POST /api/accruals_register/generate
 - `GET/POST/PATCH/DELETE /api/accrual_documents` — жизненный цикл документов начислений
 - `GET /api/accrual_documents/{id}/details` и `PUT /api/accrual_documents/{id}/full` — детализация и полное пересоздание строк документа начислений
 - `GET /api/accruals_register/calculate` и `POST /api/accruals_register/generate` — расчёт и сохранение начислений в регистр
+
+Документы начислений имеют поле `title` (название): оно сериализуется, принимается при создании/обновлении/генерации, а при отсутствии авто-генерируется из `accrual_date` (например, «Начисление за август 2026»).
 
 Регистр `accounts_register` закрыт для прямого создания/изменения/удаления (403) — записи формируются исключительно документами (платежи через SQLAlchemy `event` на `Transaction`, начисления через документы начислений).
 
@@ -618,3 +620,4 @@ npm install
 | Август 2026 | Добавлен formatPrice в форматтеры |
 | Август 2026 | Разделение показаний и начислений на документы и регистры: добавлена модель/таблица `MeterReadingDocument`, `MeterReading` связан с документом через `document_id`, добавлен эндпоинт `POST /api/meter_readings/bulk` для массового ввода, обновлён GenericList/BulkReadingsModal/columns.ts/menu.ts, исправлена конфигурация nginx (префикс `/api/`) |
 | Август 2026 | Добавлено редактирование документов: `PUT /api/meter_reading_documents/{id}/full` и `PUT /api/accrual_documents/{id}/full` (полное пересоздание строк), `GET /api/accrual_documents/{id}/details`; серверный пересчёт сумм/потребления/тарифа при сохранении начислений; регистр `accounts_register` закрыт для прямой записи (403) |
+| Август 2026 | Доделан `title` у `AccrualDocument`: сериализуется, принимается при создании/PATCH/генерации/редактировании, авто-генерируется из `accrual_date` при отсутствии; добавлено поле «Название документа» в `AccrualsCalculationModal` и колонка в списке. Удалены артефакты `backend/test_conn.py` и `backend/templates/` |

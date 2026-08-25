@@ -77,6 +77,7 @@ export type BulkReadingsResponse = {
 export type GenerateAccrualsPayload = {
     year: number;
     month: number;
+    title?: string;
     rows: AccrualPreviewRow[];
 };
 

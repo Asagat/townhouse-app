@@ -1,7 +1,7 @@
 // AccrualsCalculationModal.tsx
 
 import { useEffect, useState } from "react";
-import { Modal, Button, Space, Select, InputNumber, Table, Checkbox, message } from "antd";
+import { Modal, Button, Space, Select, InputNumber, Table, Checkbox, Input, message } from "antd";
 import dayjs from "dayjs";
 import { useApiUrl, useCustom, useCustomMutation } from "@refinedev/core";
 import type { AccrualPreviewRow } from "../../types";
@@ -30,6 +30,13 @@ const monthOptions = [
     { value: 12, label: "Декабрь" },
 ];
 
+const monthLabelByValue: Record<number, string> = Object.fromEntries(
+    monthOptions.map((m) => [m.value, m.label]),
+);
+
+const getDefaultTitle = (year: number, month: number): string =>
+    `Начисление за ${monthLabelByValue[month] ?? month} ${year}`;
+
 /**
  * Модальное окно для расчета и начисления коммунальных услуг.
  * Без documentId — режим создания: оператор выбирает месяц/год, система рассчитывает
@@ -48,6 +55,7 @@ export const AccrualsCalculationModal = ({
     const now = dayjs();
     const [year, setYear] = useState<number>(now.year());
     const [month, setMonth] = useState<number>(now.month() + 1);
+    const [title, setTitle] = useState<string>(() => getDefaultTitle(now.year(), now.month() + 1));
     const [rows, setRows] = useState<AccrualPreviewRow[]>([]);
     const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
     const [isSaving, setIsSaving] = useState(false);
@@ -92,16 +100,18 @@ export const AccrualsCalculationModal = ({
         year: number;
         month: number;
         selections: Array<{ account_id: number; services_type_id: number }>;
+        document?: { id: number; title?: string | null };
     }>({
         url: `${apiUrl}/accrual_documents/${documentId}/details`,
         method: "get",
         queryOptions: {
             enabled: false,
             onSuccess: (response) => {
-                const { year: docYear, month: docMonth, selections } = response.data;
+                const { year: docYear, month: docMonth, selections, document } = response.data;
                 setPendingSelection(selections ?? []);
                 setYear(docYear);
                 setMonth(docMonth);
+                setTitle(document?.title || getDefaultTitle(docYear, docMonth));
             },
             onError: (err: any) =>
                 message.error(
@@ -123,6 +133,7 @@ export const AccrualsCalculationModal = ({
             const n = dayjs();
             setYear(n.year());
             setMonth(n.month() + 1);
+            setTitle(getDefaultTitle(n.year(), n.month() + 1));
             setRows([]);
             setSelectedKeys([]);
             setPendingSelection(null);
@@ -148,6 +159,8 @@ export const AccrualsCalculationModal = ({
 
         setIsSaving(true);
 
+        const effectiveTitle = title.trim() || getDefaultTitle(year, month);
+
         const selections = selectedRows.map((row) => ({
             account_id: row.account_id,
             services_type_id: row.services_type_id,
@@ -162,6 +175,7 @@ export const AccrualsCalculationModal = ({
                     method: "put",
                     values: {
                         accrual_date: `${year}-${String(month).padStart(2, "0")}-01`,
+                        title: effectiveTitle,
                         selections,
                     },
                 },
@@ -187,7 +201,7 @@ export const AccrualsCalculationModal = ({
                 {
                     url: `${apiUrl}/accruals_register/generate`,
                     method: "post",
-                    values: { year, month, selections },
+                    values: { year, month, title: effectiveTitle, selections },
                 },
                 {
                     onSuccess: (response) => {
@@ -312,6 +326,15 @@ export const AccrualsCalculationModal = ({
             ]}
         >
             <Space style={{ marginBottom: 16 }} size="large" wrap>
+                <div>
+                    <div style={{ marginBottom: 4 }}>Название документа</div>
+                    <Input
+                        style={{ width: 280 }}
+                        placeholder="Начисление за август 2026"
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                    />
+                </div>
                 <div>
                     <div style={{ marginBottom: 4 }}>Месяц</div>
                     <Select
