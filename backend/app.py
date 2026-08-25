@@ -27,6 +27,7 @@ from models import (
     TariffType,
     Transaction,
     TransactionTypeEnum,
+    recalculate_account_balance,
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
@@ -906,17 +907,12 @@ def build_accrual_register_items(
 
 
 def create_accounts_register_entries_for_accruals(db: Session, items: list[AccrualsRegister]) -> None:
-    """Создаёт записи в регистре взаиморасчётов для каждой строки начисления."""
+    """
+    Создаёт записи в регистре взаиморасчётов для каждой строки начисления,
+    затем полностью пересчитывает балансы затронутых аккаунтов.
+    """
+    affected_accounts: set[int] = set()
     for item in items:
-        last_balance_result = db.execute(
-            text("SELECT balance_after FROM accounts_register WHERE account_id = :account_id ORDER BY operation_date DESC, id DESC LIMIT 1"),
-            {"account_id": item.account_id}
-        ).scalar()
-
-        previous_balance = float(last_balance_result) if last_balance_result is not None else 0.0
-        expense = float(item.amount)
-        new_balance = previous_balance - expense
-
         db.execute(
             text("""
                 INSERT INTO accounts_register (
@@ -940,10 +936,14 @@ def create_accounts_register_entries_for_accruals(db: Session, items: list[Accru
                 "account_id": item.account_id,
                 "accrual_id": item.id,
                 "income": 0.0,
-                "expense": expense,
-                "balance_after": new_balance,
-            }
+                "expense": float(item.amount),
+                "balance_after": 0.0,
+            },
         )
+        affected_accounts.add(item.account_id)
+
+    for account_id in affected_accounts:
+        recalculate_account_balance(db, account_id)
 
 
 def calculate_accruals_preview(db: Session, year: int, month: int) -> list[dict[str, Any]]:
@@ -1068,8 +1068,20 @@ def delete_accrual_document(
     if not document:
         raise HTTPException(status_code=404, detail="Документ не найден")
 
+    # Каскадное удаление начислений удалит и их записи accounts_register; запоминаем
+    # затронутые аккаунты, чтобы после удаления пересчитать их балансы.
+    accrued_items = db.query(AccrualsRegister).filter(
+        AccrualsRegister.accrual_document_id == document_id
+    ).all()
+    affected_accounts: set[int] = {item.account_id for item in accrued_items}
+
     db.delete(document)
     db.commit()
+
+    for account_id in affected_accounts:
+        recalculate_account_balance(db, account_id)
+    db.commit()
+
     return Response(status_code=204)
 
 
@@ -1436,6 +1448,8 @@ async def update_accrual_document_full(
     # Удаляем старые строки регистра вместе со связанными записями взаиморасчётов
     old_items = db.query(AccrualsRegister).filter(AccrualsRegister.accrual_document_id == document_id).all()
     old_ids = [item.id for item in old_items]
+    # Аккаунты, затронутые удаляемыми строками, — их балансы тоже нужно пересчитать
+    affected_accounts: set[int] = {item.account_id for item in old_items}
     if old_ids:
         db.execute(text("DELETE FROM accounts_register WHERE accrual_id = ANY(:ids)"), {"ids": old_ids})
         db.query(AccrualsRegister).filter(AccrualsRegister.id.in_(old_ids)).delete(synchronize_session=False)
@@ -1470,6 +1484,12 @@ async def update_accrual_document_full(
 
     try:
         create_accounts_register_entries_for_accruals(db, new_items)
+        # Пересчитываем балансы аккаунтов, которым начисление полностью убрали (старые строки),
+        # а также новых. create_accounts_register_entries_for_accruals уже пересчитал новые, но
+        # унифицированно пересчитываем все затронутые (дублирование безопасно).
+        affected_accounts.update(item.account_id for item in new_items)
+        for account_id in affected_accounts:
+            recalculate_account_balance(db, account_id)
         db.commit()
     except Exception as exc:
         db.rollback()
