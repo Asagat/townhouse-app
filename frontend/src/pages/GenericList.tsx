@@ -164,6 +164,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const isMeterReadingDocuments = resourceName === "meter_reading_documents";
     const isMeterReadings = resourceName === "meter_readings";
     const isReadOnly = resourceName === "accounts_register";
+    // Регистры формируются документами и не поддерживают прямое редактирование/удаление
+    const isRegister = isAccrualsRegister || isMeterReadings || isReadOnly;
 
     const columns = getColumnsForResource(resourceName);
     const meta = allResources.find((r) => r.key === resourceName);
@@ -260,142 +262,134 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 }),
             };
         }),
-        {
-            title: "Действия",
-            key: "actions",
-            width: 200,
-            fixed: 'right' as const,
-            render: (_: unknown, record: any) => {
-                // Регистры (автоматически формируются документами) — без возможности прямого редактирования/удаления записи
-                if (isAccrualsRegister || isMeterReadings) {
-                    return (
-                        <span style={{ color: "#999", fontSize: "12px" }}>
-                            Изменяется через документ
-                        </span>
-                    );
-                }
+        ...(isRegister
+            ? []
+            : [
+                  {
+                      title: "Действия",
+                      key: "actions",
+                      width: 200,
+                      fixed: 'right' as const,
+                      render: (_: unknown, record: any) => {
+                          if (isAccrualDocuments) {
+                              return (
+                                  <Space>
+                                      <Button
+                                          size="small"
+                                          onClick={() => {
+                                              setEditingAccrualDocumentId(record.id);
+                                              setAccrualsModalOpen(true);
+                                          }}
+                                      >
+                                          Редактировать
+                                      </Button>
+                                      <Popconfirm
+                                          title="Удалить документ начислений? Все связанные записи в регистре начислений также будут удалены."
+                                          okText="Удалить"
+                                          cancelText="Отмена"
+                                          onConfirm={() =>
+                                              deleteRecord(
+                                                  { resource: resourceName, id: record.id },
+                                                  {
+                                                      onSuccess: () => {
+                                                          message.success("Документ начислений удален");
+                                                          tableQuery.refetch();
+                                                      },
+                                                      onError: (err: any) =>
+                                                          message.error(
+                                                              err?.response?.data?.detail ??
+                                                              "Не удалось удалить документ",
+                                                          ),
+                                                  },
+                                              )
+                                          }
+                                      >
+                                          <Button size="small" danger>
+                                              Удалить
+                                          </Button>
+                                      </Popconfirm>
+                                  </Space>
+                              );
+                          }
 
-                if (isAccrualDocuments) {
-                    return (
-                        <Space>
-                            <Button
-                                size="small"
-                                onClick={() => {
-                                    setEditingAccrualDocumentId(record.id);
-                                    setAccrualsModalOpen(true);
-                                }}
-                            >
-                                Редактировать
-                            </Button>
-                            <Popconfirm
-                                title="Удалить документ начислений? Все связанные записи в регистре начислений также будут удалены."
-                                okText="Удалить"
-                                cancelText="Отмена"
-                                onConfirm={() =>
-                                    deleteRecord(
-                                        { resource: resourceName, id: record.id },
-                                        {
-                                            onSuccess: () => {
-                                                message.success("Документ начислений удален");
-                                                tableQuery.refetch();
-                                            },
-                                            onError: (err: any) =>
-                                                message.error(
-                                                    err?.response?.data?.detail ??
-                                                        "Не удалось удалить документ",
-                                                ),
-                                        },
-                                    )
-                                }
-                            >
-                                <Button size="small" danger>
-                                    Удалить
-                                </Button>
-                            </Popconfirm>
-                        </Space>
-                    );
-                }
+                          if (isMeterReadingDocuments) {
+                              return (
+                                  <Space>
+                                      <Button
+                                          size="small"
+                                          onClick={() => {
+                                              setEditingMeterReadingDocumentId(record.id);
+                                              setBulkModalOpen(true);
+                                          }}
+                                      >
+                                          Редактировать
+                                      </Button>
+                                      <Popconfirm
+                                          title="Удалить документ показаний? Все связанные показания также будут удалены."
+                                          okText="Удалить"
+                                          cancelText="Отмена"
+                                          onConfirm={() =>
+                                              deleteRecord(
+                                                  { resource: resourceName, id: record.id },
+                                                  {
+                                                      onSuccess: () => {
+                                                          message.success("Документ показаний удален");
+                                                          tableQuery.refetch();
+                                                      },
+                                                      onError: (err: any) =>
+                                                          message.error(
+                                                              err?.response?.data?.detail ??
+                                                              "Не удалось удалить документ",
+                                                          ),
+                                                  },
+                                              )
+                                          }
+                                      >
+                                          <Button size="small" danger>
+                                              Удалить
+                                          </Button>
+                                      </Popconfirm>
+                                  </Space>
+                              );
+                          }
 
-                if (isMeterReadingDocuments) {
-                    return (
-                        <Space>
-                            <Button
-                                size="small"
-                                onClick={() => {
-                                    setEditingMeterReadingDocumentId(record.id);
-                                    setBulkModalOpen(true);
-                                }}
-                            >
-                                Редактировать
-                            </Button>
-                            <Popconfirm
-                                title="Удалить документ показаний? Все связанные показания также будут удалены."
-                                okText="Удалить"
-                                cancelText="Отмена"
-                                onConfirm={() =>
-                                    deleteRecord(
-                                        { resource: resourceName, id: record.id },
-                                        {
-                                            onSuccess: () => {
-                                                message.success("Документ показаний удален");
-                                                tableQuery.refetch();
-                                            },
-                                            onError: (err: any) =>
-                                                message.error(
-                                                    err?.response?.data?.detail ??
-                                                        "Не удалось удалить документ",
-                                            ),
-                                        },
-                                    )
-                                }
-                            >
-                                <Button size="small" danger>
-                                    Удалить
-                                </Button>
-                            </Popconfirm>
-                        </Space>
-                    );
-                }
-
-                if (!isReadOnly) {
-                    return (
-                        <Space>
-                            <Button
-                                size="small"
-                                onClick={() => setModalState({ mode: "edit", record })}
-                            >
-                                Редактировать
-                            </Button>
-                            <Popconfirm
-                                title="Удалить запись?"
-                                okText="Удалить"
-                                cancelText="Отмена"
-                                onConfirm={() =>
-                                    deleteRecord(
-                                        { resource: resourceName, id: record.id },
-                                        {
-                                            onSuccess: () => message.success("Запись удалена"),
-                                            onError: (err: any) =>
-                                                message.error(
-                                                    err?.response?.data?.detail ??
-                                                        "Не удалось удалить запись",
-                                                ),
-                                        },
-                                    )
-                                }
-                            >
-                                <Button size="small" danger>
-                                    Удалить
-                                </Button>
-                            </Popconfirm>
-                        </Space>
-                    );
-                }
-                return (
-                    <span style={{ color: "#999", fontSize: "12px" }}>Только чтение</span>
-                );
-            },
-        },
+                          if (!isReadOnly) {
+                              return (
+                                  <Space>
+                                      <Button
+                                          size="small"
+                                          onClick={() => setModalState({ mode: "edit", record })}
+                                      >
+                                          Редактировать
+                                      </Button>
+                                      <Popconfirm
+                                          title="Удалить запись?"
+                                          okText="Удалить"
+                                          cancelText="Отмена"
+                                          onConfirm={() =>
+                                              deleteRecord(
+                                                  { resource: resourceName, id: record.id },
+                                                  {
+                                                      onSuccess: () => message.success("Запись удалена"),
+                                                      onError: (err: any) =>
+                                                          message.error(
+                                                              err?.response?.data?.detail ??
+                                                              "Не удалось удалить запись",
+                                                          ),
+                                                  },
+                                              )
+                                          }
+                                      >
+                                          <Button size="small" danger>
+                                              Удалить
+                                          </Button>
+                                      </Popconfirm>
+                                  </Space>
+                              );
+                          }
+                      },
+                  },
+              ]),
     ];
 
     return (
