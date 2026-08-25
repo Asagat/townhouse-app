@@ -20,9 +20,12 @@ import type { FieldMeta, ModalState } from "../types";
 import { getColumnsForResource } from "../config/columns";
 import { allResources } from "../config/menu";
 import { RecordFormModal } from "../components/common/RecordFormModal";
+import { ColumnHeader } from "../components/common/ColumnHeader";
+import { useColumnConfig } from "../hooks/useColumnConfig";
 import { BulkReadingsModal } from "../components/meter-readings/BulkReadingsModal";
 import { AccrualsCalculationModal } from "../components/accruals/AccrualsCalculationModal";
 import type { SortOrder } from "antd/es/table/interface";
+import type { DragEvent, MouseEvent } from "react";
 
 interface GenericListProps {
     resourceName: string;
@@ -170,6 +173,57 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const columns = getColumnsForResource(resourceName);
     const meta = allResources.find((r) => r.key === resourceName);
 
+    // Настройка колонок: порядок + ширины (сохраняется в localStorage на ресурс)
+    const columnKeys = columns.map((c) => c.key);
+    const {
+        order: orderedColumnKeys,
+        getWidth,
+        setColumnWidth,
+        moveColumn,
+    } = useColumnConfig(resourceName, columnKeys);
+    const [draggingColKey, setDraggingColKey] = useState<string | null>(null);
+
+    // ---- Изменение ширины колонки (ресайз) ----
+    const resizeStart = (e: MouseEvent, colKey: string) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const startX = e.clientX;
+        const startWidth = document
+            .querySelector<HTMLElement>(`[data-col-key="${colKey}"]`)?.getBoundingClientRect().width
+            ?? getWidth(colKey);
+        const onMove = (ev: globalThis.MouseEvent) => {
+            setColumnWidth(colKey, startWidth + (ev.clientX - startX));
+        };
+        const onUp = () => {
+            document.removeEventListener("mousemove", onMove);
+            document.removeEventListener("mouseup", onUp);
+            document.body.style.cursor = "";
+        };
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+        document.body.style.cursor = "col-resize";
+    };
+
+    // ---- Drag & drop для перестановки колонок ----
+    const handleColDragStart = (e: DragEvent, colKey: string) => {
+        setDraggingColKey(colKey);
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData?.("text/plain", colKey);
+    };
+    const handleColDragEnd = () => setDraggingColKey(null);
+    const handleColDragOver = (e: DragEvent) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+    };
+    const handleColDrop = (e: DragEvent, targetKey: string) => {
+        e.preventDefault();
+        const source = e.dataTransfer.getData?.("text/plain") || draggingColKey;
+        setDraggingColKey(null);
+        if (source && source !== targetKey) {
+            moveColumn(source, targetKey);
+        }
+    };
+
     const getColumnSortOrder = (dataIndex: string): SortOrder | undefined => {
         if (!isSortableField(dataIndex)) return undefined;
         const sortField = getSortField(dataIndex);
@@ -237,13 +291,23 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             sortOrder: getColumnSortOrder('id'),
             defaultSortOrder: 'descend' as const,
         },
-        ...columns.map((col) => {
+        ...orderedColumnKeys.map((colKey) => {
+            const col = columns.find((c) => c.key === colKey)!;
             const sortable = isSortableField(col.key);
             const isNested = col.key.includes('.');
             return {
-                title: col.label,
+                title: (
+                    <ColumnHeader
+                        label={col.label}
+                        dragging={draggingColKey === col.key}
+                        onDragStart={(e) => handleColDragStart(e, col.key)}
+                        onDragEnd={handleColDragEnd}
+                        onResizeStart={(e) => resizeStart(e, col.key)}
+                    />
+                ),
                 dataIndex: col.key,
                 key: col.key,
+                width: getWidth(col.key),
                 render: (value: any, record: any) => {
                     try {
                         const val = isNested ? getValueByPath(record, col.key) : value;
@@ -254,11 +318,12 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 },
                 sorter: sortable,
                 sortOrder: getColumnSortOrder(col.key),
-                ...(sortable && {
-                    onHeaderCell: () => ({
-                        style: { cursor: 'pointer' },
-                        title: 'Кликните для сортировки',
-                    }),
+                onHeaderCell: () => ({
+                    'data-col-key': col.key,
+                    onDragOver: handleColDragOver,
+                    onDrop: (e: DragEvent) => handleColDrop(e, col.key),
+                    onDragEnd: handleColDragEnd,
+                    style: { cursor: sortable ? 'pointer' : 'default' },
                 }),
             };
         }),
