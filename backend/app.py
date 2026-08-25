@@ -319,6 +319,17 @@ def accruals_register_serializer(item: AccrualsRegister) -> dict:
     else:
         result["account"] = None
 
+    apartment = item.account.apartment if item.account else None
+    result["apartment"] = (
+        {
+            "id": apartment.id,
+            "apartment_number": apartment.apartment_number,
+            "address": apartment.address,
+        }
+        if apartment
+        else None
+    )
+
     if item.services_type:
         result["services_type"] = {
             "id": item.services_type.id,
@@ -376,6 +387,17 @@ def accounts_register_serializer(item: AccountsRegister) -> dict:
         }
     else:
         result["account"] = None
+
+    apartment = item.account.apartment if item.account else None
+    result["apartment"] = (
+        {
+            "id": apartment.id,
+            "apartment_number": apartment.apartment_number,
+            "address": apartment.address,
+        }
+        if apartment
+        else None
+    )
 
     if item.services_type:
         result["services_type"] = {
@@ -1593,14 +1615,14 @@ def get_list(
 
     if resource == "accounts_register":
         query = query.options(
-            joinedload(AccountsRegister.account),
+            joinedload(AccountsRegister.account).joinedload(Account.apartment),
             joinedload(AccountsRegister.services_type),
             joinedload(AccountsRegister.accrual).joinedload(AccrualsRegister.accrual_document),
             joinedload(AccountsRegister.transaction),
         )
     elif resource == "accruals_register":
         query = query.options(
-            joinedload(AccrualsRegister.account),
+            joinedload(AccrualsRegister.account).joinedload(Account.apartment),
             joinedload(AccrualsRegister.services_type),
             joinedload(AccrualsRegister.tariff),
             joinedload(AccrualsRegister.accrual_document),
@@ -1656,6 +1678,25 @@ def get_list(
                         )""")
                     )
                 )
+        elif _sort == "apartment.apartment_number":
+            # Сортировка по № квартиры. Для начислений/взаиморасчётов квартира
+            # находится через лицевой счёт, для показаний — напрямую.
+            if resource in ("accruals_register", "accounts_register"):
+                table = "accruals_register" if resource == "accruals_register" else "accounts_register"
+                query = query.order_by(
+                    order_func(
+                        text("""(SELECT a.apartment_number FROM apartments a
+                                   WHERE a.id = (SELECT acc.apartment_id FROM accounts acc
+                                                 WHERE acc.id = {0}.account_id))""".format(table))
+                    )
+                )
+            elif resource == "meter_readings":
+                query = query.order_by(
+                    order_func(
+                        text("""(SELECT a.apartment_number FROM apartments a
+                                   WHERE a.id = meter_readings.apartment_id)""")
+                    )
+                )
         elif hasattr(model, _sort):
             query = query.order_by(order_func(getattr(model, _sort)))
         elif hasattr(model, "id"):
@@ -1689,14 +1730,14 @@ async def get_resource_item(
 
     if resource == "accounts_register":
         item = db.query(model).options(
-            joinedload(AccountsRegister.account),
+            joinedload(AccountsRegister.account).joinedload(Account.apartment),
             joinedload(AccountsRegister.services_type),
             joinedload(AccountsRegister.accrual).joinedload(AccrualsRegister.accrual_document),
             joinedload(AccountsRegister.transaction),
         ).filter(model.id == item_id).first()
     elif resource == "accruals_register":
         item = db.query(model).options(
-            joinedload(AccrualsRegister.account),
+            joinedload(AccrualsRegister.account).joinedload(Account.apartment),
             joinedload(AccrualsRegister.services_type),
             joinedload(AccrualsRegister.tariff),
             joinedload(AccrualsRegister.accrual_document),
