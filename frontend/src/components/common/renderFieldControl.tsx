@@ -28,6 +28,7 @@ export const renderFieldControl = (field: FieldMeta) => {
                 />
             );
         case "reference":
+            // Передаём resource, а плейсхолдер будет взят из словаря внутри ReferenceSelect
             return <ReferenceSelect resource={field.reference!} />;
         default:
             return <Input />;

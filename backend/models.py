@@ -62,6 +62,9 @@ class Apartment(Base):
         "Account", back_populates="apartment", passive_deletes=True
     )
     meters = relationship("Meter", back_populates="apartment", passive_deletes=True)
+    meter_readings = relationship(
+        "MeterReading", back_populates="apartment", passive_deletes=True
+    )
 
 
 class Account(Base):
@@ -96,6 +99,9 @@ class ServiceType(Base):
     tariffs = relationship("Tariff", back_populates="services_type", passive_deletes=True)
     meters = relationship("Meter", back_populates="services_type", passive_deletes=True)
     meter_readings = relationship("MeterReading", back_populates="services_type", passive_deletes=True)
+    meter_reading_documents = relationship(
+        "MeterReadingDocument", back_populates="services_type", passive_deletes=True
+    )
     accruals = relationship("AccrualsRegister", back_populates="services_type", passive_deletes=True)
 
 
@@ -145,9 +151,30 @@ class Meter(Base):
 # --- ДОКУМЕНТЫ ---
 
 
+class MeterReadingDocument(Base):
+    __tablename__ = "meter_reading_documents"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(255), nullable=False)
+    reading_date = Column(Date, nullable=False)
+    services_type_id = Column(
+        Integer, ForeignKey("services_type.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    services_type = relationship("ServiceType", back_populates="meter_reading_documents")
+    readings = relationship(
+        "MeterReading", back_populates="document", passive_deletes=True
+    )
+
+
 class MeterReading(Base):
     __tablename__ = "meter_readings"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    document_id = Column(
+        Integer, ForeignKey("meter_reading_documents.id", ondelete="CASCADE")
+    )
+    apartment_id = Column(Integer, ForeignKey("apartments.id", ondelete="CASCADE"), nullable=False)
     meter_id = Column(Integer, ForeignKey("meters.id", ondelete="CASCADE"))
     services_type_id = Column(
         Integer, ForeignKey("services_type.id", ondelete="RESTRICT"), nullable=False
@@ -155,7 +182,10 @@ class MeterReading(Base):
     reading = Column(Numeric(12, 3), nullable=False)
     reading_date = Column(Date, nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
+    document = relationship("MeterReadingDocument", back_populates="readings")
+    apartment = relationship("Apartment", back_populates="meter_readings")
     meter = relationship("Meter", back_populates="readings")
     services_type = relationship("ServiceType", back_populates="meter_readings")
     accruals = relationship("AccrualsRegister", back_populates="current_reading", passive_deletes=True)
@@ -176,13 +206,15 @@ class Transaction(Base):
     accounts_register = relationship("AccountsRegister", back_populates="transaction", passive_deletes=True)
 
 
+# backend/models.py
+
 class AccrualDocument(Base):
     __tablename__ = "accrual_documents"
     id = Column(Integer, primary_key=True, autoincrement=True)
     accrual_date = Column(Date, nullable=False)
+    title = Column(String(255), nullable=True)  # <-- ДОБАВИТЬ ПОЛЕ
     created_at = Column(TIMESTAMP, server_default=func.now())
 
-    # Связь с детальными строками регистра начислений
     accruals = relationship(
         "AccrualsRegister",
         back_populates="accrual_document",

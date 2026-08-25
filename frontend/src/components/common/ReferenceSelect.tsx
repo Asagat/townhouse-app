@@ -5,7 +5,6 @@ import { useList } from "@refinedev/core";
 
 /**
  * Форматтеры для отображения записей справочников в выпадающих списках
- * Ключ - имя ресурса, значение - функция форматирования
  */
 const referenceLabelFormatters: Record<string, (item: any) => string> = {
     owners: (item) => item.full_name ?? `#${item.id}`,
@@ -24,8 +23,24 @@ const referenceLabelFormatters: Record<string, (item: any) => string> = {
 };
 
 /**
+ * Правильные плейсхолдеры для каждого ресурса (в винительном падеже)
+ */
+const resourcePlaceholders: Record<string, string> = {
+    owners: 'Выберите собственника',
+    apartments: 'Выберите квартиру',
+    accounts: 'Выберите лицевой счёт',
+    cash_points: 'Выберите кассу/счёт',
+    service_types: 'Выберите вид услуги',
+    services_type: 'Выберите вид услуги',
+    tariff_types: 'Выберите тип тарифа',
+    tariffs: 'Выберите тариф',
+    meters: 'Выберите счётчик',
+    meter_readings: 'Выберите показание',
+    meter_reading_documents: 'Выберите документ показаний',
+};
+
+/**
  * Компонент для выбора записи из справочника (Foreign Key)
- * Автоматически загружает данные и форматирует отображение
  */
 export const ReferenceSelect = ({
     resource,
@@ -58,7 +73,7 @@ export const ReferenceSelect = ({
             loading={isLoading}
             value={value}
             onChange={onChange}
-            placeholder={placeholder || `Выберите ${resource}`}
+            placeholder={placeholder || resourcePlaceholders[resource] || `Выберите ${resource}`}
             filterOption={(input, option) =>
                 (option?.label ?? "")
                     .toString()

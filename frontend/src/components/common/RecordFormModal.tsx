@@ -95,12 +95,6 @@ export const RecordFormModal = ({
         });
     };
 
-    // Фильтруем поля для отображения
-    const visibleFields = sortedFields.filter((field) => {
-        // Пропускаем служебные поля, которые не нужно показывать в форме
-        return true;
-    });
-
     return (
         <Modal
             title={title}
@@ -114,7 +108,7 @@ export const RecordFormModal = ({
             width={800}
         >
             <Form form={form} layout="vertical">
-                {visibleFields.map((field) => {
+                {sortedFields.map((field) => {
                     const readonly = isReadonlyField(field);
 
                     return (
@@ -130,8 +124,8 @@ export const RecordFormModal = ({
                             }
                         >
                             {readonly ? (
-                                // Для readonly полей показываем просто текст
-                                <Input disabled value={initialValues?.[field.name] ?? "—"} />
+                                // Для readonly полей показываем просто текст, приводим к строке
+                                <Input disabled value={String(initialValues?.[field.name] ?? "—")} />
                             ) : (
                                 renderFieldControl(field)
                             )}

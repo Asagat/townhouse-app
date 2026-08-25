@@ -56,6 +56,9 @@ const sortMapping: Record<string, string> = {
     'installed_at': 'installed_at',
     'full_name': 'full_name',
     'phone': 'phone',
+    'title': 'title',
+    'reading_date': 'reading_date',
+    'readings_count': 'readings_count',
 
     // Вложенные поля
     'owner.full_name': 'owner.full_name',
@@ -73,6 +76,8 @@ const sortMapping: Record<string, string> = {
     'cash_point_id_label': 'cash_point.name',
     'tariff_type.name': 'tariff_type.name',
     'tariff_type_id_label': 'tariff_type.name',
+    'document.title': 'document.title',
+    'document_id_label': 'document.title',
 
     // Поля начислений и документов
     'accrual_date': 'accrual_date',
@@ -153,6 +158,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
 
     const isAccrualsRegister = resourceName === "accruals_register";
     const isAccrualDocuments = resourceName === "accrual_documents";
+    const isMeterReadingDocuments = resourceName === "meter_reading_documents";
     const isReadOnly = resourceName === "accounts_register";
 
     const columns = getColumnsForResource(resourceName);
@@ -329,6 +335,36 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     );
                 }
 
+                if (isMeterReadingDocuments) {
+                    return (
+                        <Popconfirm
+                            title="Удалить документ показаний? Все связанные показания также будут удалены."
+                            okText="Удалить"
+                            cancelText="Отмена"
+                            onConfirm={() =>
+                                deleteRecord(
+                                    { resource: resourceName, id: record.id },
+                                    {
+                                        onSuccess: () => {
+                                            message.success("Документ показаний удален");
+                                            tableQuery.refetch();
+                                        },
+                                        onError: (err: any) =>
+                                            message.error(
+                                                err?.response?.data?.detail ??
+                                                    "Не удалось удалить документ",
+                                            ),
+                                    },
+                                )
+                            }
+                        >
+                            <Button size="small" danger>
+                                Удалить
+                            </Button>
+                        </Popconfirm>
+                    );
+                }
+
                 if (!isReadOnly) {
                     return (
                         <Space>
@@ -392,7 +428,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     {meta?.label ?? resourceName}
                 </h1>
                 <Space>
-                    {resourceName === "meter_readings" && (
+                    {resourceName === "meter_reading_documents" && (
                         <Button onClick={() => setBulkModalOpen(true)}>
                             Массовый ввод показаний
                         </Button>
@@ -407,7 +443,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         </Button>
                     )}
 
-                    {!isReadOnly && !isAccrualsRegister && !isAccrualDocuments && (
+                    {!isReadOnly && !isAccrualsRegister && !isAccrualDocuments && !isMeterReadingDocuments && (
                         <Button
                             type="primary"
                             disabled={metaLoading}
@@ -454,7 +490,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 />
             )}
 
-            {resourceName === "meter_readings" && (
+            {resourceName === "meter_reading_documents" && (
                 <BulkReadingsModal
                     open={bulkModalOpen}
                     onClose={() => setBulkModalOpen(false)}

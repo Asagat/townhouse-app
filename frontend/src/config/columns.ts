@@ -1,6 +1,6 @@
 // src/config/columns.ts
 
-import type { Column } from '../types';
+import type { Column, FieldMeta } from '../types';
 import { formatDate, formatDateTime, formatNumber, formatBool } from './formatters';
 
 /**
@@ -114,6 +114,16 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'reading', label: 'Показание', format: formatNumber },
         { key: 'reading_date', label: 'Дата показания', format: formatDate },
         { key: 'meter.serial_number', label: 'Счётчик' },
+        { key: 'document.title', label: 'Документ' },
+    ],
+
+    meter_reading_documents: [
+        { key: 'id', label: 'ID' },
+        { key: 'title', label: 'Название' },
+        { key: 'reading_date', label: 'Дата показаний', format: formatDate },
+        { key: 'services_type.services_type', label: 'Вид услуги' },
+        { key: 'readings_count', label: 'Количество записей' },
+        { key: 'created_at', label: 'Дата создания', format: formatDateTime },
     ],
 };
 
@@ -133,6 +143,7 @@ export const formFieldConfig: Record<string, string[]> = {
     tariffs: ['services_type_id', 'tariff_type_id', 'price', 'unit', 'valid_from'],
     meters: ['serial_number', 'apartment_id', 'services_type_id', 'installed_at'],
     meter_readings: ['apartment_id', 'services_type_id', 'reading', 'reading_date'],
+    meter_reading_documents: ['title', 'reading_date', 'services_type_id'],
     accrual_documents: ['accrual_date'],
 };
 

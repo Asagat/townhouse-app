@@ -20,6 +20,7 @@ from models import (
     CashPoint,
     Meter,
     MeterReading,
+    MeterReadingDocument,
     Owner,
     ServiceType,
     Tariff,
@@ -203,13 +204,30 @@ def meter_serializer(item: Meter) -> dict:
     }
 
 
+def meter_reading_document_serializer(item: MeterReadingDocument) -> dict:
+    return {
+        "id": item.id,
+        "title": item.title,
+        "reading_date": item.reading_date.isoformat() if item.reading_date else None,
+        "services_type_id": item.services_type_id,
+        "services_type": {
+            "id": item.services_type.id,
+            "services_type": item.services_type.services_type,
+        } if item.services_type else None,
+        "readings_count": len(item.readings) if item.readings else 0,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+    }
+
+
 def meter_reading_serializer(item: MeterReading) -> dict:
     meter = item.meter
     services_type = item.services_type
-    apartment = meter.apartment if meter else None
+    apartment = item.apartment or (meter.apartment if meter else None)
+    document = item.document
 
     result = {
         "id": item.id,
+        "document_id": item.document_id,
         "meter_id": item.meter_id,
         "services_type_id": item.services_type_id,
         "reading": float(item.reading) if item.reading is not None else 0.0,
@@ -246,6 +264,14 @@ def meter_reading_serializer(item: MeterReading) -> dict:
         }
     else:
         result["apartment"] = None
+
+    if document:
+        result["document"] = {
+            "id": document.id,
+            "title": document.title,
+        }
+    else:
+        result["document"] = None
 
     return result
 
@@ -342,6 +368,7 @@ SERIALIZERS = {
     Tariff: tariff_serializer,
     Meter: meter_serializer,
     MeterReading: meter_reading_serializer,
+    MeterReadingDocument: meter_reading_document_serializer,
     AccrualsRegister: accruals_register_serializer,
     AccountsRegister: accounts_register_serializer,
     AccrualDocument: accrual_document_serializer,
@@ -359,6 +386,7 @@ MODEL_MAP = {
     "tariffs": Tariff,
     "meters": Meter,
     "meter_readings": MeterReading,
+    "meter_reading_documents": MeterReadingDocument,
     "accruals_register": AccrualsRegister,
     "accounts_register": AccountsRegister,
     "accrual_documents": AccrualDocument,
@@ -524,6 +552,26 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "required": True,
             "default": "today",
         },
+    ],
+    "meter_reading_documents": [
+        {"name": "id", "label": "ID документа", "type": "integer", "required": False},
+        {"name": "title", "label": "Название", "type": "string", "required": True},
+        {
+            "name": "reading_date",
+            "label": "Дата показаний",
+            "type": "date",
+            "required": True,
+            "default": "today",
+        },
+        {
+            "name": "services_type_id",
+            "label": "Вид услуги",
+            "type": "reference",
+            "reference": "services_type",
+            "required": True,
+        },
+        {"name": "readings_count", "label": "Количество записей", "type": "integer", "required": False},
+        {"name": "created_at", "label": "Дата создания", "type": "datetime", "required": False},
     ],
     "accruals_register": [
         {"name": "accrual_date", "label": "Дата начисления", "type": "date", "required": True},
@@ -705,6 +753,7 @@ def resolve_meter_reading_values(
     )
 
     return {
+        "apartment_id": int(apartment_id),
         "meter_id": meter.id,
         "services_type_id": int(services_type_id),
         "reading": coerced_reading,
@@ -896,6 +945,107 @@ def delete_accrual_document(
     return Response(status_code=204)
 
 
+# --- ЭНДПОИНТЫ ДЛЯ ДОКУМЕНТОВ ПОКАЗАНИЙ (массовый ввод) ---
+
+@api_router.post("/meter_readings/bulk", status_code=201)
+def bulk_create_readings(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """Массовое создание показаний с документом-шапкой"""
+    title = payload.get("title")
+    reading_date = payload.get("reading_date")
+    services_type_id = payload.get("services_type_id")
+    readings_data = payload.get("readings") or payload.get("entries") or []
+
+    if not title or not reading_date or not services_type_id:
+        raise HTTPException(status_code=422, detail="Заполните название, дату и вид услуги")
+    if not readings_data:
+        raise HTTPException(status_code=422, detail="Добавьте хотя бы одно показание")
+
+    parsed_date = (
+        datetime.strptime(reading_date, "%Y-%m-%d").date()
+        if isinstance(reading_date, str)
+        else reading_date
+    )
+
+    document = MeterReadingDocument(
+        title=title,
+        reading_date=parsed_date,
+        services_type_id=int(services_type_id),
+    )
+    db.add(document)
+    db.flush()
+
+    created_readings = []
+    row_errors = []
+    for row in readings_data:
+        apartment_id = row.get("apartment_id")
+        reading_value = row.get("reading")
+        meter_id = row.get("meter_id")
+
+        if apartment_id in (None, "") or reading_value in (None, ""):
+            continue
+
+        apartment = db.query(Apartment).filter(Apartment.id == int(apartment_id)).first()
+        if not apartment:
+            row_errors.append({"apartment_id": apartment_id, "detail": "Квартира не найдена"})
+            continue
+
+        if not meter_id:
+            meter = (
+                db.query(Meter)
+                .filter(
+                    Meter.apartment_id == int(apartment_id),
+                    Meter.services_type_id == int(services_type_id),
+                )
+                .order_by(Meter.installed_at.desc().nullslast(), Meter.id.desc())
+                .first()
+            )
+            meter_id = meter.id if meter else None
+
+        meter_reading = MeterReading(
+            document_id=document.id,
+            apartment_id=int(apartment_id),
+            services_type_id=int(services_type_id),
+            reading=Decimal(str(reading_value)),
+            reading_date=parsed_date,
+            meter_id=meter_id,
+        )
+        db.add(meter_reading)
+        created_readings.append(meter_reading)
+
+    if not created_readings:
+        db.rollback()
+        raise HTTPException(status_code=422, detail="Нет корректных строк для сохранения")
+
+    db.commit()
+    db.refresh(document)
+
+    return {
+        "document": meter_reading_document_serializer(document),
+        "created": [{"id": r.id, "apartment_id": r.apartment_id} for r in created_readings],
+        "errors": row_errors,
+    }
+
+
+@api_router.get("/meter_reading_documents/{document_id}/readings")
+def get_document_readings(
+    document_id: int,
+    db: Session = Depends(get_db)
+):
+    document = db.query(MeterReadingDocument).filter(MeterReadingDocument.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+
+    readings = db.query(MeterReading).filter(MeterReading.document_id == document_id).all()
+
+    return {
+        "document": meter_reading_document_serializer(document),
+        "readings": [meter_reading_serializer(r) for r in readings],
+    }
+
+
 # --- ЭНДПОИНТЫ ДЛЯ НАЧИСЛЕНИЙ ---
 
 @api_router.get("/accruals_register/calculate")
@@ -1040,7 +1190,7 @@ async def generate_accruals(
 
 
 # --- УНИВЕРСАЛЬНЫЕ CRUD ЭНДПОИНТЫ ---
-# ВАЖНО: должны быть ПОСЛЕ эндпоинтов /meta, /accrual_documents, /accruals_register
+# ВАЖНО: должны быть ПОСЛЕ эндпоинтов /meta, /accrual_documents, /accruals_register, /meter_readings/bulk
 
 @api_router.get("/{resource}")
 def get_list(
@@ -1077,6 +1227,18 @@ def get_list(
             .joinedload(Account.apartment)
             .joinedload(Apartment.owner),
             joinedload(Transaction.cash_point)
+        )
+    elif resource == "meter_reading_documents":
+        query = query.options(
+            joinedload(MeterReadingDocument.services_type),
+            joinedload(MeterReadingDocument.readings),
+        )
+    elif resource == "meter_readings":
+        query = query.options(
+            joinedload(MeterReading.meter),
+            joinedload(MeterReading.apartment),
+            joinedload(MeterReading.services_type),
+            joinedload(MeterReading.document),
         )
 
     if _sort:
@@ -1132,6 +1294,18 @@ async def get_resource_item(
             .joinedload(Account.apartment)
             .joinedload(Apartment.owner),
             joinedload(Transaction.cash_point)
+        ).filter(model.id == item_id).first()
+    elif resource == "meter_reading_documents":
+        item = db.query(model).options(
+            joinedload(MeterReadingDocument.services_type),
+            joinedload(MeterReadingDocument.readings),
+        ).filter(model.id == item_id).first()
+    elif resource == "meter_readings":
+        item = db.query(model).options(
+            joinedload(MeterReading.meter),
+            joinedload(MeterReading.apartment),
+            joinedload(MeterReading.services_type),
+            joinedload(MeterReading.document),
         ).filter(model.id == item_id).first()
     else:
         item = db.get(model, item_id)

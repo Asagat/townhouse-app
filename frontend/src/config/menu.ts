@@ -4,7 +4,7 @@ export type Category = { title: string; items: ResourceItem[] };
 
 export const categories: Category[] = [
     {
-        title: "1. Операции",
+        title: "1. Документы",
         items: [
             {
               key: "payments",
@@ -12,19 +12,14 @@ export const categories: Category[] = [
               icon: "fa-solid fa-exchange-alt",
             },
             {
-              key: "meter_readings",
-              label: "Показания",
-              icon: "fa-solid fa-pen-to-square",
-            },
-            {
-              key: "accruals_register",
-              label: "Регистр начислений",
-              icon: "fa-solid fa-calculator",
-            },
-            {
               key: 'accrual_documents',
               label: 'Начисления',
               icon: 'fa-solid fa-file-invoice',
+            },
+            {
+              key: 'meter_reading_documents',
+              label: 'Документы показаний',
+              icon: 'fa-solid fa-file-pen',
             },
         ],
     },
@@ -62,9 +57,19 @@ export const categories: Category[] = [
         title: "3. Регистры",
         items: [
             {
+              key: "meter_readings",
+              label: "Регистр показаний",
+              icon: "fa-solid fa-table",
+            },
+            {
               key: "accounts_register",
               label: "Регистр взаиморасчетов",
               icon: "fa-solid fa-book",
+            },
+            {
+              key: "accruals_register",
+              label: "Регистр начислений",
+              icon: "fa-solid fa-calculator",
             },
         ],
     },

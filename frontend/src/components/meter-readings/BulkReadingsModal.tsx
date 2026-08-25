@@ -9,6 +9,7 @@ import {
     DatePicker,
     Table,
     InputNumber,
+    Input,
     message,
 } from "antd";
 import dayjs, { Dayjs } from "dayjs";
@@ -23,7 +24,8 @@ interface BulkReadingsModalProps {
 
 /**
  * Модальное окно для массового ввода показаний счетчиков
- * Оператор выбирает вид услуги и дату, затем вводит показания для каждой квартиры
+ * Оператор задаёт название документа, выбирает вид услуги и дату,
+ * затем вводит показания для каждой квартиры
  */
 export const BulkReadingsModal = ({
     open,
@@ -37,13 +39,14 @@ export const BulkReadingsModal = ({
         sorters: [{ field: "apartment_number", order: "asc" }],
     });
     const { data: serviceTypesData } = useList({
-        resource: "service_types",
+        resource: "services_type",
         pagination: { mode: "off" },
     });
 
     const apartments = apartmentsData?.data ?? [];
     const serviceTypes = serviceTypesData?.data ?? [];
 
+    const [title, setTitle] = useState<string>("");
     const [serviceTypeId, setServiceTypeId] = useState<number | undefined>();
     const [readingDate, setReadingDate] = useState<Dayjs>(dayjs());
     const [readings, setReadings] = useState<Record<number, string>>({});
@@ -53,6 +56,7 @@ export const BulkReadingsModal = ({
 
     useEffect(() => {
         if (open) {
+            setTitle("");
             setServiceTypeId(undefined);
             setReadingDate(dayjs());
             setReadings({});
@@ -61,19 +65,23 @@ export const BulkReadingsModal = ({
     }, [open]);
 
     const handleSave = () => {
+        if (!title.trim()) {
+            message.error("Введите название документа");
+            return;
+        }
         if (!serviceTypeId) {
             message.error("Выберите вид услуги");
             return;
         }
 
-        const entries = Object.entries(readings)
+        const readingsPayload = Object.entries(readings)
             .filter(([, value]) => value !== "" && value != null)
             .map(([apartmentId, value]) => ({
                 apartment_id: Number(apartmentId),
                 reading: Number(value),
             }));
 
-        if (entries.length === 0) {
+        if (readingsPayload.length === 0) {
             message.error("Заполните хотя бы одно показание");
             return;
         }
@@ -83,9 +91,10 @@ export const BulkReadingsModal = ({
                 url: `${apiUrl}/meter_readings/bulk`,
                 method: "post",
                 values: {
+                    title,
                     services_type_id: serviceTypeId,
                     reading_date: readingDate.format("YYYY-MM-DD"),
-                    entries,
+                    readings: readingsPayload,
                 },
             },
             {
@@ -183,6 +192,15 @@ export const BulkReadingsModal = ({
             ]}
         >
             <Space style={{ marginBottom: 16 }} size="large" wrap>
+                <div>
+                    <div style={{ marginBottom: 4 }}>Название документа</div>
+                    <Input
+                        style={{ width: 260 }}
+                        placeholder="Показания за август 2026 г."
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                    />
+                </div>
                 <div>
                     <div style={{ marginBottom: 4 }}>Вид услуги</div>
                     <Select
