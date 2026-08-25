@@ -64,32 +64,32 @@ export const columnsConfig: Record<string, Column[]> = {
     accrual_documents: [
         { key: 'title', label: 'Название' },
         { key: 'accrual_date', label: 'Дата начисления', format: formatDate },
-        { key: 'created_at', label: 'Дата создания', format: formatDateTime },
         { key: 'accruals_count', label: 'Количество записей' },
         { key: 'total_amount', label: 'Общая сумма', format: formatNumber },
+        { key: 'created_at', label: 'Дата создания', format: formatDateTime },
     ],
 
     accruals_register: [
-        { key: 'accrual_date', label: 'Дата начисления', format: formatDate },
-        { key: 'document_title', label: 'Документ' },
-        { key: 'account.account_number', label: 'Лицевой счёт' },
         { key: 'apartment.apartment_number', label: '№ квартиры' },
+        { key: 'account.account_number', label: 'Лицевой счёт' },
         { key: 'services_type.services_type', label: 'Вид услуги' },
+        { key: 'accrual_date', label: 'Дата начисления', format: formatDate },
         { key: 'past_reading_value', label: 'Показание прошлое', format: formatNumber },
         { key: 'current_reading_value', label: 'Показание текущее', format: formatNumber },
         { key: 'consumption', label: 'Потребление', format: formatNumber },
         { key: 'amount', label: 'Сумма', format: formatNumber },
+        { key: 'document_title', label: 'Документ' },
     ],
 
     accounts_register: [
-        { key: 'operation_date', label: 'Дата операции', format: formatDateTime },
-        { key: 'document_title', label: 'Документ' },
-        { key: 'account.account_number', label: 'Лицевой счёт' },
         { key: 'apartment.apartment_number', label: '№ квартиры' },
+        { key: 'account.account_number', label: 'Лицевой счёт' },
         { key: 'services_type.services_type', label: 'Вид услуги' },
+        { key: 'operation_date', label: 'Дата операции', format: formatDateTime },
         { key: 'income', label: 'Приход', format: formatNumber },
         { key: 'expense', label: 'Расход', format: formatNumber },
         { key: 'balance_after', label: 'Баланс', format: formatNumber },
+        { key: 'document_title', label: 'Документ' },
     ],
 
     services_type: [
@@ -118,8 +118,8 @@ export const columnsConfig: Record<string, Column[]> = {
     meter_readings: [
         { key: 'apartment.apartment_number', label: '№ квартиры' },
         { key: 'services_type.services_type', label: 'Вид услуги' },
-        { key: 'reading', label: 'Показание', format: formatNumber },
         { key: 'reading_date', label: 'Дата показания', format: formatDate },
+        { key: 'reading', label: 'Показание', format: formatNumber },
         { key: 'meter.serial_number', label: 'Счётчик' },
         { key: 'document.title', label: 'Документ' },
     ],
