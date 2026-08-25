@@ -355,6 +355,7 @@ def accounts_register_serializer(item: AccountsRegister) -> dict:
         "account_id": item.account_id,
         "transaction_id": item.transaction_id,
         "accrual_id": item.accrual_id,
+        "services_type_id": item.services_type_id,
         "income": float(item.income) if item.income is not None else 0.0,
         "expense": float(item.expense) if item.expense is not None else 0.0,
         "balance_after": float(item.balance_after) if item.balance_after is not None else 0.0,
@@ -368,6 +369,14 @@ def accounts_register_serializer(item: AccountsRegister) -> dict:
         }
     else:
         result["account"] = None
+
+    if item.services_type:
+        result["services_type"] = {
+            "id": item.services_type.id,
+            "services_type": item.services_type.services_type,
+        }
+    else:
+        result["services_type"] = None
 
     return result
 
@@ -619,6 +628,13 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "type": "reference",
             "reference": "accounts",
             "required": True,
+        },
+        {
+            "name": "services_type_id",
+            "label": "Вид услуги",
+            "type": "reference",
+            "reference": "services_type",
+            "required": False,
         },
         {"name": "income", "label": "Приход", "type": "decimal"},
         {"name": "expense", "label": "Расход", "type": "decimal"},
@@ -919,6 +935,7 @@ def create_accounts_register_entries_for_accruals(db: Session, items: list[Accru
                     operation_date,
                     account_id,
                     accrual_id,
+                    services_type_id,
                     income,
                     expense,
                     balance_after
@@ -926,6 +943,7 @@ def create_accounts_register_entries_for_accruals(db: Session, items: list[Accru
                     :operation_date,
                     :account_id,
                     :accrual_id,
+                    :services_type_id,
                     :income,
                     :expense,
                     :balance_after
@@ -935,6 +953,7 @@ def create_accounts_register_entries_for_accruals(db: Session, items: list[Accru
                 "operation_date": datetime.now(),
                 "account_id": item.account_id,
                 "accrual_id": item.id,
+                "services_type_id": item.services_type_id,
                 "income": 0.0,
                 "expense": float(item.amount),
                 "balance_after": 0.0,
@@ -1529,7 +1548,8 @@ def get_list(
 
     if resource == "accounts_register":
         query = query.options(
-            joinedload(AccountsRegister.account)
+            joinedload(AccountsRegister.account),
+            joinedload(AccountsRegister.services_type),
         )
     elif resource == "accruals_register":
         query = query.options(
@@ -1596,7 +1616,8 @@ async def get_resource_item(
 
     if resource == "accounts_register":
         item = db.query(model).options(
-            joinedload(AccountsRegister.account)
+            joinedload(AccountsRegister.account),
+            joinedload(AccountsRegister.services_type),
         ).filter(model.id == item_id).first()
     elif resource == "accruals_register":
         item = db.query(model).options(

@@ -80,6 +80,7 @@ export const columnsConfig: Record<string, Column[]> = {
     accounts_register: [
         { key: 'operation_date', label: 'Дата операции', format: formatDateTime },
         { key: 'account.account_number', label: 'Лицевой счёт' },
+        { key: 'services_type.services_type', label: 'Вид услуги' },
         { key: 'income', label: 'Приход', format: formatNumber },
         { key: 'expense', label: 'Расход', format: formatNumber },
         { key: 'balance_after', label: 'Баланс', format: formatNumber },
@@ -136,7 +137,7 @@ export const formFieldConfig: Record<string, string[]> = {
     payments: ['apartment_id', 'cash_point_id', 'transaction_type', 'amount', 'notes'],
     transactions: ['apartment_id', 'cash_point_id', 'transaction_type', 'amount', 'notes'],
     accruals_register: ['accrual_date', 'account_id', 'services_type_id', 'past_reading_value', 'current_reading_value', 'consumption', 'amount'],
-    accounts_register: ['account_id', 'income', 'expense', 'balance_after'],
+    accounts_register: ['account_id', 'services_type_id', 'income', 'expense', 'balance_after'],
     services_type: ['services_type'],
     tariff_types: ['name'],
     tariffs: ['services_type_id', 'tariff_type_id', 'price', 'unit', 'valid_from'],

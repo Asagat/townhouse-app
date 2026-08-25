@@ -282,6 +282,11 @@ class AccountsRegister(Base):
     accrual_id = Column(
         Integer, ForeignKey("accruals_register.id", ondelete="CASCADE"), nullable=True
     )
+    # Вид услуги — заполняется для операций начислений (платежи его не имеют),
+    # задаётся в момент записи документа начисления в регистр.
+    services_type_id = Column(
+        Integer, ForeignKey("services_type.id", ondelete="RESTRICT"), nullable=True
+    )
 
     income = Column(Numeric(15, 2), default=0)
     expense = Column(Numeric(15, 2), default=0)
@@ -290,6 +295,7 @@ class AccountsRegister(Base):
     account = relationship("Account", back_populates="accounts_register")
     transaction = relationship("Transaction", back_populates="accounts_register")
     accrual = relationship("AccrualsRegister", back_populates="accounts_register")
+    services_type = relationship("ServiceType")
 
 
 # --- ОБРАБОТЧИКИ ---
