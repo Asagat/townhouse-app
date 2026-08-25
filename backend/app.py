@@ -491,6 +491,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "required": True,
         },
         {"name": "amount", "label": "Сумма", "type": "decimal", "required": True},
+        {"name": "transaction_date", "label": "Дата", "type": "date", "default": "today", "required": True},
         {"name": "notes", "label": "Примечание", "type": "string"},
     ],
     "payments": [
@@ -517,6 +518,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "required": True,
         },
         {"name": "amount", "label": "Сумма", "type": "decimal", "required": True},
+        {"name": "transaction_date", "label": "Дата", "type": "date", "default": "today", "required": True},
         {"name": "notes", "label": "Примечание", "type": "string"},
     ],
     "service_types": [
@@ -714,6 +716,7 @@ def resolve_transaction_values(
     transaction_type = payload.get("transaction_type")
     amount = payload.get("amount")
     notes = payload.get("notes")
+    transaction_date = payload.get("transaction_date")
 
     if apartment_id in (None, ""):
         raise HTTPException(status_code=422, detail="Укажите квартиру")
@@ -739,7 +742,7 @@ def resolve_transaction_values(
             ),
         )
 
-    return {
+    values = {
         "account_id": account.id,
         "cash_point_id": int(cash_point_id),
         "transaction_type": coerce_field_value(
@@ -753,6 +756,14 @@ def resolve_transaction_values(
         "amount": coerce_field_value(amount, {"type": "decimal", "label": "Сумма"}),
         "notes": notes,
     }
+
+    # Дата операции: если передана — устанавливаем; иначе БД поставит сейчас().
+    if transaction_date not in (None, ""):
+        values["transaction_date"] = coerce_field_value(
+            transaction_date, {"type": "datetime", "label": "Дата операции"}
+        )
+
+    return values
 
 
 def build_transaction_title(transaction: Transaction) -> str:
