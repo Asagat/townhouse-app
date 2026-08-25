@@ -41,7 +41,7 @@ export const RecordFormModal = ({
 
     // Определяем, является ли поле readonly (только для просмотра)
     const isReadonlyField = (field: FieldMeta): boolean => {
-        const readonlyFields = ['id', 'created_at', 'accruals_count', 'total_amount'];
+        const readonlyFields = ['id', 'created_at', 'accruals_count', 'total_amount', 'title'];
         return readonlyFields.includes(field.name);
     };
 

@@ -133,6 +133,7 @@ def transaction_serializer(item: Transaction) -> dict:
 
     result = {
         "id": item.id,
+        "title": item.title,
         "transaction_date": item.transaction_date.isoformat() if item.transaction_date else None,
         "account_id": item.account_id,
         "cash_point_id": item.cash_point_id,
@@ -461,6 +462,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         {"name": "is_active", "label": "Активна", "type": "boolean"},
     ],
     "transactions": [
+        {"name": "title", "label": "Название", "type": "string", "required": False},
         {
             "name": "apartment_id",
             "label": "Квартира",
@@ -486,6 +488,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         {"name": "notes", "label": "Примечание", "type": "string"},
     ],
     "payments": [
+        {"name": "title", "label": "Название", "type": "string", "required": False},
         {
             "name": "apartment_id",
             "label": "Квартира",
@@ -744,6 +747,31 @@ def resolve_transaction_values(
         "amount": coerce_field_value(amount, {"type": "decimal", "label": "Сумма"}),
         "notes": notes,
     }
+
+
+def build_transaction_title(transaction: Transaction) -> str:
+    """
+    Формирует название документа «Приход/Расход» по формуле:
+    «Тип операции + №(ID) + дата операции», например «Приход в кассу №17 от 24.08.2026».
+    """
+    type_label = (
+        transaction.transaction_type.value
+        if hasattr(transaction.transaction_type, "value")
+        else str(transaction.transaction_type)
+    )
+    date_label = ""
+    if transaction.transaction_date:
+        date_label = transaction.transaction_date.strftime("%d.%m.%Y")
+    return f"{type_label} №{transaction.id} от {date_label}".strip()
+
+
+def set_transaction_title(db: Session, transaction: Transaction) -> None:
+    """Вычисляет и сохраняет название транзакции по формуле (обновляет строку)."""
+    new_title = build_transaction_title(transaction)
+    if transaction.title != new_title:
+        transaction.title = new_title
+        db.add(transaction)
+        db.flush()
 
 
 def resolve_meter_reading_values(
@@ -1704,6 +1732,12 @@ async def create_resource_item(
         ) from exc
     db.refresh(item)
 
+    # Для документов «Приход/Расход» после получения id и даты формируем название
+    if resource in ["transactions", "payments"]:
+        set_transaction_title(db, item)
+        db.commit()
+        db.refresh(item)
+
     serializer = SERIALIZERS.get(model)
     row = serializer(item) if serializer else {"id": item.id}
     return row
@@ -1753,6 +1787,13 @@ async def update_resource_item(
             detail="Нарушение целостности данных (проверьте связанные записи)",
         ) from exc
     db.refresh(item)
+
+    # Для документов «Приход/Расход» пересчитываем название по формуле
+    # (тип операции или дата могли измениться).
+    if resource in ["transactions", "payments"]:
+        set_transaction_title(db, item)
+        db.commit()
+        db.refresh(item)
 
     serializer = SERIALIZERS.get(model)
     row = serializer(item) if serializer else {"id": item.id}

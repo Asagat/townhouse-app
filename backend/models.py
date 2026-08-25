@@ -200,6 +200,9 @@ class Transaction(Base):
     transaction_type = Column(Enum(TransactionTypeEnum), nullable=False)
     amount = Column(Numeric(15, 2), nullable=False)
     notes = Column(String(255))
+    # Название документа «Приход/Расход», формируется автоматически по формуле
+    # «Тип операции + №(ID) + дата операции» в момент создания/изменения.
+    title = Column(String(255), nullable=True)
 
     account = relationship("Account", back_populates="transactions")
     cash_point = relationship("CashPoint", back_populates="transactions")

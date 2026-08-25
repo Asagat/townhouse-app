@@ -38,6 +38,7 @@ export const columnsConfig: Record<string, Column[]> = {
     ],
 
     payments: [
+        { key: 'title', label: 'Название' },
         { key: 'transaction_date', label: 'Дата', format: formatDateTime },
         { key: 'cash_point.name', label: 'Касса/Счёт' },
         { key: 'apartment.apartment_number', label: '№ квартиры' },
@@ -49,6 +50,7 @@ export const columnsConfig: Record<string, Column[]> = {
     ],
 
     transactions: [
+        { key: 'title', label: 'Название' },
         { key: 'transaction_date', label: 'Дата', format: formatDateTime },
         { key: 'cash_point.name', label: 'Касса/Счёт' },
         { key: 'apartment.apartment_number', label: '№ квартиры' },
@@ -134,8 +136,8 @@ export const formFieldConfig: Record<string, string[]> = {
     apartments: ['apartment_number', 'address', 'square', 'owner_id'],
     accounts: ['account_number', 'account_name', 'is_active', 'apartment_id'],
     cash_points: ['name', 'is_active'],
-    payments: ['apartment_id', 'cash_point_id', 'transaction_type', 'amount', 'notes'],
-    transactions: ['apartment_id', 'cash_point_id', 'transaction_type', 'amount', 'notes'],
+    payments: ['title', 'apartment_id', 'cash_point_id', 'transaction_type', 'amount', 'notes'],
+    transactions: ['title', 'apartment_id', 'cash_point_id', 'transaction_type', 'amount', 'notes'],
     accruals_register: ['accrual_date', 'account_id', 'services_type_id', 'past_reading_value', 'current_reading_value', 'consumption', 'amount'],
     accounts_register: ['account_id', 'services_type_id', 'income', 'expense', 'balance_after'],
     services_type: ['services_type'],
