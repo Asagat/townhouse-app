@@ -1,27 +1,15 @@
-import type { CSSProperties, DragEvent, MouseEvent } from "react";
+import type { CSSProperties, MouseEvent } from "react";
 
 interface ColumnHeaderProps {
     label: string;
-    dragging?: boolean;
-    onDragStart: (e: DragEvent) => void;
-    onDragEnd: () => void;
     onResizeStart: (e: MouseEvent) => void;
 }
 
 /**
- * Заголовок колонки с поддержкой:
- *  - перетаскивания для изменения порядка (за ручку "≡"),
- *  - изменения ширины колонки (за правый край).
- * Сортировка остаётся на AntD Table (клик по заголовку колонки с sorter),
- * drop/рисование порядка обрабатывается на всей ячейке заголовка (см. onHeaderCell).
+ * Заголовок колонки с поддержкой изменения ширины колонки
+ * (потяните за правый край заголовка).
  */
-export const ColumnHeader = ({
-    label,
-    dragging,
-    onDragStart,
-    onDragEnd,
-    onResizeStart,
-}: ColumnHeaderProps) => {
+export const ColumnHeader = ({ label, onResizeStart }: ColumnHeaderProps) => {
     const containerStyle: CSSProperties = {
         display: "inline-flex",
         alignItems: "center",
@@ -32,25 +20,10 @@ export const ColumnHeader = ({
 
     return (
         <div style={containerStyle}>
-            <span
-                draggable
-                title="Перетащите, чтобы изменить порядок колонок"
-                onDragStart={onDragStart}
-                onDragEnd={onDragEnd}
-                style={{
-                    cursor: dragging ? "grabbing" : "grab",
-                    color: "#8c8c8c",
-                    marginRight: 4,
-                    fontSize: 12,
-                    flexShrink: 0,
-                }}
-            >
-                ≡
-            </span>
             <span style={{ flex: 1, whiteSpace: "nowrap" }}>{label}</span>
             <span
                 title="Потяните, чтобы изменить ширину колонки"
-                onMouseDown={(e) => onResizeStart(e)}
+                onMouseDown={onResizeStart}
                 style={{
                     width: 6,
                     marginLeft: 4,

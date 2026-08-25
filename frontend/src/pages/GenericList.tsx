@@ -21,11 +21,11 @@ import { getColumnsForResource } from "../config/columns";
 import { allResources } from "../config/menu";
 import { RecordFormModal } from "../components/common/RecordFormModal";
 import { ColumnHeader } from "../components/common/ColumnHeader";
-import { useColumnConfig } from "../hooks/useColumnConfig";
+import { useColumnWidths } from "../hooks/useColumnConfig";
 import { BulkReadingsModal } from "../components/meter-readings/BulkReadingsModal";
 import { AccrualsCalculationModal } from "../components/accruals/AccrualsCalculationModal";
 import type { SortOrder } from "antd/es/table/interface";
-import type { DragEvent, MouseEvent } from "react";
+import type { MouseEvent } from "react";
 
 interface GenericListProps {
     resourceName: string;
@@ -173,15 +173,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const columns = getColumnsForResource(resourceName);
     const meta = allResources.find((r) => r.key === resourceName);
 
-    // Настройка колонок: порядок + ширины (сохраняется в localStorage на ресурс)
-    const columnKeys = columns.map((c) => c.key);
-    const {
-        order: orderedColumnKeys,
-        getWidth,
-        setColumnWidth,
-        moveColumn,
-    } = useColumnConfig(resourceName, columnKeys);
-    const [draggingColKey, setDraggingColKey] = useState<string | null>(null);
+    // Настройка колонок: ширины (сохраняется в localStorage на ресурс)
+    const { getWidth, setColumnWidth } = useColumnWidths(resourceName);
 
     // ---- Изменение ширины колонки (ресайз) ----
     const resizeStart = (e: MouseEvent, colKey: string) => {
@@ -202,26 +195,6 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         document.addEventListener("mousemove", onMove);
         document.addEventListener("mouseup", onUp);
         document.body.style.cursor = "col-resize";
-    };
-
-    // ---- Drag & drop для перестановки колонок ----
-    const handleColDragStart = (e: DragEvent, colKey: string) => {
-        setDraggingColKey(colKey);
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData?.("text/plain", colKey);
-    };
-    const handleColDragEnd = () => setDraggingColKey(null);
-    const handleColDragOver = (e: DragEvent) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-    };
-    const handleColDrop = (e: DragEvent, targetKey: string) => {
-        e.preventDefault();
-        const source = e.dataTransfer.getData?.("text/plain") || draggingColKey;
-        setDraggingColKey(null);
-        if (source && source !== targetKey) {
-            moveColumn(source, targetKey);
-        }
     };
 
     const getColumnSortOrder = (dataIndex: string): SortOrder | undefined => {
@@ -291,17 +264,13 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             sortOrder: getColumnSortOrder('id'),
             defaultSortOrder: 'descend' as const,
         },
-        ...orderedColumnKeys.map((colKey) => {
-            const col = columns.find((c) => c.key === colKey)!;
+        ...columns.map((col) => {
             const sortable = isSortableField(col.key);
             const isNested = col.key.includes('.');
             return {
                 title: (
                     <ColumnHeader
                         label={col.label}
-                        dragging={draggingColKey === col.key}
-                        onDragStart={(e) => handleColDragStart(e, col.key)}
-                        onDragEnd={handleColDragEnd}
                         onResizeStart={(e) => resizeStart(e, col.key)}
                     />
                 ),
@@ -320,9 +289,6 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 sortOrder: getColumnSortOrder(col.key),
                 onHeaderCell: () => ({
                     'data-col-key': col.key,
-                    onDragOver: handleColDragOver,
-                    onDrop: (e: DragEvent) => handleColDrop(e, col.key),
-                    onDragEnd: handleColDragEnd,
                     style: { cursor: sortable ? 'pointer' : 'default' },
                 }),
             };
