@@ -307,6 +307,7 @@ def accruals_register_serializer(item: AccrualsRegister) -> dict:
         "current_reading_value": float(item.current_reading_value) if item.current_reading_value is not None else None,
         "consumption": float(item.consumption) if item.consumption is not None else 0.0,
         "amount": float(item.amount) if item.amount is not None else 0.0,
+        "document_title": item.accrual_document.title if item.accrual_document else None,
     }
 
     if item.account:
@@ -360,6 +361,11 @@ def accounts_register_serializer(item: AccountsRegister) -> dict:
         "income": float(item.income) if item.income is not None else 0.0,
         "expense": float(item.expense) if item.expense is not None else 0.0,
         "balance_after": float(item.balance_after) if item.balance_after is not None else 0.0,
+        "document_title": (
+            item.accrual.accrual_document.title
+            if item.accrual and item.accrual.accrual_document
+            else (item.transaction.title if item.transaction else None)
+        ),
     }
 
     if item.account:
@@ -1578,12 +1584,15 @@ def get_list(
         query = query.options(
             joinedload(AccountsRegister.account),
             joinedload(AccountsRegister.services_type),
+            joinedload(AccountsRegister.accrual).joinedload(AccrualsRegister.accrual_document),
+            joinedload(AccountsRegister.transaction),
         )
     elif resource == "accruals_register":
         query = query.options(
             joinedload(AccrualsRegister.account),
             joinedload(AccrualsRegister.services_type),
-            joinedload(AccrualsRegister.tariff)
+            joinedload(AccrualsRegister.tariff),
+            joinedload(AccrualsRegister.accrual_document),
         )
     elif resource == "accrual_documents":
         query = query.options(
@@ -1646,12 +1655,15 @@ async def get_resource_item(
         item = db.query(model).options(
             joinedload(AccountsRegister.account),
             joinedload(AccountsRegister.services_type),
+            joinedload(AccountsRegister.accrual).joinedload(AccrualsRegister.accrual_document),
+            joinedload(AccountsRegister.transaction),
         ).filter(model.id == item_id).first()
     elif resource == "accruals_register":
         item = db.query(model).options(
             joinedload(AccrualsRegister.account),
             joinedload(AccrualsRegister.services_type),
-            joinedload(AccrualsRegister.tariff)
+            joinedload(AccrualsRegister.tariff),
+            joinedload(AccrualsRegister.accrual_document),
         ).filter(model.id == item_id).first()
     elif resource == "accrual_documents":
         item = db.query(model).options(

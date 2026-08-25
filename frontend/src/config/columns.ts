@@ -71,6 +71,7 @@ export const columnsConfig: Record<string, Column[]> = {
 
     accruals_register: [
         { key: 'accrual_date', label: 'Дата начисления', format: formatDate },
+        { key: 'document_title', label: 'Название документа' },
         { key: 'account.account_number', label: 'Лицевой счёт' },
         { key: 'services_type.services_type', label: 'Вид услуги' },
         { key: 'past_reading_value', label: 'Показание прошлое', format: formatNumber },
@@ -81,6 +82,7 @@ export const columnsConfig: Record<string, Column[]> = {
 
     accounts_register: [
         { key: 'operation_date', label: 'Дата операции', format: formatDateTime },
+        { key: 'document_title', label: 'Название документа' },
         { key: 'account.account_number', label: 'Лицевой счёт' },
         { key: 'services_type.services_type', label: 'Вид услуги' },
         { key: 'income', label: 'Приход', format: formatNumber },
