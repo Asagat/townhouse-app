@@ -87,6 +87,7 @@ def apartment_serializer(item: Apartment) -> dict:
 
 def account_serializer(item: Account) -> dict:
     apartment = item.apartment
+    owner = apartment.owner if apartment else None
     return {
         "id": item.id,
         "apartment_id": item.apartment_id,
@@ -98,6 +99,10 @@ def account_serializer(item: Account) -> dict:
             "id": apartment.id,
             "apartment_number": apartment.apartment_number,
             "address": apartment.address,
+            "owner": {
+                "id": owner.id,
+                "full_name": owner.full_name,
+            } if owner else None,
         } if apartment else None
     }
 
@@ -770,6 +775,164 @@ CUSTOM_VALUE_BUILDERS: dict[str, Any] = {
 
 # --- ФУНКЦИЯ РАСЧЕТА НАЧИСЛЕНИЙ ---
 
+def calculate_accrual_for_account_service(
+    db: Session, account: Account, service_type: ServiceType, period_end: date
+) -> dict[str, Any] | None:
+    """
+    Рассчитывает начисление для одной пары (лицевой счёт, вид услуги) на конец периода.
+    Возвращает None, если начислить нечего (нет тарифа или нулевое потребление для непостоянного тарифа).
+    Эта функция — единственный источник истины для расчёта: используется и для превью,
+    и при фактическом сохранении в регистр, чтобы клиент не мог подделать сумму/показания.
+    """
+    apartment = account.apartment
+    if not apartment:
+        return None
+
+    tariff = db.query(Tariff).filter(
+        Tariff.services_type_id == service_type.id,
+        Tariff.valid_from <= period_end
+    ).order_by(Tariff.valid_from.desc()).first()
+
+    if not tariff:
+        return None
+
+    meter = db.query(Meter).filter(
+        Meter.apartment_id == apartment.id,
+        Meter.services_type_id == service_type.id
+    ).first()
+
+    past_reading = None
+    current_reading = None
+    consumption = 0
+
+    if meter:
+        current_reading_obj = db.query(MeterReading).filter(
+            MeterReading.meter_id == meter.id,
+            MeterReading.reading_date <= period_end
+        ).order_by(MeterReading.reading_date.desc()).first()
+
+        if current_reading_obj:
+            current_reading = float(current_reading_obj.reading)
+
+            past_reading_obj = db.query(MeterReading).filter(
+                MeterReading.meter_id == meter.id,
+                MeterReading.reading_date < current_reading_obj.reading_date,
+                MeterReading.id != current_reading_obj.id
+            ).order_by(MeterReading.reading_date.desc()).first()
+
+            if past_reading_obj:
+                past_reading = float(past_reading_obj.reading)
+            else:
+                past_reading = 0
+
+            consumption = current_reading - past_reading
+
+    tariff_type = db.query(TariffType).filter(TariffType.id == tariff.tariff_type_id).first()
+    tariff_type_name = tariff_type.name if tariff_type else ""
+
+    if tariff_type_name == "Постоянный":
+        amount = float(tariff.price)
+    else:
+        amount = consumption * float(tariff.price)
+
+    if consumption <= 0 and tariff_type_name != "Постоянный":
+        return None
+
+    return {
+        "account_id": account.id,
+        "account_id_label": f"№ {apartment.apartment_number} — {apartment.address}",
+        "services_type_id": service_type.id,
+        "services_type_id_label": service_type.services_type,
+        "tariff_id": tariff.id,
+        "tariff_id_label": f"{float(tariff.price)} ₸",
+        "past_reading_value": past_reading,
+        "current_reading_value": current_reading,
+        "consumption": consumption,
+        "amount": amount,
+    }
+
+
+def build_accrual_register_items(
+    db: Session,
+    document: AccrualDocument,
+    period_end: date,
+    accrual_date: date,
+    requested_pairs: set[tuple[int, int]],
+) -> list[AccrualsRegister]:
+    """
+    Строит список строк AccrualsRegister для выбранных пар (account_id, services_type_id),
+    пересчитывая каждую на сервере. Используется и при создании,
+    и при редактировании документа начислений.
+    """
+    items = []
+    for account_id, services_type_id in requested_pairs:
+        account = db.query(Account).filter(Account.id == account_id, Account.is_active == True).first()
+        service_type = db.query(ServiceType).filter(ServiceType.id == services_type_id).first()
+        if not account or not service_type:
+            continue
+
+        calculated = calculate_accrual_for_account_service(db, account, service_type, period_end)
+        if calculated is None:
+            continue
+
+        items.append(
+            AccrualsRegister(
+                accrual_document_id=document.id,
+                accrual_date=accrual_date,
+                account_id=calculated["account_id"],
+                services_type_id=calculated["services_type_id"],
+                tariff_id=calculated["tariff_id"],
+                past_reading_value=Decimal(str(calculated["past_reading_value"])) if calculated["past_reading_value"] is not None else None,
+                current_reading_value=Decimal(str(calculated["current_reading_value"])) if calculated["current_reading_value"] is not None else None,
+                consumption=Decimal(str(calculated["consumption"])),
+                amount=Decimal(str(calculated["amount"])),
+            )
+        )
+
+    return items
+
+
+def create_accounts_register_entries_for_accruals(db: Session, items: list[AccrualsRegister]) -> None:
+    """Создаёт записи в регистре взаиморасчётов для каждой строки начисления."""
+    for item in items:
+        last_balance_result = db.execute(
+            text("SELECT balance_after FROM accounts_register WHERE account_id = :account_id ORDER BY operation_date DESC, id DESC LIMIT 1"),
+            {"account_id": item.account_id}
+        ).scalar()
+
+        previous_balance = float(last_balance_result) if last_balance_result is not None else 0.0
+        expense = float(item.amount)
+        new_balance = previous_balance - expense
+
+        db.execute(
+            text("""
+                INSERT INTO accounts_register (
+                    operation_date,
+                    account_id,
+                    accrual_id,
+                    income,
+                    expense,
+                    balance_after
+                ) VALUES (
+                    :operation_date,
+                    :account_id,
+                    :accrual_id,
+                    :income,
+                    :expense,
+                    :balance_after
+                )
+            """),
+            {
+                "operation_date": datetime.now(),
+                "account_id": item.account_id,
+                "accrual_id": item.id,
+                "income": 0.0,
+                "expense": expense,
+                "balance_after": new_balance,
+            }
+        )
+
+
 def calculate_accruals_preview(db: Session, year: int, month: int) -> list[dict[str, Any]]:
     period_end = date(year, month, calendar.monthrange(year, month)[1])
 
@@ -780,73 +943,13 @@ def calculate_accruals_preview(db: Session, year: int, month: int) -> list[dict[
     row_number = 1
 
     for account in accounts:
-        apartment = account.apartment
-        if not apartment:
-            continue
-
         for service_type in service_types:
-            tariff = db.query(Tariff).filter(
-                Tariff.services_type_id == service_type.id,
-                Tariff.valid_from <= period_end
-            ).order_by(Tariff.valid_from.desc()).first()
-
-            if not tariff:
+            row = calculate_accrual_for_account_service(db, account, service_type, period_end)
+            if row is None:
                 continue
-
-            meter = db.query(Meter).filter(
-                Meter.apartment_id == apartment.id,
-                Meter.services_type_id == service_type.id
-            ).first()
-
-            past_reading = None
-            current_reading = None
-            consumption = 0
-
-            if meter:
-                current_reading_obj = db.query(MeterReading).filter(
-                    MeterReading.meter_id == meter.id,
-                    MeterReading.reading_date <= period_end
-                ).order_by(MeterReading.reading_date.desc()).first()
-
-                if current_reading_obj:
-                    current_reading = float(current_reading_obj.reading)
-
-                    past_reading_obj = db.query(MeterReading).filter(
-                        MeterReading.meter_id == meter.id,
-                        MeterReading.reading_date < current_reading_obj.reading_date,
-                        MeterReading.id != current_reading_obj.id
-                    ).order_by(MeterReading.reading_date.desc()).first()
-
-                    if past_reading_obj:
-                        past_reading = float(past_reading_obj.reading)
-                    else:
-                        past_reading = 0
-
-                    consumption = current_reading - past_reading
-
-            tariff_type = db.query(TariffType).filter(TariffType.id == tariff.tariff_type_id).first()
-            tariff_type_name = tariff_type.name if tariff_type else ""
-
-            if tariff_type_name == "Постоянный":
-                amount = float(tariff.price)
-            else:
-                amount = consumption * float(tariff.price)
-
-            if consumption > 0 or tariff_type_name == "Постоянный":
-                rows.append({
-                    "row_number": row_number,
-                    "account_id": account.id,
-                    "account_id_label": f"№ {apartment.apartment_number} — {apartment.address}",
-                    "services_type_id": service_type.id,
-                    "services_type_id_label": service_type.services_type,
-                    "tariff_id": tariff.id,
-                    "tariff_id_label": f"{float(tariff.price)} ₸",
-                    "past_reading_value": past_reading,
-                    "current_reading_value": current_reading,
-                    "consumption": consumption,
-                    "amount": amount
-                })
-                row_number += 1
+            row["row_number"] = row_number
+            rows.append(row)
+            row_number += 1
 
     return rows
 
@@ -1046,6 +1149,97 @@ def get_document_readings(
     }
 
 
+@api_router.put("/meter_reading_documents/{document_id}/full")
+def update_meter_reading_document_full(
+    document_id: int,
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Полностью обновляет документ показаний и пересоздаёт его строки: старые показания удаляются,
+    новые создаются из присланного списка — аналогично bulk-созданию, но в режиме редактирования.
+    """
+    document = db.query(MeterReadingDocument).filter(MeterReadingDocument.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+
+    title = payload.get("title")
+    reading_date = payload.get("reading_date")
+    services_type_id = payload.get("services_type_id")
+    readings_data = payload.get("readings") or []
+
+    if not title or not reading_date or not services_type_id:
+        raise HTTPException(status_code=422, detail="Заполните название, дату и вид услуги")
+    if not readings_data:
+        raise HTTPException(status_code=422, detail="Добавьте хотя бы одно показание")
+
+    parsed_date = (
+        datetime.strptime(reading_date, "%Y-%m-%d").date()
+        if isinstance(reading_date, str)
+        else reading_date
+    )
+    services_type_id = int(services_type_id)
+
+    document.title = title
+    document.reading_date = parsed_date
+    document.services_type_id = services_type_id
+
+    # Удаляем старые показания этого документа и создаём новые из присланного списка
+    db.query(MeterReading).filter(MeterReading.document_id == document_id).delete(synchronize_session=False)
+    db.flush()
+
+    created_readings = []
+    row_errors = []
+    for row in readings_data:
+        apartment_id = row.get("apartment_id")
+        reading_value = row.get("reading")
+        meter_id = row.get("meter_id")
+
+        if apartment_id in (None, "") or reading_value in (None, ""):
+            continue
+
+        apartment = db.query(Apartment).filter(Apartment.id == int(apartment_id)).first()
+        if not apartment:
+            row_errors.append({"apartment_id": apartment_id, "detail": "Квартира не найдена"})
+            continue
+
+        if not meter_id:
+            meter = (
+                db.query(Meter)
+                .filter(
+                    Meter.apartment_id == int(apartment_id),
+                    Meter.services_type_id == services_type_id,
+                )
+                .order_by(Meter.installed_at.desc().nullslast(), Meter.id.desc())
+                .first()
+            )
+            meter_id = meter.id if meter else None
+
+        meter_reading = MeterReading(
+            document_id=document.id,
+            apartment_id=int(apartment_id),
+            services_type_id=services_type_id,
+            reading=Decimal(str(reading_value)),
+            reading_date=parsed_date,
+            meter_id=meter_id,
+        )
+        db.add(meter_reading)
+        created_readings.append(meter_reading)
+
+    if not created_readings:
+        db.rollback()
+        raise HTTPException(status_code=422, detail="Нет корректных строк для сохранения")
+
+    db.commit()
+    db.refresh(document)
+
+    return {
+        "document": meter_reading_document_serializer(document),
+        "updated": [{"id": r.id, "apartment_id": r.apartment_id} for r in created_readings],
+        "errors": row_errors,
+    }
+
+
 # --- ЭНДПОИНТЫ ДЛЯ НАЧИСЛЕНИЙ ---
 
 @api_router.get("/accruals_register/calculate")
@@ -1066,16 +1260,21 @@ async def generate_accruals(
     payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db)
 ):
+    """
+    Создаёт документ начислений и строки регистра за одну транзакцию.
+
+    Важно: клиент присылает только идентификаторы выбранных строк (account_id + services_type_id),
+    а не рассчитанные значения. Сумма, потребление, тариф и показания
+    всегда пересчитываются на сервере на момент сохранения, чтобы исключить подмену
+    данных через API и рассинхронизацию с изменившимися между превью и сохранением данными.
+    """
     year = payload.get("year")
     month = payload.get("month")
-    document_id = payload.get("document_id")
-    rows = payload.get("rows") or []
+    selections = payload.get("selections") or payload.get("rows") or []
 
     if year in (None, "") or month in (None, ""):
         raise HTTPException(status_code=422, detail="Укажите месяц и год начисления")
-    if not document_id:
-        raise HTTPException(status_code=422, detail="Укажите ID документа начислений")
-    if not isinstance(rows, list) or not rows:
+    if not isinstance(selections, list) or not selections:
         raise HTTPException(status_code=422, detail="Нет строк для начисления")
 
     year = int(year)
@@ -1083,44 +1282,32 @@ async def generate_accruals(
     if month < 1 or month > 12:
         raise HTTPException(status_code=422, detail="Некорректный месяц")
 
-    accrual_date = date(year, month, calendar.monthrange(year, month)[1])
+    period_end = date(year, month, calendar.monthrange(year, month)[1])
 
-    document = db.query(AccrualDocument).filter(AccrualDocument.id == document_id).first()
-    if not document:
-        raise HTTPException(status_code=404, detail=f"Документ начислений с ID {document_id} не найден")
-
-    items = []
-    for row in rows:
+    # Собираем уникальные пары (account_id, services_type_id) из выбора клиента
+    requested_pairs: set[tuple[int, int]] = set()
+    for row in selections:
         account_id = row.get("account_id")
         services_type_id = row.get("services_type_id")
-        tariff_id = row.get("tariff_id")
-        amount = row.get("amount")
-        consumption = row.get("consumption")
-
-        if account_id in (None, "") or services_type_id in (None, "") or tariff_id in (None, ""):
+        if account_id in (None, "") or services_type_id in (None, ""):
             continue
-        if amount in (None, ""):
-            continue
+        requested_pairs.add((int(account_id), int(services_type_id)))
 
-        past_reading = row.get("past_reading_value")
-        current_reading = row.get("current_reading_value")
+    if not requested_pairs:
+        raise HTTPException(status_code=422, detail="Нет корректных строк для начисления")
 
-        items.append(
-            AccrualsRegister(
-                accrual_document_id=int(document_id),
-                accrual_date=accrual_date,
-                account_id=int(account_id),
-                services_type_id=int(services_type_id),
-                tariff_id=int(tariff_id),
-                past_reading_value=Decimal(str(past_reading)) if past_reading is not None else None,
-                current_reading_value=Decimal(str(current_reading)) if current_reading is not None else None,
-                consumption=Decimal(str(consumption)) if consumption is not None else Decimal("0"),
-                amount=Decimal(str(amount)) if amount is not None else Decimal("0"),
-            )
-        )
+    accrual_date = date(year, month, calendar.monthrange(year, month)[1])
+
+    # Создаём документ начислений в той же транзакции, чтобы исключить документы-сирот
+    document = AccrualDocument(accrual_date=accrual_date)
+    db.add(document)
+    db.flush()  # получаем document.id до commit
+
+    items = build_accrual_register_items(db, document, period_end, accrual_date, requested_pairs)
 
     if not items:
-        raise HTTPException(status_code=422, detail="Нет корректных строк для начисления")
+        db.rollback()
+        raise HTTPException(status_code=422, detail="Нет корректных строк для начисления (возможно, данные успели измениться с момента расчёта превью)")
 
     db.add_all(items)
     try:
@@ -1133,60 +1320,137 @@ async def generate_accruals(
         ) from exc
 
     try:
-        for item in items:
-            last_balance_result = db.execute(
-                text("SELECT balance_after FROM accounts_register WHERE account_id = :account_id ORDER BY operation_date DESC, id DESC LIMIT 1"),
-                {"account_id": item.account_id}
-            ).scalar()
-
-            previous_balance = last_balance_result if last_balance_result is not None else 0
-            previous_balance = float(previous_balance)
-
-            expense = float(item.amount)
-            income = 0.0
-            new_balance = previous_balance - expense
-
-            db.execute(
-                text("""
-                    INSERT INTO accounts_register (
-                        operation_date,
-                        account_id,
-                        accrual_id,
-                        income,
-                        expense,
-                        balance_after
-                    ) VALUES (
-                        :operation_date,
-                        :account_id,
-                        :accrual_id,
-                        :income,
-                        :expense,
-                        :balance_after
-                    )
-                """),
-                {
-                    "operation_date": datetime.now(),
-                    "account_id": item.account_id,
-                    "accrual_id": item.id,
-                    "income": income,
-                    "expense": expense,
-                    "balance_after": new_balance
-                }
-            )
-
+        create_accounts_register_entries_for_accruals(db, items)
         db.commit()
-
     except Exception as exc:
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail=f"Не удалось создать записи в регистре взаиморасчетов: {str(exc)}",
+            detail=f"Не удалось создать записи в регистре взаиморасчётов: {str(exc)}",
         ) from exc
+
+    db.refresh(document)
 
     serializer = SERIALIZERS.get(AccrualsRegister)
     created_rows = [serializer(item) for item in items]
 
-    return {"created": created_rows}
+    return {
+        "document": accrual_document_serializer(document),
+        "created": created_rows,
+    }
+
+
+@api_router.get("/accrual_documents/{document_id}/details")
+def get_accrual_document_details(
+    document_id: int,
+    db: Session = Depends(get_db)
+):
+    """Возвращает документ начислений вместе с его строками регистра, чтобы их можно было отредактировать."""
+    document = db.query(AccrualDocument).filter(AccrualDocument.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+
+    accruals = db.query(AccrualsRegister).filter(AccrualsRegister.accrual_document_id == document_id).all()
+    serializer = SERIALIZERS.get(AccrualsRegister)
+
+    year = document.accrual_date.year
+    month = document.accrual_date.month
+
+    return {
+        "document": accrual_document_serializer(document),
+        "accruals": [serializer(item) for item in accruals],
+        "year": year,
+        "month": month,
+        "selections": [
+            {"account_id": item.account_id, "services_type_id": item.services_type_id}
+            for item in accruals
+        ],
+    }
+
+
+@api_router.put("/accrual_documents/{document_id}/full")
+async def update_accrual_document_full(
+    document_id: int,
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Полностью пересоздаёт строки регистра начислений для документа: старые строки удаляются,
+    новые рассчитываются на сервере по присланным идентификаторам (account_id + services_type_id).
+    Связанные записи регистра взаиморасчётов (accounts_register) также пересоздаются.
+    """
+    document = db.query(AccrualDocument).filter(AccrualDocument.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+
+    accrual_date_raw = payload.get("accrual_date")
+    selections = payload.get("selections") or []
+
+    if not isinstance(selections, list) or not selections:
+        raise HTTPException(status_code=422, detail="Нет строк для начисления")
+
+    requested_pairs: set[tuple[int, int]] = set()
+    for row in selections:
+        account_id = row.get("account_id")
+        services_type_id = row.get("services_type_id")
+        if account_id in (None, "") or services_type_id in (None, ""):
+            continue
+        requested_pairs.add((int(account_id), int(services_type_id)))
+
+    if not requested_pairs:
+        raise HTTPException(status_code=422, detail="Нет корректных строк для начисления")
+
+    accrual_date = (
+        datetime.strptime(accrual_date_raw, "%Y-%m-%d").date()
+        if accrual_date_raw
+        else document.accrual_date
+    )
+    period_end = date(accrual_date.year, accrual_date.month, calendar.monthrange(accrual_date.year, accrual_date.month)[1])
+
+    # Удаляем старые строки регистра вместе со связанными записями взаиморасчётов
+    old_items = db.query(AccrualsRegister).filter(AccrualsRegister.accrual_document_id == document_id).all()
+    old_ids = [item.id for item in old_items]
+    if old_ids:
+        db.execute(text("DELETE FROM accounts_register WHERE accrual_id = ANY(:ids)"), {"ids": old_ids})
+        db.query(AccrualsRegister).filter(AccrualsRegister.id.in_(old_ids)).delete(synchronize_session=False)
+        db.flush()
+
+    document.accrual_date = accrual_date
+
+    new_items = build_accrual_register_items(db, document, period_end, accrual_date, requested_pairs)
+    if not new_items:
+        db.rollback()
+        raise HTTPException(status_code=422, detail="Нет корректных строк для начисления")
+
+    db.add_all(new_items)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"Нарушение целостности данных при сохранении начислений: {str(exc)}",
+        ) from exc
+
+    try:
+        create_accounts_register_entries_for_accruals(db, new_items)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"Не удалось обновить записи в регистре взаиморасчётов: {str(exc)}",
+        ) from exc
+
+    db.refresh(document)
+
+    serializer = SERIALIZERS.get(AccrualsRegister)
+    updated_rows = [serializer(item) for item in new_items]
+
+    return {
+        "document": accrual_document_serializer(document),
+        "updated": updated_rows,
+    }
 
 
 # --- УНИВЕРСАЛЬНЫЕ CRUD ЭНДПОИНТЫ ---

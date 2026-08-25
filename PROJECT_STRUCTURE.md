@@ -217,6 +217,10 @@ accounts: (item) => `${item.account_number} (${item.account_name})`
 5. POST `/api/meter_readings/bulk` создаёт один `MeterReadingDocument` и набор связанных с ним `MeterReading`
 6. Ошибки по отдельным строкам показываются в таблице, не прерывая сохранение остальных строк
 
+Модалка работает в двух режимах:
+- **Создание** (без `documentId`): оператор заполняет форму, создаётся новый документ показаний.
+- **Редактирование** (с `documentId`): данные и показания существующего документа подгружаются через `GET /api/meter_reading_documents/{id}/readings`, а при сохранении документ полностью пересоздаётся через `PUT /api/meter_reading_documents/{id}/full` (старые строки удаляются, создаются новые из присланного списка).
+
 ---
 
 ### 8. `components/accruals/AccrualsCalculationModal.tsx`
@@ -228,10 +232,16 @@ accounts: (item) => `${item.account_number} (${item.account_name})`
 
 **Бизнес-логика:**
 1. Оператор выбирает месяц/год
-2. Система рассчитывает начисления по всем счетам
+2. Система рассчитывает начисления по всем счетам (GET `/api/accruals_register/calculate`)
 3. Отображается таблица с предварительными строками
 4. Оператор выбирает строки для сохранения
-5. Выбранные строки сохраняются в регистр
+5. Выбранные строки сохраняются в регистр (POST `/api/accruals_register/generate`)
+
+Модалка работает в двух режимах:
+- **Создание** (без `documentId`): создаётся новый документ начислений.
+- **Редактирование** (с `documentId`): месяц/год и ранее выбранные пары (account_id + services_type_id) подгружаются через `GET /api/accrual_documents/{id}/details`, а при сохранении строки документа полностью пересоздаются через `PUT /api/accrual_documents/{id}/full` (старые строки и связанные записи `accounts_register` удаляются).
+
+**Важно (защита от подмены данных):** клиент отправляет на сервер только идентификаторы выбранных пар `(account_id, services_type_id)`. Сумма, потребление, тариф и показания всегда пересчитываются на сервере на момент сохранения, поэтому изменившиеся между предпросмотром и сохранением данные не искажаются.
 
 ---
 
@@ -363,10 +373,15 @@ POST /api/accruals_register/generate
 ### `app.py` — API
 - Универсальные CRUD-эндпоинты `GET/POST/PATCH/DELETE /api/{resource}` через `MODEL_MAP` / `SERIALIZERS` / `FIELD_CONFIG`
 - `GET /api/meta/{resource}` — метаданные полей для динамической формы на фронте
+- Кастомные билдеры значений (`CUSTOM_VALUE_BUILDERS`): для `transactions`/`payments` и `meter_readings` сервер сам подбирает лицевой счёт/счётчик по квартире и виду услуги
 - `POST /api/meter_readings/bulk` — создаёт `MeterReadingDocument` и набор `MeterReading` за один запрос, автоподбор счётчика по квартире/виду услуги
 - `GET /api/meter_reading_documents/{id}/readings` — детализация показаний конкретного документа
-- `GET/POST/PATCH/DELETE /api/accrual_documents` — аналогичный жизненный цикл для документов начислений
+- `PUT /api/meter_reading_documents/{id}/full` — полное пересоздание документа показаний (редактирование)
+- `GET/POST/PATCH/DELETE /api/accrual_documents` — жизненный цикл документов начислений
+- `GET /api/accrual_documents/{id}/details` и `PUT /api/accrual_documents/{id}/full` — детализация и полное пересоздание строк документа начислений
 - `GET /api/accruals_register/calculate` и `POST /api/accruals_register/generate` — расчёт и сохранение начислений в регистр
+
+Регистр `accounts_register` закрыт для прямого создания/изменения/удаления (403) — записи формируются исключительно документами (платежи через SQLAlchemy `event` на `Transaction`, начисления через документы начислений).
 
 Протокол списков совместим с `@refinedev/simple-rest`: параметры `_start/_end/_sort/_order`, ответ — JSON-массив с заголовком `X-Total-Count`.
 
@@ -405,18 +420,17 @@ cd /opt/townhouse/frontend
 # Установка зависимостей
 npm install
 
-# Запуск dev-сервера
-npm start
+# Запуск dev-сервера (Vite)
+npm run dev
 
-# Сборка для продакшена
+# Сборка для продакшена (tsc + vite build)
 npm run build
 
 # Проверка TypeScript ошибок
-npx tsc --noEmit
-
-# Проверка линтером
-npm run lint
+npx tsc --noEmit -p tsconfig.app.json
 ```
+
+Примечание: скрипта `npm run lint` нет — ESLint не подключён как зависимость (в проекте есть только idle-конфиг `eslint.config.js`).
 
 ---
 
@@ -569,8 +583,8 @@ npm install
 ## 📊 Статистика проекта
 
 ### Файловая структура:
-- **Всего файлов:** 18
-- **Компонентов:** 10
+- **Всего файлов:** 21 (фронтенд `src/`) + бэкенд `backend/`
+- **Компонентов:** 11
 - **Конфигураций:** 4
 - **Типов:** 1
 - **Хуков:** 1
@@ -578,13 +592,13 @@ npm install
 ### Размеры ключевых файлов:
 | Файл | Строк | Назначение |
 |------|-------|------------|
-| App.tsx | ~50 | Главный компонент |
-| GenericList.tsx | ~450 | Универсальная страница |
-| RecordFormModal.tsx | ~80 | Модалка CRUD |
-| BulkReadingsModal.tsx | ~230 | Массовый ввод показаний с созданием документа |
-| AccrualsCalculationModal.tsx | ~200 | Расчет начислений |
+| App.tsx | ~70 | Главный компонент |
+| GenericList.tsx | ~520 | Универсальная страница |
+| RecordFormModal.tsx | ~140 | Модалка CRUD |
+| BulkReadingsModal.tsx | ~310 | Массовый ввод показаний + редактирование документа |
+| AccrualsCalculationModal.tsx | ~350 | Расчёт начислений + редактирование документа |
 | backend/models.py | ~380 | Модели СУБД (включая `MeterReadingDocument`) |
-| backend/app.py | ~800 | API: CRUD + bulk-эндпоинты для показаний/начислений |
+| backend/app.py | ~1720 | API: CRUD + bulk-эндпоинты для показаний/начислений |
 
 ---
 
@@ -603,3 +617,4 @@ npm install
 | Август 2026 | Обновлены соглашения по коду |
 | Август 2026 | Добавлен formatPrice в форматтеры |
 | Август 2026 | Разделение показаний и начислений на документы и регистры: добавлена модель/таблица `MeterReadingDocument`, `MeterReading` связан с документом через `document_id`, добавлен эндпоинт `POST /api/meter_readings/bulk` для массового ввода, обновлён GenericList/BulkReadingsModal/columns.ts/menu.ts, исправлена конфигурация nginx (префикс `/api/`) |
+| Август 2026 | Добавлено редактирование документов: `PUT /api/meter_reading_documents/{id}/full` и `PUT /api/accrual_documents/{id}/full` (полное пересоздание строк), `GET /api/accrual_documents/{id}/details`; серверный пересчёт сумм/потребления/тарифа при сохранении начислений; регистр `accounts_register` закрыт для прямой записи (403) |

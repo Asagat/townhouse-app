@@ -11,6 +11,8 @@ interface AccrualsCalculationModalProps {
     open: boolean;
     onClose: () => void;
     onSaved: () => void;
+    /** Если передан, модалка работает в режиме редактирования существующего документа */
+    documentId?: number;
 }
 
 const monthOptions = [
@@ -29,22 +31,29 @@ const monthOptions = [
 ];
 
 /**
- * Модальное окно для расчета и начисления коммунальных услуг
- * Оператор выбирает месяц/год, система рассчитывает предварительные строки
- * Оператор может выбрать строки для сохранения в регистр
+ * Модальное окно для расчета и начисления коммунальных услуг.
+ * Без documentId — режим создания: оператор выбирает месяц/год, система рассчитывает
+ * предварительные строки, оператор выбирает строки для сохранения в новый документ.
+ * С documentId — режим редактирования: подгружаются месяц/год и ранее выбранные строки
+ * существующего документа, при сохранении строки документа полностью пересоздаются.
  */
 export const AccrualsCalculationModal = ({
     open,
     onClose,
     onSaved,
+    documentId,
 }: AccrualsCalculationModalProps) => {
     const apiUrl = useApiUrl();
+    const isEditMode = documentId !== undefined;
     const now = dayjs();
     const [year, setYear] = useState<number>(now.year());
     const [month, setMonth] = useState<number>(now.month() + 1);
     const [rows, setRows] = useState<AccrualPreviewRow[]>([]);
     const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
     const [isSaving, setIsSaving] = useState(false);
+    const [pendingSelection, setPendingSelection] = useState<
+        Array<{ account_id: number; services_type_id: number }> | null
+    >(null);
 
     const { refetch, isFetching } = useCustom<{ rows: AccrualPreviewRow[] }>({
         url: `${apiUrl}/accruals_register/calculate`,
@@ -55,7 +64,22 @@ export const AccrualsCalculationModal = ({
             onSuccess: (response) => {
                 const data = response.data.rows ?? [];
                 setRows(data);
-                setSelectedKeys(data.map((row) => row.row_number));
+                if (pendingSelection) {
+                    // Восстанавливаем выбор строк, ранее сохранённых в редактируемом документе
+                    const keys = data
+                        .filter((row) =>
+                            pendingSelection.some(
+                                (sel) =>
+                                    sel.account_id === row.account_id &&
+                                    sel.services_type_id === row.services_type_id,
+                            ),
+                        )
+                        .map((row) => row.row_number);
+                    setSelectedKeys(keys);
+                    setPendingSelection(null);
+                } else {
+                    setSelectedKeys(data.map((row) => row.row_number));
+                }
             },
             onError: (err: any) =>
                 message.error(
@@ -64,17 +88,47 @@ export const AccrualsCalculationModal = ({
         },
     });
 
+    const { refetch: fetchDocumentDetails, isFetching: isLoadingDocument } = useCustom<{
+        year: number;
+        month: number;
+        selections: Array<{ account_id: number; services_type_id: number }>;
+    }>({
+        url: `${apiUrl}/accrual_documents/${documentId}/details`,
+        method: "get",
+        queryOptions: {
+            enabled: false,
+            onSuccess: (response) => {
+                const { year: docYear, month: docMonth, selections } = response.data;
+                setPendingSelection(selections ?? []);
+                setYear(docYear);
+                setMonth(docMonth);
+            },
+            onError: (err: any) =>
+                message.error(
+                    err?.response?.data?.detail ?? "Не удалось загрузить документ начислений",
+                ),
+        },
+    });
+
     const { mutate: generate, isLoading: saving } = useCustomMutation();
 
     useEffect(() => {
-        if (open) {
+        if (!open) return;
+
+        if (isEditMode) {
+            setRows([]);
+            setSelectedKeys([]);
+            fetchDocumentDetails();
+        } else {
             const n = dayjs();
             setYear(n.year());
             setMonth(n.month() + 1);
             setRows([]);
             setSelectedKeys([]);
+            setPendingSelection(null);
         }
-    }, [open]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, isEditMode, documentId]);
 
     useEffect(() => {
         if (open) {
@@ -83,7 +137,7 @@ export const AccrualsCalculationModal = ({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, year, month]);
 
-    const handleSave = async () => {
+    const handleSave = () => {
         const selectedRows = rows.filter((row) =>
             selectedKeys.includes(row.row_number),
         );
@@ -94,40 +148,57 @@ export const AccrualsCalculationModal = ({
 
         setIsSaving(true);
 
-        try {
-            // 1. Создаем документ начислений
-            const docResponse = await fetch(`${apiUrl}/accrual_documents`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    accrual_date: `${year}-${String(month).padStart(2, '0')}-01`
-                })
-            });
+        const selections = selectedRows.map((row) => ({
+            account_id: row.account_id,
+            services_type_id: row.services_type_id,
+        }));
 
-            if (!docResponse.ok) {
-                throw new Error("Не удалось создать документ начислений");
-            }
-
-            const docData = await docResponse.json();
-            const documentId = docData.id;
-            message.info(`Создан документ начислений №${documentId}`);
-
-            // 2. Сохраняем начисления с document_id
+        // Отправляем только идентификаторы выбранных строк — сумма, потребление, тариф и показания
+        // будут пересчитаны на сервере на момент сохранения.
+        if (isEditMode) {
             generate(
                 {
-                    url: `${apiUrl}/accruals_register/generate`,
-                    method: "post",
+                    url: `${apiUrl}/accrual_documents/${documentId}/full`,
+                    method: "put",
                     values: {
-                        year,
-                        month,
-                        document_id: documentId,
-                        rows: selectedRows,
+                        accrual_date: `${year}-${String(month).padStart(2, "0")}-01`,
+                        selections,
                     },
                 },
                 {
                     onSuccess: (response) => {
-                        const created = (response.data as any).created?.length ?? 0;
-                        message.success(`Начислено записей: ${created}`);
+                        const data = response.data as any;
+                        const updated = data.updated?.length ?? 0;
+                        message.success(`Документ начислений обновлён, записей: ${updated}`);
+                        onSaved();
+                        onClose();
+                        setIsSaving(false);
+                    },
+                    onError: (err: any) => {
+                        message.error(
+                            err?.response?.data?.detail ?? "Не удалось обновить начисления",
+                        );
+                        setIsSaving(false);
+                    },
+                },
+            );
+        } else {
+            generate(
+                {
+                    url: `${apiUrl}/accruals_register/generate`,
+                    method: "post",
+                    values: { year, month, selections },
+                },
+                {
+                    onSuccess: (response) => {
+                        const data = response.data as any;
+                        const created = data.created?.length ?? 0;
+                        const newDocumentId = data.document?.id;
+                        message.success(
+                            newDocumentId
+                                ? `Создан документ начислений №${newDocumentId}, начислено записей: ${created}`
+                                : `Начислено записей: ${created}`,
+                        );
                         onSaved();
                         onClose();
                         setIsSaving(false);
@@ -140,9 +211,6 @@ export const AccrualsCalculationModal = ({
                     },
                 },
             );
-        } catch (error) {
-            message.error("Не удалось создать документ начислений");
-            setIsSaving(false);
         }
     };
 
@@ -221,7 +289,7 @@ export const AccrualsCalculationModal = ({
 
     return (
         <Modal
-            title="Начисление сумм по коммунальным услугам"
+            title={isEditMode ? "Редактирование документа начислений" : "Начисление сумм по коммунальным услугам"}
             open={open}
             onCancel={onClose}
             width={1100}
@@ -237,7 +305,9 @@ export const AccrualsCalculationModal = ({
                     disabled={selectedKeys.length === 0}
                     onClick={handleSave}
                 >
-                    Начислить выбранные ({selectedKeys.length})
+                    {isEditMode
+                        ? `Сохранить изменения (${selectedKeys.length})`
+                        : `Начислить выбранные (${selectedKeys.length})`}
                 </Button>,
             ]}
         >
@@ -267,7 +337,7 @@ export const AccrualsCalculationModal = ({
                 rowKey="row_number"
                 dataSource={rows}
                 columns={columns}
-                loading={isFetching}
+                loading={isFetching || isLoadingDocument}
                 pagination={false}
                 size="small"
                 scroll={{ y: 450 }}

@@ -18,7 +18,7 @@ export const categories: Category[] = [
             },
             {
               key: 'meter_reading_documents',
-              label: 'Документы показаний',
+              label: 'Показания',
               icon: 'fa-solid fa-file-pen',
             },
         ],

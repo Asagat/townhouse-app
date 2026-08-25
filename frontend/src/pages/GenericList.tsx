@@ -154,11 +154,14 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
 
     const [modalState, setModalState] = useState<ModalState | null>(null);
     const [bulkModalOpen, setBulkModalOpen] = useState(false);
+    const [editingMeterReadingDocumentId, setEditingMeterReadingDocumentId] = useState<number | undefined>(undefined);
     const [accrualsModalOpen, setAccrualsModalOpen] = useState(false);
+    const [editingAccrualDocumentId, setEditingAccrualDocumentId] = useState<number | undefined>(undefined);
 
     const isAccrualsRegister = resourceName === "accruals_register";
     const isAccrualDocuments = resourceName === "accrual_documents";
     const isMeterReadingDocuments = resourceName === "meter_reading_documents";
+    const isMeterReadings = resourceName === "meter_readings";
     const isReadOnly = resourceName === "accounts_register";
 
     const columns = getColumnsForResource(resourceName);
@@ -262,38 +265,12 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             width: 200,
             fixed: 'right' as const,
             render: (_: unknown, record: any) => {
-                if (isAccrualsRegister) {
+                // Регистры (автоматически формируются документами) — без возможности прямого редактирования/удаления записи
+                if (isAccrualsRegister || isMeterReadings) {
                     return (
-                        <Space>
-                            <Button
-                                size="small"
-                                onClick={() => setModalState({ mode: "edit", record })}
-                            >
-                                Редактировать
-                            </Button>
-                            <Popconfirm
-                                title="Удалить запись?"
-                                okText="Удалить"
-                                cancelText="Отмена"
-                                onConfirm={() =>
-                                    deleteRecord(
-                                        { resource: resourceName, id: record.id },
-                                        {
-                                            onSuccess: () => message.success("Запись удалена"),
-                                            onError: (err: any) =>
-                                                message.error(
-                                                    err?.response?.data?.detail ??
-                                                        "Не удалось удалить запись",
-                                                ),
-                                        },
-                                    )
-                                }
-                            >
-                                <Button size="small" danger>
-                                    Удалить
-                                </Button>
-                            </Popconfirm>
-                        </Space>
+                        <span style={{ color: "#999", fontSize: "12px" }}>
+                            Изменяется через документ
+                        </span>
                     );
                 }
 
@@ -302,7 +279,10 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         <Space>
                             <Button
                                 size="small"
-                                onClick={() => setModalState({ mode: "edit", record })}
+                                onClick={() => {
+                                    setEditingAccrualDocumentId(record.id);
+                                    setAccrualsModalOpen(true);
+                                }}
                             >
                                 Редактировать
                             </Button>
@@ -337,31 +317,42 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
 
                 if (isMeterReadingDocuments) {
                     return (
-                        <Popconfirm
-                            title="Удалить документ показаний? Все связанные показания также будут удалены."
-                            okText="Удалить"
-                            cancelText="Отмена"
-                            onConfirm={() =>
-                                deleteRecord(
-                                    { resource: resourceName, id: record.id },
-                                    {
-                                        onSuccess: () => {
-                                            message.success("Документ показаний удален");
-                                            tableQuery.refetch();
-                                        },
-                                        onError: (err: any) =>
-                                            message.error(
-                                                err?.response?.data?.detail ??
-                                                    "Не удалось удалить документ",
-                                            ),
-                                    },
-                                )
-                            }
-                        >
-                            <Button size="small" danger>
-                                Удалить
+                        <Space>
+                            <Button
+                                size="small"
+                                onClick={() => {
+                                    setEditingMeterReadingDocumentId(record.id);
+                                    setBulkModalOpen(true);
+                                }}
+                            >
+                                Редактировать
                             </Button>
-                        </Popconfirm>
+                            <Popconfirm
+                                title="Удалить документ показаний? Все связанные показания также будут удалены."
+                                okText="Удалить"
+                                cancelText="Отмена"
+                                onConfirm={() =>
+                                    deleteRecord(
+                                        { resource: resourceName, id: record.id },
+                                        {
+                                            onSuccess: () => {
+                                                message.success("Документ показаний удален");
+                                                tableQuery.refetch();
+                                            },
+                                            onError: (err: any) =>
+                                                message.error(
+                                                    err?.response?.data?.detail ??
+                                                        "Не удалось удалить документ",
+                                            ),
+                                        },
+                                    )
+                                }
+                            >
+                                <Button size="small" danger>
+                                    Удалить
+                                </Button>
+                            </Popconfirm>
+                        </Space>
                     );
                 }
 
@@ -428,22 +419,31 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     {meta?.label ?? resourceName}
                 </h1>
                 <Space>
-                    {resourceName === "meter_reading_documents" && (
-                        <Button onClick={() => setBulkModalOpen(true)}>
-                            Массовый ввод показаний
+                    {isMeterReadingDocuments && (
+                        <Button
+                            type="primary"
+                            onClick={() => {
+                                setEditingMeterReadingDocumentId(undefined);
+                                setBulkModalOpen(true);
+                            }}
+                        >
+                            Добавить
                         </Button>
                     )}
 
                     {isAccrualDocuments && (
                         <Button
                             type="primary"
-                            onClick={() => setAccrualsModalOpen(true)}
+                            onClick={() => {
+                                setEditingAccrualDocumentId(undefined);
+                                setAccrualsModalOpen(true);
+                            }}
                         >
                             Добавить
                         </Button>
                     )}
 
-                    {!isReadOnly && !isAccrualsRegister && !isAccrualDocuments && !isMeterReadingDocuments && (
+                    {!isReadOnly && !isAccrualsRegister && !isAccrualDocuments && !isMeterReadingDocuments && !isMeterReadings && (
                         <Button
                             type="primary"
                             disabled={metaLoading}
@@ -490,10 +490,14 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 />
             )}
 
-            {resourceName === "meter_reading_documents" && (
+            {isMeterReadingDocuments && (
                 <BulkReadingsModal
                     open={bulkModalOpen}
-                    onClose={() => setBulkModalOpen(false)}
+                    documentId={editingMeterReadingDocumentId}
+                    onClose={() => {
+                        setBulkModalOpen(false);
+                        setEditingMeterReadingDocumentId(undefined);
+                    }}
                     onSaved={() => tableQuery.refetch()}
                 />
             )}
@@ -501,7 +505,11 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             {isAccrualDocuments && (
                 <AccrualsCalculationModal
                     open={accrualsModalOpen}
-                    onClose={() => setAccrualsModalOpen(false)}
+                    documentId={editingAccrualDocumentId}
+                    onClose={() => {
+                        setAccrualsModalOpen(false);
+                        setEditingAccrualDocumentId(undefined);
+                    }}
                     onSaved={() => tableQuery.refetch()}
                 />
             )}

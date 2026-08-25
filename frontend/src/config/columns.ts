@@ -29,7 +29,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'account_name', label: 'Наименование' },
         { key: 'is_active', label: 'Активен', format: formatBool },
         { key: 'apartment.apartment_number', label: '№ квартиры' },
-        { key: 'apartment.address', label: 'Адрес квартиры' },
+        { key: 'apartment.owner.full_name', label: 'Собственник' },
     ],
 
     cash_points: [
@@ -60,7 +60,6 @@ export const columnsConfig: Record<string, Column[]> = {
     ],
 
     accrual_documents: [
-        { key: 'id', label: 'ID' },
         { key: 'accrual_date', label: 'Дата начисления', format: formatDate },
         { key: 'created_at', label: 'Дата создания', format: formatDateTime },
         { key: 'accruals_count', label: 'Количество записей' },
@@ -118,7 +117,6 @@ export const columnsConfig: Record<string, Column[]> = {
     ],
 
     meter_reading_documents: [
-        { key: 'id', label: 'ID' },
         { key: 'title', label: 'Название' },
         { key: 'reading_date', label: 'Дата показаний', format: formatDate },
         { key: 'services_type.services_type', label: 'Вид услуги' },

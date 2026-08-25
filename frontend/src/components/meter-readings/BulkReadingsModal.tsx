@@ -13,26 +13,42 @@ import {
     message,
 } from "antd";
 import dayjs, { Dayjs } from "dayjs";
-import { useList, useApiUrl, useCustomMutation } from "@refinedev/core";
+import { useList, useApiUrl, useCustom, useCustomMutation } from "@refinedev/core";
 import { DATE_FORMAT } from "../../config/formatters";
 
 interface BulkReadingsModalProps {
     open: boolean;
     onClose: () => void;
     onSaved: () => void;
+    /** Если передан, модалка работает в режиме редактирования существующего документа показаний */
+    documentId?: number;
 }
 
+const MONTH_NAMES_NOMINATIVE = [
+    "январь", "февраль", "март", "апрель", "май", "июнь",
+    "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+];
+
+const getDefaultTitle = (date: Dayjs): string =>
+    `Снятие показаний за ${MONTH_NAMES_NOMINATIVE[date.month()]} ${date.year()}`;
+
+const DEFAULT_SERVICE_TYPE_LABEL = "Электричество";
+
 /**
- * Модальное окно для массового ввода показаний счетчиков
- * Оператор задаёт название документа, выбирает вид услуги и дату,
- * затем вводит показания для каждой квартиры
+ * Модальное окно для массового ввода показаний счетчиков.
+ * Без documentId — режим создания: оператор задаёт название документа, вид услуги и дату,
+ * затем вводит показания для каждой квартиры, создаётся новый документ.
+ * С documentId — режим редактирования: подгружаются данные существующего документа
+ * и его показания, при сохранении документ и его показания полностью пересоздаются.
  */
 export const BulkReadingsModal = ({
     open,
     onClose,
     onSaved,
+    documentId,
 }: BulkReadingsModalProps) => {
     const apiUrl = useApiUrl();
+    const isEditMode = documentId !== undefined;
     const { data: apartmentsData, isLoading: apartmentsLoading } = useList({
         resource: "apartments",
         pagination: { mode: "off" },
@@ -54,15 +70,64 @@ export const BulkReadingsModal = ({
 
     const { mutate: bulkCreate, isLoading: saving } = useCustomMutation();
 
+    const { refetch: fetchDocument, isFetching: isLoadingDocument } = useCustom<{
+        document: any;
+        readings: any[];
+    }>({
+        url: `${apiUrl}/meter_reading_documents/${documentId}/readings`,
+        method: "get",
+        queryOptions: {
+            enabled: false,
+            onSuccess: (response) => {
+                const { document, readings: existingReadings } = response.data;
+                setTitle(document.title ?? "");
+                setReadingDate(document.reading_date ? dayjs(document.reading_date) : dayjs());
+                setServiceTypeId(document.services_type_id ?? undefined);
+
+                const readingsMap: Record<number, string> = {};
+                (existingReadings ?? []).forEach((r: any) => {
+                    if (r.apartment_id != null) {
+                        readingsMap[r.apartment_id] = String(r.reading);
+                    }
+                });
+                setReadings(readingsMap);
+                setRowErrors({});
+            },
+            onError: (err: any) =>
+                message.error(
+                    err?.response?.data?.detail ?? "Не удалось загрузить документ показаний",
+                ),
+        },
+    });
+
     useEffect(() => {
-        if (open) {
-            setTitle("");
+        if (!open) return;
+
+        if (isEditMode) {
+            fetchDocument();
+        } else {
+            const now = dayjs();
+            setTitle(getDefaultTitle(now));
             setServiceTypeId(undefined);
-            setReadingDate(dayjs());
+            setReadingDate(now);
             setReadings({});
             setRowErrors({});
         }
-    }, [open]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, isEditMode, documentId]);
+
+    // Подставляем вид услуги по умолчанию (Электричество) в режиме создания, как только справочник загрузится
+    useEffect(() => {
+        if (open && !isEditMode && serviceTypeId === undefined && serviceTypes.length > 0) {
+            const defaultServiceType = serviceTypes.find(
+                (s: any) => s.services_type === DEFAULT_SERVICE_TYPE_LABEL,
+            );
+            if (defaultServiceType) {
+                setServiceTypeId(Number(defaultServiceType.id));
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, isEditMode, serviceTypes]);
 
     const handleSave = () => {
         if (!title.trim()) {
@@ -86,10 +151,14 @@ export const BulkReadingsModal = ({
             return;
         }
 
+        const url = isEditMode
+            ? `${apiUrl}/meter_reading_documents/${documentId}/full`
+            : `${apiUrl}/meter_readings/bulk`;
+
         bulkCreate(
             {
-                url: `${apiUrl}/meter_readings/bulk`,
-                method: "post",
+                url,
+                method: isEditMode ? "put" : "post",
                 values: {
                     title,
                     services_type_id: serviceTypeId,
@@ -106,11 +175,15 @@ export const BulkReadingsModal = ({
                     });
                     setRowErrors(newRowErrors);
 
-                    const createdCount = result.created?.length ?? 0;
+                    const savedCount = (result.created ?? result.updated)?.length ?? 0;
                     const errorCount = result.errors?.length ?? 0;
 
-                    if (createdCount > 0) {
-                        message.success(`Сохранено показаний: ${createdCount}`);
+                    if (savedCount > 0) {
+                        message.success(
+                            isEditMode
+                                ? `Документ обновлён, показаний: ${savedCount}`
+                                : `Сохранено показаний: ${savedCount}`,
+                        );
                         onSaved();
                     }
                     if (errorCount > 0) {
@@ -177,7 +250,7 @@ export const BulkReadingsModal = ({
 
     return (
         <Modal
-            title="Массовый ввод показаний"
+            title={isEditMode ? "Редактирование документа показаний" : "Массовый ввод показаний"}
             open={open}
             onCancel={onClose}
             width={800}
@@ -229,7 +302,7 @@ export const BulkReadingsModal = ({
                 rowKey="id"
                 dataSource={apartments}
                 columns={columns}
-                loading={apartmentsLoading}
+                loading={apartmentsLoading || isLoadingDocument}
                 pagination={false}
                 size="small"
                 scroll={{ y: 400 }}
