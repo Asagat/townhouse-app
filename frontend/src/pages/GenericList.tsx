@@ -20,12 +20,9 @@ import type { FieldMeta, ModalState } from "../types";
 import { getColumnsForResource } from "../config/columns";
 import { allResources } from "../config/menu";
 import { RecordFormModal } from "../components/common/RecordFormModal";
-import { ColumnHeader } from "../components/common/ColumnHeader";
-import { useColumnWidths } from "../hooks/useColumnConfig";
 import { BulkReadingsModal } from "../components/meter-readings/BulkReadingsModal";
 import { AccrualsCalculationModal } from "../components/accruals/AccrualsCalculationModal";
 import type { SortOrder } from "antd/es/table/interface";
-import type { MouseEvent } from "react";
 
 interface GenericListProps {
     resourceName: string;
@@ -173,30 +170,6 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const columns = getColumnsForResource(resourceName);
     const meta = allResources.find((r) => r.key === resourceName);
 
-    // Настройка колонок: ширины (сохраняется в localStorage на ресурс)
-    const { getWidth, setColumnWidth } = useColumnWidths(resourceName);
-
-    // ---- Изменение ширины колонки (ресайз) ----
-    const resizeStart = (e: MouseEvent, colKey: string) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const startX = e.clientX;
-        const startWidth = document
-            .querySelector<HTMLElement>(`[data-col-key="${colKey}"]`)?.getBoundingClientRect().width
-            ?? getWidth(colKey);
-        const onMove = (ev: globalThis.MouseEvent) => {
-            setColumnWidth(colKey, startWidth + (ev.clientX - startX));
-        };
-        const onUp = () => {
-            document.removeEventListener("mousemove", onMove);
-            document.removeEventListener("mouseup", onUp);
-            document.body.style.cursor = "";
-        };
-        document.addEventListener("mousemove", onMove);
-        document.addEventListener("mouseup", onUp);
-        document.body.style.cursor = "col-resize";
-    };
-
     const getColumnSortOrder = (dataIndex: string): SortOrder | undefined => {
         if (!isSortableField(dataIndex)) return undefined;
         const sortField = getSortField(dataIndex);
@@ -268,15 +241,9 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             const sortable = isSortableField(col.key);
             const isNested = col.key.includes('.');
             return {
-                title: (
-                    <ColumnHeader
-                        label={col.label}
-                        onResizeStart={(e) => resizeStart(e, col.key)}
-                    />
-                ),
+                title: col.label,
                 dataIndex: col.key,
                 key: col.key,
-                width: getWidth(col.key),
                 render: (value: any, record: any) => {
                     try {
                         const val = isNested ? getValueByPath(record, col.key) : value;
@@ -287,9 +254,11 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 },
                 sorter: sortable,
                 sortOrder: getColumnSortOrder(col.key),
-                onHeaderCell: () => ({
-                    'data-col-key': col.key,
-                    style: { cursor: sortable ? 'pointer' : 'default' },
+                ...(sortable && {
+                    onHeaderCell: () => ({
+                        style: { cursor: 'pointer' },
+                        title: 'Кликните для сортировки',
+                    }),
                 }),
             };
         }),
