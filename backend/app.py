@@ -1620,7 +1620,32 @@ def get_list(
 
     if _sort:
         order_func = desc if (_order or "").lower() == "desc" else asc
-        if hasattr(model, _sort):
+
+        if _sort == "document_title":
+            # document_title — расчётное поле сериализатора; сортируем по названию
+            # документа-источника через подзапросы.
+            if resource == "accruals_register":
+                query = query.order_by(
+                    order_func(
+                        text("""(SELECT ad.title FROM accrual_documents ad
+                                  WHERE ad.id = accruals_register.accrual_document_id)""")
+                    )
+                )
+            elif resource == "accounts_register":
+                query = query.order_by(
+                    order_func(
+                        text("""(
+                            COALESCE(
+                                (SELECT ad.title FROM accrual_documents ad
+                                 WHERE ad.id = (SELECT arx.accrual_document_id FROM accruals_register arx
+                                                WHERE arx.id = accounts_register.accrual_id)),
+                                (SELECT t.title FROM transactions t
+                                 WHERE t.id = accounts_register.transaction_id)
+                            )
+                        )""")
+                    )
+                )
+        elif hasattr(model, _sort):
             query = query.order_by(order_func(getattr(model, _sort)))
         elif hasattr(model, "id"):
             query = query.order_by(order_func(model.id))

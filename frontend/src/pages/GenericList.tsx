@@ -78,6 +78,7 @@ const sortMapping: Record<string, string> = {
     'tariff_type_id_label': 'tariff_type.name',
     'document.title': 'document.title',
     'document_id_label': 'document.title',
+    'document_title': 'document_title',
 
     // Поля начислений и документов
     'accrual_date': 'accrual_date',
