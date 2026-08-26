@@ -26,16 +26,17 @@ a {
 }
 
 /* Фон закреплённых колонок таблицы (например, «Действия») —
-   приводим к зелёному тону шапки и белому телу, вместо серой подложки antd */
-.ant-table-cell-fix-right,
-.ant-table-cell-fix-left {
-  background-clip: padding-box;
-}
+   шапка в зелёном тоне, строки наследуют фон от строки таблицы,
+   включая подсветку при наведении */
 .ant-table-thead .ant-table-cell-fix-right,
 .ant-table-thead .ant-table-cell-fix-left {
   background: #e3f3e6 !important;
 }
 .ant-table-tbody .ant-table-cell-fix-right,
 .ant-table-tbody .ant-table-cell-fix-left {
-  background: #ffffff !important;
+  background: transparent !important;
+}
+.ant-table-tbody > tr:hover > .ant-table-cell-fix-right,
+.ant-table-tbody > tr:hover > .ant-table-cell-fix-left {
+  background: rgba(34, 174, 46, 0.08) !important;
 }
