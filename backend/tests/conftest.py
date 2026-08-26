@@ -94,11 +94,14 @@ def account_factory(db):
         account_id = rec["account_id"]
         db.execute(text("DELETE FROM cash_register WHERE account_id = :a"), {"a": account_id})
         db.execute(text("DELETE FROM accounts_register WHERE account_id = :a"), {"a": account_id})
+        db.execute(text("DELETE FROM accruals_register WHERE account_id = :a"), {"a": account_id})
         db.execute(text("DELETE FROM transactions WHERE account_id = :a"), {"a": account_id})
         db.execute(text("DELETE FROM accounts WHERE id = :a"), {"a": account_id})
         db.execute(text("DELETE FROM apartments WHERE id = :a"), {"a": rec["apartment_id"]})
         db.execute(text("DELETE FROM owners WHERE id = :a"), {"a": rec["owner_id"]})
         db.execute(text("DELETE FROM cash_points WHERE id = :a"), {"a": rec["cash_point_id"]})
+    # Удаляем тестовые документы начислений, не привязанные к реальным данным.
+    db.execute(text("DELETE FROM accrual_documents WHERE title = 'test accruals'"))
     db.commit()
 
 

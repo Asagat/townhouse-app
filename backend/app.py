@@ -55,7 +55,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, asc, text
 
 import receipt_config as rc
-from writeoffs import calculate_write_offs
+from writeoffs import calculate_write_offs, rebuild_accounts_register, check_register_integrity
 
 # Инициализация основного приложения
 app = FastAPI(title="Townhouse ERP System")
@@ -1968,6 +1968,49 @@ def run_write_offs(
         raise HTTPException(status_code=409, detail=f"Не удалось выполнить списание: {str(exc)}")
 
     return result
+
+
+@api_router.post("/maintenance/rebuild_registers", status_code=201)
+def rebuild_registers(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Полный пересбор производного среза (accounts_register) «с нуля» из первичных
+    регистров (accruals_register + cash_register). Служебная операция для
+    восстановления согласованности после импорта/правок данных и после
+    «не прошедшего» списания.
+
+    Опциональный account_ids — ограничить пересбор конкретными счетами;
+    если не передан — все активные. После пересбора возвращает аудит целостности
+    по затронутым счетам.
+    """
+    raw_ids = payload.get("account_ids")
+    if raw_ids is None:
+        account_ids = None
+    elif isinstance(raw_ids, list):
+        account_ids = [int(x) for x in raw_ids]
+    else:
+        raise HTTPException(status_code=422, detail="Поле 'account_ids' должно быть списком или отсутствовать")
+
+    try:
+        rebuild = rebuild_accounts_register(db, account_ids)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Ошибка пересбора регистров")
+        raise HTTPException(status_code=409, detail=f"Не удалось пересобрать регистры: {str(exc)}")
+
+    # Аудит целостности по затронутым счетам.
+    audit = []
+    for rec in rebuild["processed"]:
+        audit.append(check_register_integrity(db, rec["account_id"]))
+
+    return {
+        "rebuilt": rebuild["processed"],
+        "integrity": audit,
+        "all_consistent": all(a["consistent"] for a in audit),
+    }
 
 
 # --- ОТЧЁТ ПО ЛИЦЕВОМУ СЧЁТУ ---

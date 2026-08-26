@@ -10,11 +10,20 @@
   - Фаза 4: отчёт по лицевому счёту (начислено/оплачено/долг/переплата).
 """
 
-from models import Account, AccountsRegister, CashRegister, Transaction, TransactionTypeEnum
+from models import (
+    Account,
+    AccountsRegister,
+    AccrualDocument,
+    AccrualsRegister,
+    CashRegister,
+    Transaction,
+    TransactionTypeEnum,
+)
 from sqlalchemy import text
+from datetime import date
 
-from writeoffs import calculate_write_offs
-from app import build_account_statement
+from writeoffs import calculate_write_offs, rebuild_accounts_register, check_register_integrity
+from app import build_account_statement, create_accounts_register_entries_for_accruals
 
 
 def _count(db, table: str, account_id: int) -> int:
@@ -31,6 +40,34 @@ def _accrual(db, account_id: int, svc_id: int, amount):
              "VALUES (:a, :s, :amt, 0, 0)"),
         {"a": account_id, "s": svc_id, "amt": amount},
     )
+
+
+def _real_accrual(db, account_id: int, svc_id: int, amount):
+    """Создаёт начисление по реальному пути: документ + accruals_register, затем
+    запись в accounts_register. Нужно для тестов, зависящих от воссоздания среза
+    (rebuild читает начисления из accruals_register)."""
+    doc = db.query(AccrualDocument).order_by(AccrualDocument.id).first()
+    if doc is None:
+        doc = AccrualDocument(accrual_date=date(2026, 9, 1), title="test accruals")
+        db.add(doc)
+        db.flush()
+    tariff_id = db.execute(text("SELECT id FROM tariffs WHERE services_type_id = :s LIMIT 1"), {"s": svc_id}).scalar()
+    if tariff_id is None:
+        tariff_id = db.execute(text("SELECT id FROM tariffs ORDER BY id LIMIT 1")).scalar()
+    ar = AccrualsRegister(
+        accrual_document_id=doc.id,
+        accrual_date=doc.accrual_date,
+        account_id=account_id,
+        tariff_id=tariff_id,
+        services_type_id=svc_id,
+        consumption=0,
+        amount=amount,
+    )
+    db.add(ar)
+    db.flush()
+    db.commit()
+    create_accounts_register_entries_for_accruals(db, [ar])
+    db.commit()
 
 
 def _payment(db, account_id: int, cash_point_id: int, amount) -> int:
@@ -219,3 +256,72 @@ def test_account_statement_partial_debt(db, account_factory):
     assert m["debt_total"] == 500.0
     s = stmt["services"][0]
     assert s["accrued"] == 800.0 and s["paid"] == 300.0 and s["debt"] == 500.0
+
+
+# --- Пункт 3.3: пересоздание производного среза и аудит целостности ---
+
+
+def test_rebuild_accounts_register_restores_consistency(db, account_factory):
+    rec = account_factory("rb0")
+    _real_accrual(db, rec["account_id"], 1, 1000)
+    _payment(db, rec["account_id"], rec["cash_point_id"], 600)
+
+    calculate_write_offs(db, [rec["account_id"]])
+    db.commit()
+
+    # Согласовано после списания.
+    assert check_register_integrity(db, rec["account_id"])["consistent"] is True
+
+    # Портим срез: добавляем «лишнее» начисление и удаляем оправданное списание.
+    db.execute(text("INSERT INTO accounts_register (account_id, services_type_id, income, expense, balance_after) "
+                    "VALUES (:a, 1, 999, 0, 0)"), {"a": rec["account_id"]})
+    db.execute(text("DELETE FROM accounts_register WHERE account_id=:a AND expense > 0"), {"a": rec["account_id"]})
+    db.commit()
+
+    inconsistent = check_register_integrity(db, rec["account_id"])
+    assert inconsistent["consistent"] is False
+
+    # Пересбор среза восстанавливает согласованность «с нуля».
+    rebuild_accounts_register(db, [rec["account_id"]])
+    db.commit()
+
+    consistent = check_register_integrity(db, rec["account_id"])
+    assert consistent["consistent"] is True
+    assert consistent["accrued_settlement"] == 1000.0  # ровно как в accruals_register
+    assert consistent["written_off"] == 600.0
+
+
+def test_rebuild_is_deterministic(db, account_factory):
+    rec = account_factory("rb1")
+    _real_accrual(db, rec["account_id"], 1, 1200)
+    _real_accrual(db, rec["account_id"], 3, 300)
+    _payment(db, rec["account_id"], rec["cash_point_id"], 900)
+    db.commit()
+
+    def _state(account_id):
+        return db.execute(
+            text("SELECT services_type_id, income, expense FROM accounts_register "
+                 "WHERE account_id=:a ORDER BY services_type_id NULLS LAST, income DESC"),
+            {"a": account_id},
+        ).fetchall()
+
+    rebuild_accounts_register(db, [rec["account_id"]])
+    db.commit()
+    first = _state(rec["account_id"])
+    first_balance = db.execute(
+        text("SELECT balance_after FROM accounts_register WHERE account_id=:a ORDER BY operation_date DESC, id DESC LIMIT 1"),
+        {"a": rec["account_id"]},
+    ).scalar()
+
+    rebuild_accounts_register(db, [rec["account_id"]])
+    db.commit()
+    second = _state(rec["account_id"])
+    second_balance = db.execute(
+        text("SELECT balance_after FROM accounts_register WHERE account_id=:a ORDER BY operation_date DESC, id DESC LIMIT 1"),
+        {"a": rec["account_id"]},
+    ).scalar()
+
+    assert first == second
+    assert float(first_balance) == float(second_balance)
+    # Долг = начислено 1500 - списано 900 = 600 (положительный = долг).
+    assert float(first_balance) == 600.0
