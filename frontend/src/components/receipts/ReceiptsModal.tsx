@@ -12,6 +12,7 @@ import {
 } from "antd";
 import dayjs from "dayjs";
 import { useApiUrl, useCustomMutation } from "@refinedev/core";
+import { authedFetch } from "../../auth/http";
 
 interface ReceiptsModalProps {
     open: boolean;
@@ -94,7 +95,7 @@ export const ReceiptsModal = ({ open, onClose, onSaved }: ReceiptsModalProps) =>
     const handleDownloadAll = async () => {
         setDownloading(true);
         try {
-            const resp = await fetch(`${apiUrl}/receipt_documents/bulk_pdf`, {
+            const resp = await authedFetch(`${apiUrl}/receipt_documents/bulk_pdf`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ year, month }),
@@ -130,7 +131,7 @@ export const ReceiptsModal = ({ open, onClose, onSaved }: ReceiptsModalProps) =>
     const handleDeleteAll = async () => {
         setDeleting(true);
         try {
-            const resp = await fetch(
+            const resp = await authedFetch(
                 `${apiUrl}/receipt_documents/bulk_delete?year=${year}&month=${month}`,
                 { method: "DELETE" },
             );

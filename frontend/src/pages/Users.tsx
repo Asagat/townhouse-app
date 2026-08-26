@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { Table, Button, Space, Modal, Form, Input, Select, Switch, Popconfirm, message, Tag } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import { http } from "../auth/http";
+import { http, apiUrl } from "../auth/http";
 
 interface UserRow {
     id: number;
@@ -41,7 +41,7 @@ export const Users = () => {
     const load = async () => {
         setLoading(true);
         try {
-            const res = await http.get<UserRow[]>("/auth/users");
+            const res = await http.get<UserRow[]>(`${apiUrl}/auth/users`);
             setRows(res.data);
         } catch (e: any) {
             message.error(e?.response?.data?.detail ?? "Не удалось загрузить пользователей");
@@ -76,10 +76,10 @@ export const Users = () => {
         const values = await form.validateFields();
         try {
             if (editing) {
-                await http.patch(`/auth/users/${editing.id}`, values);
+                await http.patch(`${apiUrl}/auth/users/${editing.id}`, values);
                 message.success("Пользователь обновлён");
             } else {
-                await http.post("/auth/users", values);
+                await http.post(`${apiUrl}/auth/users`, values);
                 message.success("Пользователь создан");
             }
             setModalOpen(false);
@@ -91,7 +91,7 @@ export const Users = () => {
 
     const handleDelete = async (row: UserRow) => {
         try {
-            await http.delete(`/auth/users/${row.id}`);
+            await http.delete(`${apiUrl}/auth/users/${row.id}`);
             message.success("Пользователь удалён");
             load();
         } catch (e: any) {

@@ -1,5 +1,7 @@
 // src/auth/http.ts
-// Axios-инстанс, который добавляет JWT в Authorization для всех запросов к API.
+// Axios-инстанс (без baseURL), который добавляет JWT в Authorization.
+// Refine-dataProvider и useCustom передают ПОЛНЫЙ путь (/api/...), поэтому
+// baseURL здесь не ставим — иначе получилось бы двойное /api/api.
 
 import axios from "axios";
 import type { AxiosError } from "axios";
@@ -7,7 +9,7 @@ import { clearToken, getToken } from "./token";
 
 export const apiUrl = "/api";
 
-export const http = axios.create({ baseURL: apiUrl });
+export const http = axios.create();
 
 http.interceptors.request.use((config) => {
     const token = getToken();
@@ -29,3 +31,16 @@ http.interceptors.response.use(
         return Promise.reject(error);
     },
 );
+
+// Авторизованный вариант fetch (добавляет Bearer-токен) для прямых вызовов API.
+export const authedFetch = (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
+    const token = getToken();
+    const headers = new Headers(init.headers ?? {});
+    if (token) {
+        headers.set("Authorization", `Bearer ${token}`);
+    }
+    if (init.body && !headers.has("Content-Type")) {
+        headers.set("Content-Type", "application/json");
+    }
+    return fetch(input, { ...init, headers });
+};

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Modal, Button, Spin, Table } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useApiUrl } from "@refinedev/core";
+import { authedFetch } from "../../auth/http";
 
 interface ReceiptItemData {
     id: number;
@@ -124,7 +125,7 @@ export const ReceiptViewModal = ({
         setError(null);
         setDoc(null);
         setItems([]);
-        fetch(`${apiUrl}/receipt_documents/${receiptId}/items`)
+        authedFetch(`${apiUrl}/receipt_documents/${receiptId}/items`)
             .then(async (resp) => {
                 if (!resp.ok) {
                     let detail = "Не удалось загрузить квитанцию";
