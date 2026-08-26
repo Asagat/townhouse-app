@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import zipfile
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
@@ -1888,6 +1889,61 @@ def get_receipt_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
     )
+
+
+@api_router.post("/receipt_documents/bulk_pdf")
+def bulk_receipt_pdf(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+):
+    """Массово скачивает квитанции за период одним ZIP-архивом."""
+    year = payload.get("year")
+    month = payload.get("month")
+    if year in (None, "") or month in (None, ""):
+        raise HTTPException(status_code=422, detail="Укажите месяц и год")
+    year = int(year)
+    month = int(month)
+
+    receipts = (
+        db.query(ReceiptDocument)
+        .options(joinedload(ReceiptDocument.items))
+        .filter(ReceiptDocument.period_year == year, ReceiptDocument.period_month == month)
+        .all()
+    )
+    if not receipts:
+        raise HTTPException(status_code=404, detail="Квитанции за выбранный период не найдены")
+
+    bio = io.BytesIO()
+    with zipfile.ZipFile(bio, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for rec in receipts:
+            pdf = build_receipt_pdf(rec)
+            fname = f"Квитанция_{rec.apartment_number}_{rec.period_month:02d}.{rec.period_year}.pdf"
+            # безопасное имя в архиве
+            zf.writestr(fname, pdf)
+    bio.seek(0)
+
+    return StreamingResponse(
+        bio,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"receipts_{month:02d}_{year}.zip\""
+        },
+    )
+
+
+@api_router.delete("/receipt_documents/bulk_delete")
+def bulk_delete_receipts(
+    year: int,
+    month: int,
+    db: Session = Depends(get_db),
+):
+    """Массово удаляет квитанции за период (строки удаляются каскадно)."""
+    deleted = db.query(ReceiptDocument).filter(
+        ReceiptDocument.period_year == year,
+        ReceiptDocument.period_month == month,
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"deleted": deleted}
 
 
 def _fmt_amount2(value) -> str:
