@@ -22,8 +22,9 @@ const CASHIER_CREATE = ["payments", "apartments", "accounts", "owners"];
 // Какие ресурсы Кассир может РЕДАКТИРОВАТЬ: справочники учёта (но не Приход/Расход).
 const CASHIER_EDIT = ["apartments", "accounts", "owners"];
 
-// Контролер создаёт/правит только показания, счетчики и справочники для выбора.
-const CONTROLLER_CREATE = ["meter_readings", "meters", "apartments", "accounts", "owners"];
+// Контролер вносит показания (создаёт/правит документ показаний) и правит счетчики;
+// квартиры/счета/контрагенты — только чтение (для выбора).
+const CONTROLLER_CREATE = ["meter_reading_documents", "meters"];
 
 export const canCreate = (role: string, resource: string): boolean => {
     if (role === "admin") return true;

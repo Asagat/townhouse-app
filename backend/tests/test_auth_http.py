@@ -23,13 +23,14 @@ def seed_users(db):
         ("http_admin", UserRole.admin),
         ("http_cash", UserRole.cashier),
         ("http_oper", UserRole.operator),
+        ("http_ctrl", UserRole.controller),
     ]:
         u = User(username=uname, password_hash=hash_password("pass"), full_name=uname, role=role, is_active=True)
         db.add(u)
         db.commit()
         db.refresh(u)
         ids.append(u.id)
-    yield {u: uname for uname in ("http_admin", "http_cash", "http_oper")}
+    yield {u: uname for uname in ("http_admin", "http_cash", "http_oper", "http_ctrl")}
     if ids:
         db.execute(text("DELETE FROM users WHERE id = ANY(:ids)"), {"ids": ids})
         db.commit()
@@ -110,3 +111,37 @@ def test_admin_delete_user(client, db, seed_users):
     uid = r.json()["id"]
     assert client.delete(f"/api/auth/users/{uid}", headers=h).status_code == 204
     assert client.get("/api/auth/users", headers=h).status_code == 200
+
+
+def test_controller_permissions(client, seed_users):
+    h = _auth(client, "http_ctrl")
+    # читает документы показаний и регистр показаний
+    assert client.get("/api/meter_reading_documents?_start=0&_end=10", headers=h).status_code == 200
+    assert client.get("/api/meter_readings?_start=0&_end=10", headers=h).status_code == 200
+    # читает счетчики, квартиры, счета, контрагентов (выбор при вводе)
+    assert client.get("/api/meters?_start=0&_end=10", headers=h).status_code == 200
+    assert client.get("/api/apartments?_start=0&_end=10", headers=h).status_code == 200
+    assert client.get("/api/accounts?_start=0&_end=10", headers=h).status_code == 200
+    assert client.get("/api/owners?_start=0&_end=10", headers=h).status_code == 200
+    # контроллер НЕ видит денежные документы/регистры и настройки
+    assert client.get("/api/payments?_start=0&_end=10", headers=h).status_code == 403
+    assert client.get("/api/accruals_register?_start=0&_end=10", headers=h).status_code == 403
+    assert client.get("/api/tariffs?_start=0&_end=10", headers=h).status_code == 403
+
+
+def test_controller_cannot_edit_apartments_but_can_edit_meters(client, db, seed_users):
+    h = _auth(client, "http_ctrl")
+    # контроллер может править счетчики (meters)
+    m_id = db.execute(text("SELECT id FROM meters ORDER BY id LIMIT 1")).scalar()
+    if m_id:
+        assert client.patch(f"/api/meters/{m_id}", headers=h, json={"installed_at": "2026-01-01"}).status_code == 200
+    # но не квартиры/счета/контрагентов и не настройки
+    apt_id = db.execute(text("SELECT id FROM apartments ORDER BY id LIMIT 1")).scalar()
+    if apt_id:
+        assert client.patch(f"/api/apartments/{apt_id}", headers=h, json={"square": 1}).status_code == 403
+    acc_id = db.execute(text("SELECT id FROM accounts ORDER BY id LIMIT 1")).scalar()
+    if acc_id:
+        assert client.patch(f"/api/accounts/{acc_id}", headers=h, json={"account_name": "x"}).status_code == 403
+    t_id = db.execute(text("SELECT id FROM tariffs ORDER BY id LIMIT 1")).scalar()
+    if t_id:
+        assert client.patch(f"/api/tariffs/{t_id}", headers=h, json={"price": 1}).status_code == 403

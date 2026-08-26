@@ -37,8 +37,16 @@ REGISTER_RESOURCES = {
     "meter_readings",
 }
 
-# Что видит controller (только показания + минимально квартиры/счет для выбора).
-CONTROLLER_ALLOWED = {"meter_readings", "accounts", "apartments"}
+# Что видит/использует controller (только показания): читает документы показаний,
+# регистр показаний, счетчики и справочники для выбора (квартиры/счета/контрагенты).
+CONTROLLER_ALLOWED = {
+    "meter_reading_documents",
+    "meter_readings",
+    "meters",
+    "apartments",
+    "accounts",
+    "owners",
+}
 
 
 def _role_level(user: User) -> int:
@@ -66,7 +74,9 @@ def _create_update_allowed(user: User, resource: str) -> bool:
         # Кассир — операционные документы/справочники, без настроек и регистров.
         return resource not in SETTINGS_RESOURCES and resource not in REGISTER_RESOURCES
     if user.role == UserRole.controller:
-        return resource == "meter_readings" or resource == "meters"
+        # Контролер вносит показания (создаёт/правит документ показаний) и правит счетчики;
+        # квартиры/счета/контрагенты — только чтение (для выбора).
+        return resource in {"meter_reading_documents", "meters"}
     return False
 
 

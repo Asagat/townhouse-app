@@ -502,7 +502,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     {meta?.label ?? resourceName}
                 </h1>
                 <Space>
-                    {isMeterReadingDocuments && (
+                    {isMeterReadingDocuments && roleCanCreate && (
                         <Button
                             type="primary"
                             onClick={() => {
