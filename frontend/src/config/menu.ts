@@ -21,6 +21,11 @@ export const categories: Category[] = [
               label: 'Показания',
               icon: 'fa-solid fa-file-pen',
             },
+            {
+              key: 'receipt_documents',
+              label: 'Квитанции',
+              icon: 'fa-solid fa-file-invoice-dollar',
+            },
         ],
     },
     {

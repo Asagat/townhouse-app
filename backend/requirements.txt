@@ -5,3 +5,4 @@ psycopg2-binary
 sqladmin
 pydantic
 pydantic-settings
+reportlab

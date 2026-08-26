@@ -131,6 +131,18 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'readings_count', label: 'Количество записей' },
         { key: 'created_at', label: 'Дата создания', format: formatDateTime },
     ],
+
+    receipt_documents: [
+        { key: 'apartment_number', label: '№ квартиры' },
+        { key: 'owner_name', label: 'Собственник' },
+        { key: 'account_number', label: 'Лицевой счёт' },
+        { key: 'period_month', label: 'Месяц' },
+        { key: 'period_year', label: 'Год' },
+        { key: 'total_amount', label: 'Начислено', format: formatNumber },
+        { key: 'debt', label: 'Долг', format: formatNumber },
+        { key: 'overpayment', label: 'Переплата', format: formatNumber },
+        { key: 'payable_amount', label: 'К оплате', format: formatNumber },
+    ],
 };
 
 /**

@@ -80,6 +80,7 @@ class Account(Base):
     transactions = relationship("Transaction", back_populates="account", passive_deletes=True)
     accruals = relationship("AccrualsRegister", back_populates="account", passive_deletes=True)
     accounts_register = relationship("AccountsRegister", back_populates="account", passive_deletes=True)
+    receipts = relationship("ReceiptDocument", back_populates="account", passive_deletes=True)
 
 
 class CashPoint(Base):
@@ -401,3 +402,58 @@ def transaction_after_delete(mapper, connection, target):
     # Каскадное удаление accounts_register для этой транзакции выполняется СУБД;
     # пересчитываем балансы оставшихся записей аккаунта.
     recalculate_account_balance(connection, target.account_id)
+
+
+# --- КВИТАНЦИИ (документ-шапка + строки) ---
+
+
+class ReceiptDocument(Base):
+    """Квитанция — документ-шапка. Хранит реквизиты плательщика и итоги."""
+    __tablename__ = "receipt_documents"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Лицевой счёт, на который выставлена квитанция
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False)
+    # Период начисления (месяц/год)
+    period_year = Column(Integer, nullable=False)
+    period_month = Column(Integer, nullable=False)
+
+    # Снимок реквизитов плательщика на момент формирования (неизменяемый документ)
+    apartment_number = Column(Integer)
+    address = Column(String(255))
+    owner_name = Column(String(255))
+    account_number = Column(String(20))
+
+    # Итоги: начислено, долг (положительный), переплата (положительная), к оплате
+    total_amount = Column(Numeric(15, 2), default=0)      # сумма начислений
+    debt = Column(Numeric(15, 2), default=0)              # задолженность (>=0)
+    overpayment = Column(Numeric(15, 2), default=0)       # переплата (>=0)
+    payable_amount = Column(Numeric(15, 2), default=0)    # к оплате = total + debt - overpayment
+
+    issued_at = Column(TIMESTAMP, server_default=func.now())
+
+    account = relationship("Account", back_populates="receipts")
+    items = relationship("ReceiptItem", back_populates="receipt", passive_deletes=True)
+
+
+class ReceiptItem(Base):
+    """Строка квитанции: вид услуги, показания, тариф, сумма. Долг/переплату садим на «Фонд развития»."""
+    __tablename__ = "receipt_items"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    receipt_id = Column(Integer, ForeignKey("receipt_documents.id", ondelete="CASCADE"), nullable=False)
+
+    services_type_id = Column(Integer, ForeignKey("services_type.id", ondelete="RESTRICT"))
+    service_name = Column(String(255), nullable=False)
+
+    reading_prev = Column(Numeric(12, 3))   # показание предыдущее (может быть NULL)
+    reading_curr = Column(Numeric(12, 3))   # показание последнее (может быть NULL)
+    quantity = Column(Numeric(12, 3), default=0)  # потребление (для счётчика) или 1 (фикс.)
+    tariff = Column(Numeric(15, 2), default=0)
+    amount = Column(Numeric(15, 2), default=0)    # сумма по строке
+
+    debt = Column(Numeric(15, 2), default=0)            # долг по строке (>=0)
+    overpayment = Column(Numeric(15, 2), default=0)     # переплата по строке (>=0)
+    payable = Column(Numeric(15, 2), default=0)         # к оплате по строке = amount + debt - overpayment
+
+    receipt = relationship("ReceiptDocument", back_populates="items")
+    services_type = relationship("ServiceType")

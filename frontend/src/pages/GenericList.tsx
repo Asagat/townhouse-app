@@ -22,6 +22,7 @@ import { allResources } from "../config/menu";
 import { RecordFormModal } from "../components/common/RecordFormModal";
 import { BulkReadingsModal } from "../components/meter-readings/BulkReadingsModal";
 import { AccrualsCalculationModal } from "../components/accruals/AccrualsCalculationModal";
+import { ReceiptsModal } from "../components/receipts/ReceiptsModal";
 import type { SortOrder } from "antd/es/table/interface";
 
 interface GenericListProps {
@@ -86,6 +87,14 @@ const sortMapping: Record<string, string> = {
     'created_at': 'created_at',
     'accruals_count': 'accruals_count',
     'total_amount': 'total_amount',
+
+    // Поля квитанций
+    'owner_name': 'owner_name',
+    'period_month': 'period_month',
+    'period_year': 'period_year',
+    'debt': 'debt',
+    'overpayment': 'overpayment',
+    'payable_amount': 'payable_amount',
 };
 
 const isSortableField = (dataIndex: string): boolean => {
@@ -158,12 +167,14 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const [editingMeterReadingDocumentId, setEditingMeterReadingDocumentId] = useState<number | undefined>(undefined);
     const [accrualsModalOpen, setAccrualsModalOpen] = useState(false);
     const [editingAccrualDocumentId, setEditingAccrualDocumentId] = useState<number | undefined>(undefined);
+    const [receiptsModalOpen, setReceiptsModalOpen] = useState(false);
 
     const isAccrualsRegister = resourceName === "accruals_register";
     const isAccrualDocuments = resourceName === "accrual_documents";
     const isMeterReadingDocuments = resourceName === "meter_reading_documents";
     const isMeterReadings = resourceName === "meter_readings";
     const isReadOnly = resourceName === "accounts_register";
+    const isReceiptDocuments = resourceName === "receipt_documents";
     // Регистры формируются документами и не поддерживают прямое редактирование/удаление
     const isRegister = isAccrualsRegister || isMeterReadings || isReadOnly;
 
@@ -271,6 +282,46 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                       width: 200,
                       fixed: 'right' as const,
                       render: (_: unknown, record: any) => {
+                          if (isReceiptDocuments) {
+                              return (
+                                  <Space>
+                                      <Button
+                                          size="small"
+                                          onClick={() =>
+                                              window.open(
+                                                  `${apiUrl}/receipt_documents/${record.id}/pdf`,
+                                                  "_blank",
+                                              )
+                                          }
+                                      >
+                                          PDF
+                                      </Button>
+                                      <Popconfirm
+                                          title="Удалить квитанцию?"
+                                          okText="Удалить"
+                                          cancelText="Отмена"
+                                          onConfirm={() =>
+                                              deleteRecord(
+                                                  { resource: resourceName, id: record.id },
+                                                  {
+                                                      onSuccess: () => message.success("Квитанция удалена"),
+                                                      onError: (err: any) =>
+                                                          message.error(
+                                                              err?.response?.data?.detail ??
+                                                              "Не удалось удалить квитанцию",
+                                                          ),
+                                                  },
+                                              )
+                                          }
+                                      >
+                                          <Button size="small" danger>
+                                              Удалить
+                                          </Button>
+                                      </Popconfirm>
+                                  </Space>
+                              );
+                          }
+
                           if (isAccrualDocuments) {
                               return (
                                   <Space>
@@ -426,6 +477,15 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         </Button>
                     )}
 
+                    {isReceiptDocuments && (
+                        <Button
+                            type="primary"
+                            onClick={() => setReceiptsModalOpen(true)}
+                        >
+                            Сформировать квитанции
+                        </Button>
+                    )}
+
                     {isAccrualDocuments && (
                         <Button
                             type="primary"
@@ -438,7 +498,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         </Button>
                     )}
 
-                    {!isReadOnly && !isAccrualsRegister && !isAccrualDocuments && !isMeterReadingDocuments && !isMeterReadings && (
+                    {!isReadOnly && !isAccrualsRegister && !isAccrualDocuments && !isMeterReadingDocuments && !isMeterReadings && !isReceiptDocuments && (
                         <Button
                             type="primary"
                             disabled={metaLoading}
@@ -505,6 +565,14 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         setAccrualsModalOpen(false);
                         setEditingAccrualDocumentId(undefined);
                     }}
+                    onSaved={() => tableQuery.refetch()}
+                />
+            )}
+
+            {isReceiptDocuments && (
+                <ReceiptsModal
+                    open={receiptsModalOpen}
+                    onClose={() => setReceiptsModalOpen(false)}
                     onSaved={() => tableQuery.refetch()}
                 />
             )}

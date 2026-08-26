@@ -2,6 +2,7 @@
 
 import calendar
 import enum
+import io
 import json
 import logging
 from datetime import date, datetime
@@ -11,6 +12,20 @@ from typing import Any
 from database import engine, get_db
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import (
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 from models import (
     Account,
     AccountsRegister,
@@ -22,6 +37,8 @@ from models import (
     MeterReading,
     MeterReadingDocument,
     Owner,
+    ReceiptDocument,
+    ReceiptItem,
     ServiceType,
     Tariff,
     TariffType,
@@ -410,6 +427,53 @@ def accounts_register_serializer(item: AccountsRegister) -> dict:
     return result
 
 
+def receipt_item_serializer(item: ReceiptItem) -> dict:
+    return {
+        "id": item.id,
+        "receipt_id": item.receipt_id,
+        "services_type_id": item.services_type_id,
+        "service_name": item.service_name,
+        "reading_prev": float(item.reading_prev) if item.reading_prev is not None else None,
+        "reading_curr": float(item.reading_curr) if item.reading_curr is not None else None,
+        "quantity": float(item.quantity) if item.quantity is not None else 0.0,
+        "tariff": float(item.tariff) if item.tariff is not None else 0.0,
+        "amount": float(item.amount) if item.amount is not None else 0.0,
+        "debt": float(item.debt) if item.debt is not None else 0.0,
+        "overpayment": float(item.overpayment) if item.overpayment is not None else 0.0,
+        "payable": float(item.payable) if item.payable is not None else 0.0,
+    }
+
+
+def receipt_document_serializer(item: ReceiptDocument) -> dict:
+    result = {
+        "id": item.id,
+        "account_id": item.account_id,
+        "period_year": item.period_year,
+        "period_month": item.period_month,
+        "apartment_number": item.apartment_number,
+        "address": item.address,
+        "owner_name": item.owner_name,
+        "account_number": item.account_number,
+        "total_amount": float(item.total_amount) if item.total_amount is not None else 0.0,
+        "debt": float(item.debt) if item.debt is not None else 0.0,
+        "overpayment": float(item.overpayment) if item.overpayment is not None else 0.0,
+        "payable_amount": float(item.payable_amount) if item.payable_amount is not None else 0.0,
+        "issued_at": item.issued_at.isoformat() if item.issued_at else None,
+        "items_count": len(item.items) if item.items else 0,
+    }
+
+    if item.account:
+        result["account"] = {
+            "id": item.account.id,
+            "account_number": item.account.account_number,
+            "account_name": item.account.account_name,
+        }
+    else:
+        result["account"] = None
+
+    return result
+
+
 SERIALIZERS = {
     Owner: make_serializer([
         "full_name", "first_name", "last_name", "middle_name",
@@ -428,6 +492,8 @@ SERIALIZERS = {
     AccrualsRegister: accruals_register_serializer,
     AccountsRegister: accounts_register_serializer,
     AccrualDocument: accrual_document_serializer,
+    ReceiptDocument: receipt_document_serializer,
+    ReceiptItem: receipt_item_serializer,
 }
 
 MODEL_MAP = {
@@ -446,6 +512,8 @@ MODEL_MAP = {
     "accruals_register": AccrualsRegister,
     "accounts_register": AccountsRegister,
     "accrual_documents": AccrualDocument,
+    "receipt_documents": ReceiptDocument,
+    "receipt_items": ReceiptItem,
 }
 
 
@@ -680,6 +748,26 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         {"name": "created_at", "label": "Дата создания", "type": "datetime", "required": False},
         {"name": "accruals_count", "label": "Количество записей", "type": "integer", "required": False},
         {"name": "total_amount", "label": "Общая сумма", "type": "decimal", "required": False},
+    ],
+    "receipt_documents": [
+        {"name": "id", "label": "№ квитанции", "type": "integer", "required": False},
+        {"name": "account_id", "label": "Лицевой счёт", "type": "reference", "reference": "accounts", "required": False},
+        {"name": "apartment_number", "label": "№ квартиры", "type": "integer", "required": False},
+        {"name": "owner_name", "label": "Собственник", "type": "string", "required": False},
+        {"name": "period_month", "label": "Месяц", "type": "integer", "required": False},
+        {"name": "period_year", "label": "Год", "type": "integer", "required": False},
+        {"name": "total_amount", "label": "Начислено", "type": "decimal", "required": False},
+        {"name": "debt", "label": "Долг", "type": "decimal", "required": False},
+        {"name": "overpayment", "label": "Переплата", "type": "decimal", "required": False},
+        {"name": "payable_amount", "label": "К оплате", "type": "decimal", "required": False},
+        {"name": "issued_at", "label": "Дата создания", "type": "datetime", "required": False},
+        {"name": "items_count", "label": "Количество записей", "type": "integer", "required": False},
+    ],
+    "receipt_items": [
+        {"name": "id", "label": "ID", "type": "integer", "required": False},
+        {"name": "receipt_id", "label": "Квитанция", "type": "integer", "required": False},
+        {"name": "service_name", "label": "Услуга", "type": "string", "required": False},
+        {"name": "amount", "label": "Сумма", "type": "decimal", "required": False},
     ],
 }
 
@@ -1595,6 +1683,317 @@ async def update_accrual_document_full(
     }
 
 
+# --- ЭНДПОИНТЫ ДЛЯ КВИТАНЦИЙ ---
+
+FUND_SERVICE_TYPE_ID = 7  # «Фонд развития»: сюда садим общий долг/переплату счёта
+
+
+FUND_SERVICE_FALLBACK = "Фонд развития"
+
+
+def _current_account_balance(db: Session, account_id: int) -> float:
+    """Текущий баланс лицевого счёта — последняя запись accounts_register."""
+    value = db.execute(
+        text("SELECT balance_after FROM accounts_register WHERE account_id = :account_id "
+             "ORDER BY operation_date DESC, id DESC LIMIT 1"),
+        {"account_id": account_id},
+    ).scalar()
+    return float(value) if value is not None else 0.0
+
+
+def _service_name(db: Session, services_type_id) -> str:
+    if services_type_id is None:
+        return FUND_SERVICE_FALLBACK
+    st = db.get(ServiceType, services_type_id)
+    return st.services_type if st else str(services_type_id)
+
+
+def generate_receipt_document(db: Session, account: Account, year: int, month: int) -> ReceiptDocument | None:
+    """
+    Формирует квитанцию для одного лицевого счёта за период.
+    Возвращает None, если за период нет начислений.
+    """
+    start = date(year, month, 1)
+    end = date(year, month, calendar.monthrange(year, month)[1])
+
+    accruals = (
+        db.query(AccrualsRegister)
+        .filter(
+            AccrualsRegister.account_id == account.id,
+            AccrualsRegister.accrual_date >= start,
+            AccrualsRegister.accrual_date <= end,
+        )
+        .all()
+    )
+    if not accruals:
+        return None
+
+    apartment = account.apartment
+    owner_name = apartment.owner.full_name if apartment and apartment.owner else ""
+
+    receipt = ReceiptDocument(
+        account_id=account.id,
+        period_year=year,
+        period_month=month,
+        apartment_number=apartment.apartment_number if apartment else None,
+        address=apartment.address if apartment else None,
+        owner_name=owner_name,
+        account_number=account.account_number,
+    )
+    db.add(receipt)
+    db.flush()
+
+    # Текущий баланс счёта: положительный — долг, отрицательный — переплата
+    balance = _current_account_balance(db, account.id)
+    debt = max(0.0, balance)
+    overpayment = max(0.0, -balance)
+
+    total_amount = 0.0
+    created_items: list[ReceiptItem] = []
+    for acc in accruals:
+        tariff = acc.tariff.price if acc.tariff else 0
+        amount = float(acc.amount)
+        total_amount += amount
+        item = ReceiptItem(
+            receipt_id=receipt.id,
+            services_type_id=acc.services_type_id,
+            service_name=_service_name(db, acc.services_type_id),
+            reading_prev=acc.past_reading_value,
+            reading_curr=acc.current_reading_value,
+            quantity=acc.consumption,
+            tariff=tariff,
+            amount=amount,
+            debt=0.0,
+            overpayment=0.0,
+            payable=amount,
+        )
+        db.add(item)
+        created_items.append(item)
+
+    # Долг/переплату садим на строку «Фонд развития» (services_type_id == FUND_SERVICE_TYPE_ID).
+    # Ищем среди уже созданных строк фонда из начислений; если таковой нет — создаём отдельную.
+    fund_row = next(
+        (x for x in created_items if x.services_type_id == FUND_SERVICE_TYPE_ID),
+        None,
+    )
+    if fund_row is None:
+        fund_row = ReceiptItem(
+            receipt_id=receipt.id,
+            services_type_id=FUND_SERVICE_TYPE_ID,
+            service_name=FUND_SERVICE_FALLBACK,
+            reading_prev=None,
+            reading_curr=None,
+            quantity=1,
+            tariff=0.0,
+            amount=0.0,
+            debt=0.0,
+            overpayment=0.0,
+            payable=0.0,
+        )
+        db.add(fund_row)
+    # «Садим» общий баланс (долг ИЛИ переплата) на строку фонда: payable = amount + долг - переплата
+    fund_row.debt = debt
+    fund_row.overpayment = overpayment
+    fund_row.payable = float(fund_row.amount or 0.0) + debt - overpayment
+
+    receipt.total_amount = total_amount
+    receipt.debt = debt
+    receipt.overpayment = overpayment
+    receipt.payable_amount = total_amount + debt - overpayment
+
+    return receipt
+
+
+@api_router.post("/receipt_documents/generate", status_code=201)
+def generate_receipts(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """Массово формирует квитанции по всем активным лицевым счетам за период."""
+    year = payload.get("year")
+    month = payload.get("month")
+    if year in (None, "") or month in (None, ""):
+        raise HTTPException(status_code=422, detail="Укажите месяц и год")
+    year = int(year)
+    month = int(month)
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=422, detail="Некорректный месяц")
+
+    accounts = db.query(Account).filter(Account.is_active == True).all()
+    created = []
+    for account in accounts:
+        rec = generate_receipt_document(db, account, year, month)
+        if rec:
+            created.append(rec)
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Не удалось сохранить квитанции: {str(exc)}")
+
+    serializer = SERIALIZERS.get(ReceiptDocument)
+    rows = []
+    for rec in created:
+        db.refresh(rec)
+        rows.append(serializer(rec) if serializer else {"id": rec.id})
+    return {"year": year, "month": month, "created": rows}
+
+
+@api_router.get("/receipt_documents/{document_id}/items")
+def get_receipt_items(
+    document_id: int,
+    db: Session = Depends(get_db)
+):
+    receipt = db.get(ReceiptDocument, document_id)
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Квитанция не найдена")
+    items = db.query(ReceiptItem).filter(ReceiptItem.receipt_id == document_id).all()
+    serializer = SERIALIZERS.get(ReceiptItem)
+    return {
+        "document": receipt_document_serializer(receipt),
+        "items": [serializer(i) for i in items] if serializer else [],
+    }
+
+
+@api_router.get("/receipt_documents/{document_id}/pdf")
+def get_receipt_pdf(
+    document_id: int,
+    db: Session = Depends(get_db)
+):
+    """Генерирует PDF квитанции на лету по образцу безобразtemplate."""
+    receipt = (
+        db.query(ReceiptDocument)
+        .options(joinedload(ReceiptDocument.items))
+        .get(document_id)
+    )
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Квитанция не найдена")
+
+    pdf_bytes = build_receipt_pdf(receipt)
+    filename = f"receipt_{receipt.id}_{receipt.period_month:02d}_{receipt.period_year}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
+    )
+
+
+def _fmt_amount2(value) -> str:
+    """Формат: пробелы как разделители тысяч, запятая как десятичный. Напр. «1 525,00»."""
+    try:
+        v = Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        v = Decimal("0.00")
+    neg = ""
+    if v < 0:
+        neg = "-"
+        v = -v
+    int_part, _, frac = f"{v}".partition(".")
+    ip = f"{int(int_part):,}".replace(",", " ")
+    return f"{neg}{ip},{frac}"
+
+
+def _fmt_reading(value) -> str:
+    if value is None:
+        return "-"
+    v = Decimal(str(value))
+    if v == v.to_integral_value():
+        return f"{int(v)}"
+    return f"{v}"
+
+
+def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
+    """Вёрстка PDF квитанции в стиле шаблона «Квитанция.pdf» (+ столбец «Переплата»)."""
+    # Поддержка кириллицы: регистрируем TTF-шрифты.
+    FONT = "DejaVuSans"
+    FONT_B = "DejaVuSans-Bold"
+    if FONT not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(FONT, "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"))
+    if FONT_B not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(FONT_B, "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "Title2", parent=styles["Title"], fontSize=16, spaceAfter=2, fontName=FONT_B
+    )
+    period_style = ParagraphStyle(
+        "Period", parent=styles["Normal"], fontSize=12, spaceAfter=6, fontName=FONT_B
+    )
+    head_style = ParagraphStyle(
+        "Head", parent=styles["Normal"], fontSize=12, spaceAfter=14, fontName=FONT_B
+    )
+
+    month_names = [
+        "январь", "февраль", "март", "апрель", "май", "июнь",
+        "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+    ]
+    period = f"{month_names[receipt.period_month - 1].capitalize()} {receipt.period_year}"
+    header = [
+        Paragraph("Квитанция", title_style),
+        Paragraph("Family Townhouse", title_style),
+        Paragraph(period, period_style),
+        Paragraph(
+            f"Квартира № {receipt.apartment_number} {receipt.owner_name}",
+            head_style,
+        ),
+    ]
+
+    columns = [
+        "Услуга", "Последние", "Предыдущие", "Количество",
+        "Тариф", "Сумма", "Долг", "Переплата", "К оплате",
+    ]
+    data = [columns]
+    for it in sorted(receipt.items, key=lambda x: (x.services_type_id is None, x.id)):
+        data.append([
+            it.service_name,
+            _fmt_reading(it.reading_curr),
+            _fmt_reading(it.reading_prev),
+            _fmt_amount2(it.quantity) if it.quantity is not None else "-",
+            _fmt_amount2(it.tariff) if it.tariff is not None else "-",
+            _fmt_amount2(it.amount),
+            _fmt_amount2(it.debt) if it.debt else "0,00",
+            _fmt_amount2(it.overpayment) if it.overpayment else "0,00",
+            _fmt_amount2(it.payable),
+        ])
+    data.append([
+        "Итого", "", "", "",
+        "", _fmt_amount2(receipt.total_amount),
+        _fmt_amount2(receipt.debt) if receipt.debt else "0,00",
+        _fmt_amount2(receipt.overpayment) if receipt.overpayment else "0,00",
+        _fmt_amount2(receipt.payable_amount),
+    ])
+
+    col_widths = [110, 70, 70, 62, 62, 80, 62, 70, 80]
+    table = Table(data, colWidths=col_widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.Color(0.93, 0.93, 0.93)),
+        ("FONTNAME", (0, 0), (-1, -1), FONT),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("FONTNAME", (0, -1), (-1, -1), FONT_B),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.Color(0.96, 0.96, 0.96)),
+    ]))
+
+    issued = receipt.issued_at
+    stamp = issued.strftime("%d.%m.%Y %H:%M:%S") if issued else ""
+    date_style = ParagraphStyle(
+        "DateS", parent=styles["Normal"], fontSize=9, textColor=colors.grey,
+        spaceBefore=18, alignment=2, fontName=FONT,
+    )
+    footer = [Paragraph(stamp, date_style)]
+
+    story = header + [Spacer(1, 2), table] + footer
+    buf = io.BytesIO()
+    SimpleDocTemplate(buf, pagesize=A4, topMargin=40, bottomMargin=40, leftMargin=40, rightMargin=40).build(story)
+    return buf.getvalue()
+
+
 # --- УНИВЕРСАЛЬНЫЕ CRUD ЭНДПОИНТЫ ---
 # ВАЖНО: должны быть ПОСЛЕ эндпоинтов /meta, /accrual_documents, /accruals_register, /meter_readings/bulk
 
@@ -1650,8 +2049,13 @@ def get_list(
             joinedload(MeterReading.services_type),
             joinedload(MeterReading.document),
         )
+    elif resource == "receipt_documents":
+        query = query.options(
+            joinedload(ReceiptDocument.account).joinedload(Account.apartment),
+            joinedload(ReceiptDocument.items),
+        )
 
-    if _sort:
+    if _sort: 
         order_func = desc if (_order or "").lower() == "desc" else asc
 
         if _sort == "document_title":
@@ -1764,6 +2168,15 @@ async def get_resource_item(
             joinedload(MeterReading.apartment),
             joinedload(MeterReading.services_type),
             joinedload(MeterReading.document),
+        ).filter(model.id == item_id).first()
+    elif resource == "receipt_documents":
+        item = db.query(model).options(
+            joinedload(ReceiptDocument.account).joinedload(Account.apartment),
+            joinedload(ReceiptDocument.items),
+        ).filter(model.id == item_id).first()
+    elif resource == "receipt_items":
+        item = db.query(model).options(
+            joinedload(ReceiptItem.receipt)
         ).filter(model.id == item_id).first()
     else:
         item = db.get(model, item_id)
