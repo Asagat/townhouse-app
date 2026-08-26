@@ -192,6 +192,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const roleCanCreate = canCreate(role, resourceName);
     const roleCanEdit = canEdit(role, resourceName);
     const roleCanDelete = canDelete(role, resourceName);
+    // Есть ли у роли хоть какое-то действие записи (иначе столбец «Действия» не показываем).
+    const roleCanWrite = roleCanCreate || roleCanEdit || roleCanDelete;
 
     const columns = getColumnsForResource(resourceName);
     const meta = allResources.find((r) => r.key === resourceName);
@@ -288,7 +290,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 }),
             };
         }),
-        ...(isRegister
+        ...(isRegister || !roleCanWrite
             ? []
             : [
                   {
