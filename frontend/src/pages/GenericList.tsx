@@ -15,6 +15,7 @@ import {
     useDelete,
     useCustom,
     useApiUrl,
+    useGetIdentity,
 } from "@refinedev/core";
 import type { FieldMeta, ModalState } from "../types";
 import { getColumnsForResource } from "../config/columns";
@@ -126,6 +127,8 @@ const getValueByPath = (obj: any, path: string): any => {
 export const GenericList = ({ resourceName }: GenericListProps) => {
     const apiUrl = useApiUrl();
 
+    const { data: identity } = useGetIdentity<any>();
+
     const {
         tableQuery,
         current,
@@ -182,6 +185,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const isReceiptDocuments = resourceName === "receipt_documents";
     // Регистры формируются документами и не поддерживают прямое редактирование/удаление
     const isRegister = isAccrualsRegister || isMeterReadings || isReadOnly;
+    // Роль «Житель»: только просмотр своего счёта — без кнопок «Выполнить списание» и «Добавить».
+    const isResident = identity?.role === "resident";
 
     const columns = getColumnsForResource(resourceName);
     const meta = allResources.find((r) => r.key === resourceName);
@@ -511,7 +516,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         </Button>
                     )}
 
-                    {resourceName === "payments" && (
+                    {resourceName === "payments" && !isResident && (
                         <Button
                             type="primary"
                             onClick={() => setWriteOffsModalOpen(true)}
@@ -520,7 +525,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         </Button>
                     )}
 
-                    {!isReadOnly && !isAccrualsRegister && !isAccrualDocuments && !isMeterReadingDocuments && !isMeterReadings && !isReceiptDocuments && (
+                    {!isResident && !isReadOnly && !isAccrualsRegister && !isAccrualDocuments && !isMeterReadingDocuments && !isMeterReadings && !isReceiptDocuments && (
                         <Button
                             type="primary"
                             disabled={metaLoading}
