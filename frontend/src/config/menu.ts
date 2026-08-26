@@ -76,6 +76,11 @@ export const categories: Category[] = [
               label: "Регистр начислений",
               icon: "fa-solid fa-calculator",
             },
+            {
+              key: "cash_register",
+              label: "Регистр денежных средств",
+              icon: "fa-solid fa-money-bill-wave",
+            },
         ],
     },
     {

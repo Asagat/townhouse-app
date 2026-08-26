@@ -92,8 +92,19 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'document_title', label: 'Документ' },
     ],
 
+    cash_register: [
+        { key: 'apartment.apartment_number', label: '№ квартиры' },
+        { key: 'account.account_number', label: 'Лицевой счёт' },
+        { key: 'operation_date', label: 'Дата операции', format: formatDateTime },
+        { key: 'income', label: 'Приход', format: formatNumber },
+        { key: 'expense', label: 'Расход', format: formatNumber },
+        { key: 'balance_after', label: 'Баланс', format: formatNumber },
+        { key: 'document_title', label: 'Документ' },
+    ],
+
     services_type: [
         { key: 'services_type', label: 'Вид услуги' },
+        { key: 'priority', label: 'Приоритет списания' },
     ],
 
     tariff_types: [
@@ -156,7 +167,7 @@ export const formFieldConfig: Record<string, string[]> = {
     transactions: ['title', 'apartment_id', 'cash_point_id', 'transaction_type', 'amount', 'transaction_date', 'notes'],
     accruals_register: ['accrual_date', 'account_id', 'services_type_id', 'past_reading_value', 'current_reading_value', 'consumption', 'amount'],
     accounts_register: ['account_id', 'services_type_id', 'income', 'expense', 'balance_after'],
-    services_type: ['services_type'],
+    services_type: ['services_type', 'priority'],
     tariff_types: ['name'],
     tariffs: ['services_type_id', 'tariff_type_id', 'price', 'unit', 'valid_from'],
     meters: ['serial_number', 'apartment_id', 'services_type_id', 'installed_at'],

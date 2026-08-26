@@ -80,6 +80,7 @@ class Account(Base):
     transactions = relationship("Transaction", back_populates="account", passive_deletes=True)
     accruals = relationship("AccrualsRegister", back_populates="account", passive_deletes=True)
     accounts_register = relationship("AccountsRegister", back_populates="account", passive_deletes=True)
+    cash_register = relationship("CashRegister", back_populates="account", passive_deletes=True)
     receipts = relationship("ReceiptDocument", back_populates="account", passive_deletes=True)
 
 
@@ -96,6 +97,9 @@ class ServiceType(Base):
     __tablename__ = "services_type"
     id = Column(Integer, primary_key=True, autoincrement=True)
     services_type = Column(String(255), nullable=False)
+    # Порядок списания задолженности: меньший номер списывается раньше.
+    # NULL/0 — списание в последнюю очередь (после услуг с заданным приоритетом).
+    priority = Column(Integer, default=0)
 
     tariffs = relationship("Tariff", back_populates="services_type", passive_deletes=True)
     meters = relationship("Meter", back_populates="services_type", passive_deletes=True)
@@ -208,6 +212,7 @@ class Transaction(Base):
     account = relationship("Account", back_populates="transactions")
     cash_point = relationship("CashPoint", back_populates="transactions")
     accounts_register = relationship("AccountsRegister", back_populates="transaction", passive_deletes=True)
+    cash_register = relationship("CashRegister", back_populates="transaction", passive_deletes=True)
 
 
 # backend/models.py
@@ -227,6 +232,30 @@ class AccrualDocument(Base):
         back_populates="accrual_document",
         passive_deletes=True
     )
+
+
+# =====================================================================
+# КОНВЕНЦИЯ ЗНАКОВ  (источник истины — РОАДМАП «Списание задолженностей»)
+# =====================================================================
+# Оба регистра используют ОДНУ формулу нарастающего итога:
+#     balance_after = SUM(income) - SUM(expense)
+# но смысл income/expense у них РАЗНЫЙ:
+#
+# 1) accounts_register (регистр взаиморасчётов) — «задолженность» жителя:
+#    - income  = НАЧИСЛЕНО  (сумма к уплате по счёту/услуге)  -> долг растёт;
+#    - expense = СПИСАНО/ОПЛАЧЕНО по счёту/услуге             -> долг падает;
+#    balance_after > 0 = ДОЛГ;   balance_after < 0 = ПЕРЕПЛАТА/АВАНС.
+#
+# 2) cash_register (регистр денежных средств) — «денежный остаток» на счёте/кассе:
+#    - income  = реальный приход денег;
+#    - expense = реальный расход денег;
+#    balance_after = сколько денег числится на счёте (НЕ является долгом).
+#
+# ДЕЙСТВУЮЩЕЕ ПОВЕДЕНИЕ: конвенция соблюдается с момента формального «переворота
+# знаков» (начисления пишутся в income, списание/оплата — в expense в accounts_register;
+# документ «Приход/Расход» пишет в cash_register). Квитанции и отчёт трактуют
+# положительный balance_after как долг, отрицательный — как переплату.
+# =====================================================================
 
 
 # --- РЕГИСТРЫ ---
@@ -286,12 +315,17 @@ class AccountsRegister(Base):
     accrual_id = Column(
         Integer, ForeignKey("accruals_register.id", ondelete="CASCADE"), nullable=True
     )
-    # Вид услуги — заполняется для операций начислений (платежи его не имеют),
-    # задаётся в момент записи документа начисления в регистр.
+    # Вид услуги — привязка записи к конкретной услуге. Заполняется для начислений
+    # и для записей списания (разнесённых по услугам); записи денежного регистра
+    # (см. cash_register, Фаза 1) услугу не имеют.
     services_type_id = Column(
         Integer, ForeignKey("services_type.id", ondelete="RESTRICT"), nullable=True
     )
 
+    # Суммы по ЦЕЛЕВОЙ конвенции (см. блок «КОНВЕНЦИЯ ЗНАКОВ» ниже):
+    #   income  = НАЧИСЛЕНО   (долг жителя растёт);
+    #   expense = СПИСАНО/ОПЛАЧЕНО (долг жителя падает);
+    #   balance_after > 0 = ДОЛГ,  balance_after < 0 = ПЕРЕПЛАТА/АВАНС.
     income = Column(Numeric(15, 2), default=0)
     expense = Column(Numeric(15, 2), default=0)
     balance_after = Column(Numeric(15, 2))
@@ -302,6 +336,32 @@ class AccountsRegister(Base):
     services_type = relationship("ServiceType")
 
 
+class CashRegister(Base):
+    """Регистр денежных средств (история движения денег по лицевому счёту).
+
+    Первичный регистр: заполняется документом «Приход/Расход» (Transaction).
+    НЕ является задолженностью жителя — это денежный остаток на счёте/кассе:
+    balance_after = SUM(income - expense), где income = реальный приход денег,
+    expense = реальный расход. Смысл знаков см. в блоке «КОНВЕНЦИЯ ЗНАКОВ».
+    """
+    __tablename__ = "cash_register"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    operation_date = Column(TIMESTAMP, server_default=func.now())
+    account_id = Column(
+        Integer, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
+    )
+    transaction_id = Column(
+        Integer, ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False
+    )
+
+    income = Column(Numeric(15, 2), default=0)
+    expense = Column(Numeric(15, 2), default=0)
+    balance_after = Column(Numeric(15, 2))
+
+    account = relationship("Account", back_populates="cash_register")
+    transaction = relationship("Transaction", back_populates="cash_register")
+
+
 # --- ОБРАБОТЧИКИ ---
 
 from sqlalchemy import event, text
@@ -309,45 +369,76 @@ from datetime import datetime
 
 
 def transaction_income_expense(target) -> tuple[object, object]:
-    """Возвращает пару (income, expense) для транзакции."""
+    """Возвращает пару (income, expense) для ТРАНЗАКЦИИ (документ «Приход/Расход»).
+
+    Применяется к РЕГИСТРУ ДЕНЕЖНЫХ СРЕДСТВ (cash_register): приход денег -> income,
+    расход -> expense. Не используется для accounts_register (задолженности) — туда
+    деньги попадают только через операцию списания (Фаза 3). Целевая семантика
+    обоих регистров описана в блоке «КОНВЕНЦИЯ ЗНАКОВ» выше.
+    """
     if target.transaction_type in [TransactionTypeEnum.in_cash, TransactionTypeEnum.in_bank]:
         return target.amount, 0
     return 0, target.amount
 
 
-def recalculate_account_balance(executor, account_id) -> None:
-    """
-    Полностью пересчитывает balance_after для ВСЕХ записей accounts_register аккаунта
-    «с нуля» по истории операций (приходы минус расходы) в хронологическом порядке
+_REGISTER_RUNNING_UPDATE = """
+    WITH ordered AS (
+        SELECT id,
+               SUM(income - expense) OVER (
+                   ORDER BY operation_date ASC, id ASC
+               ) AS running
+        FROM {table}
+        WHERE account_id = :account_id
+    )
+    UPDATE {table} ar
+    SET balance_after = ordered.running
+    FROM ordered
+    WHERE ar.id = ordered.id
+"""
+
+# Имена таблиц пересчёта — безопасные программные константы (без пользовательского ввода).
+_RECALC_TABLES = ("accounts_register", "cash_register")
+
+
+def recalculate_register_balance(executor, table: str, account_id) -> None:
+    """Пересчитывает balance_after для ВСЕХ записей указанного регистра аккаунта
+    «с нуля» по нарастающему итогу (SUM(income - expense)) в хронологическом порядке
     (operation_date, затем id).
+
+    Функция МЕХАНИЧЕСКАЯ — она не знает смысла income/expense (долг или денежный
+    остаток — см. блок «КОНВЕНЦИЯ ЗНАКОВ»). Принимает имя таблицы из фиксированного
+    набора _RECALC_TABLES (никакой пользовательский ввод в SQL не попадает).
 
     executor — объект с .execute() (Session или Connection), чтобы функцию можно было
     вызывать и из SQLAlchemy-событий (connection), и из бизнес-логики приложения (session).
     """
+    if table not in _RECALC_TABLES:
+        raise ValueError(f"Недопустимое имя регистра для пересчёта: {table}")
     executor.execute(
-        text("""
-            WITH ordered AS (
-                SELECT id,
-                       SUM(income - expense) OVER (
-                           ORDER BY operation_date ASC, id ASC
-                       ) AS running
-                FROM accounts_register
-                WHERE account_id = :account_id
-            )
-            UPDATE accounts_register ar
-            SET balance_after = ordered.running
-            FROM ordered
-            WHERE ar.id = ordered.id
-        """),
+        text(_REGISTER_RUNNING_UPDATE.format(table=table)),
         {"account_id": account_id},
     )
 
 
-def insert_accounts_register_entry(connection, target) -> None:
-    """Создаёт запись accounts_register для вставленной транзакции."""
+def recalculate_account_balance(executor, account_id) -> None:
+    """Пересчитывает balance_after регистра взаиморасчётов (accounts_register).
+
+    Обёртка над recalculate_register_balance для обратной совместимости с вызовами
+    в бизнес-логике приложения (create_accounts_register_entries_for_accruals и т.п.).
+    """
+    recalculate_register_balance(executor, "accounts_register", account_id)
+
+
+def recalculate_cash_balance(executor, account_id) -> None:
+    """Пересчитывает balance_after регистра денежных средств (cash_register)."""
+    recalculate_register_balance(executor, "cash_register", account_id)
+
+
+def insert_cash_register_entry(connection, target) -> None:
+    """Создаёт запись cash_register для вставленной транзакции («Приход/Расход»)."""
     income, expense = transaction_income_expense(target)
     connection.execute(
-        text("INSERT INTO accounts_register (operation_date, account_id, transaction_id, income, expense, balance_after) "
+        text("INSERT INTO cash_register (operation_date, account_id, transaction_id, income, expense, balance_after) "
              "VALUES (:operation_date, :account_id, :transaction_id, :income, :expense, :balance_after)"),
         {
             "operation_date": target.transaction_date or datetime.now(),
@@ -361,11 +452,11 @@ def insert_accounts_register_entry(connection, target) -> None:
     )
 
 
-def update_accounts_register_entry(connection, target) -> None:
-    """Обновляет содержимое записи accounts_register для изменённой транзакции."""
+def update_cash_register_entry(connection, target) -> None:
+    """Обновляет содержимое записи cash_register для изменённой транзакции."""
     income, expense = transaction_income_expense(target)
     connection.execute(
-        text("UPDATE accounts_register SET operation_date = :operation_date, income = :income, expense = :expense "
+        text("UPDATE cash_register SET operation_date = :operation_date, income = :income, expense = :expense "
              "WHERE transaction_id = :transaction_id"),
         {
             "operation_date": target.transaction_date or datetime.now(),
@@ -378,30 +469,30 @@ def update_accounts_register_entry(connection, target) -> None:
 
 @event.listens_for(Transaction, "after_insert")
 def transaction_after_insert(mapper, connection, target):
-    insert_accounts_register_entry(connection, target)
-    recalculate_account_balance(connection, target.account_id)
+    insert_cash_register_entry(connection, target)
+    recalculate_cash_balance(connection, target.account_id)
 
 
 @event.listens_for(Transaction, "after_update")
 def transaction_after_update(mapper, connection, target):
-    # Если строки в accounts_register для этой транзакции нет — создаём (например,
+    # Если строки в cash_register для этой транзакции нет — создаём (например,
     # транзакцию добавили напрямую в обход события вставки).
     existing = connection.execute(
-        text("SELECT 1 FROM accounts_register WHERE transaction_id = :transaction_id"),
+        text("SELECT 1 FROM cash_register WHERE transaction_id = :transaction_id"),
         {"transaction_id": target.id},
     ).first()
     if existing:
-        update_accounts_register_entry(connection, target)
+        update_cash_register_entry(connection, target)
     else:
-        insert_accounts_register_entry(connection, target)
-    recalculate_account_balance(connection, target.account_id)
+        insert_cash_register_entry(connection, target)
+    recalculate_cash_balance(connection, target.account_id)
 
 
 @event.listens_for(Transaction, "after_delete")
 def transaction_after_delete(mapper, connection, target):
-    # Каскадное удаление accounts_register для этой транзакции выполняется СУБД;
+    # Каскадное удаление cash_register для этой транзакции выполняется СУБД;
     # пересчитываем балансы оставшихся записей аккаунта.
-    recalculate_account_balance(connection, target.account_id)
+    recalculate_cash_balance(connection, target.account_id)
 
 
 # --- КВИТАНЦИИ (документ-шапка + строки) ---

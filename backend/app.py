@@ -36,6 +36,7 @@ from models import (
     AccrualDocument,
     Apartment,
     CashPoint,
+    CashRegister,
     Meter,
     MeterReading,
     MeterReadingDocument,
@@ -54,6 +55,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, asc, text
 
 import receipt_config as rc
+from writeoffs import calculate_write_offs
 
 # Инициализация основного приложения
 app = FastAPI(title="Townhouse ERP System")
@@ -432,6 +434,42 @@ def accounts_register_serializer(item: AccountsRegister) -> dict:
     return result
 
 
+def cash_register_serializer(item: CashRegister) -> dict:
+    """Сериализатор регистра денежных средств."""
+    result = {
+        "id": item.id,
+        "operation_date": item.operation_date.isoformat() if item.operation_date else None,
+        "account_id": item.account_id,
+        "transaction_id": item.transaction_id,
+        "income": float(item.income) if item.income is not None else 0.0,
+        "expense": float(item.expense) if item.expense is not None else 0.0,
+        "balance_after": float(item.balance_after) if item.balance_after is not None else 0.0,
+        "document_title": item.transaction.title if item.transaction else None,
+    }
+
+    if item.account:
+        result["account"] = {
+            "id": item.account.id,
+            "account_number": item.account.account_number,
+            "account_name": item.account.account_name,
+        }
+    else:
+        result["account"] = None
+
+    apartment = item.account.apartment if item.account else None
+    result["apartment"] = (
+        {
+            "id": apartment.id,
+            "apartment_number": apartment.apartment_number,
+            "address": apartment.address,
+        }
+        if apartment
+        else None
+    )
+
+    return result
+
+
 def receipt_item_serializer(item: ReceiptItem) -> dict:
     return {
         "id": item.id,
@@ -488,7 +526,7 @@ SERIALIZERS = {
     Account: account_serializer,
     CashPoint: cash_point_serializer,
     Transaction: transaction_serializer,
-    ServiceType: make_serializer(["services_type"]),
+    ServiceType: make_serializer(["services_type", "priority"]),
     TariffType: make_serializer(["name"]),
     Tariff: tariff_serializer,
     Meter: meter_serializer,
@@ -496,6 +534,7 @@ SERIALIZERS = {
     MeterReadingDocument: meter_reading_document_serializer,
     AccrualsRegister: accruals_register_serializer,
     AccountsRegister: accounts_register_serializer,
+    CashRegister: cash_register_serializer,
     AccrualDocument: accrual_document_serializer,
     ReceiptDocument: receipt_document_serializer,
     ReceiptItem: receipt_item_serializer,
@@ -516,6 +555,7 @@ MODEL_MAP = {
     "meter_reading_documents": MeterReadingDocument,
     "accruals_register": AccrualsRegister,
     "accounts_register": AccountsRegister,
+    "cash_register": CashRegister,
     "accrual_documents": AccrualDocument,
     "receipt_documents": ReceiptDocument,
     "receipt_items": ReceiptItem,
@@ -618,9 +658,11 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
     ],
     "service_types": [
         {"name": "services_type", "label": "Вид услуги", "type": "string", "required": True},
+        {"name": "priority", "label": "Приоритет списания", "type": "integer", "required": False},
     ],
     "services_type": [
         {"name": "services_type", "label": "Вид услуги", "type": "string", "required": True},
+        {"name": "priority", "label": "Приоритет списания", "type": "integer", "required": False},
     ],
     "tariff_types": [
         {"name": "name", "label": "Наименование", "type": "string", "required": True},
@@ -741,6 +783,18 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "type": "reference",
             "reference": "services_type",
             "required": False,
+        },
+        {"name": "income", "label": "Приход", "type": "decimal"},
+        {"name": "expense", "label": "Расход", "type": "decimal"},
+        {"name": "balance_after", "label": "Баланс после", "type": "decimal"},
+    ],
+    "cash_register": [
+        {
+            "name": "account_id",
+            "label": "Лицевой счёт",
+            "type": "reference",
+            "reference": "accounts",
+            "required": True,
         },
         {"name": "income", "label": "Приход", "type": "decimal"},
         {"name": "expense", "label": "Расход", "type": "decimal"},
@@ -1086,6 +1140,10 @@ def create_accounts_register_entries_for_accruals(db: Session, items: list[Accru
     """
     Создаёт записи в регистре взаиморасчётов для каждой строки начисления,
     затем полностью пересчитывает балансы затронутых аккаунтов.
+
+    Конвенция знаков: начисление записывается в income (долг жителя растёт),
+    списание/оплата — в expense (долг падает). balance_after = SUM(income)-SUM(expense),
+    положительный = долг, отрицательный = переплата (см. «КОНВЕНЦИЯ ЗНАКОВ» в models.py).
     """
     affected_accounts: set[int] = set()
     for item in items:
@@ -1114,8 +1172,8 @@ def create_accounts_register_entries_for_accruals(db: Session, items: list[Accru
                 "account_id": item.account_id,
                 "accrual_id": item.id,
                 "services_type_id": item.services_type_id,
-                "income": 0.0,
-                "expense": float(item.amount),
+                "income": float(item.amount),
+                "expense": 0.0,
                 "balance_after": 0.0,
             },
         )
@@ -1697,13 +1755,46 @@ FUND_SERVICE_FALLBACK = "Фонд развития"
 
 
 def _current_account_balance(db: Session, account_id: int) -> float:
-    """Текущий баланс лицевого счёта — последняя запись accounts_register."""
+    """Текущий баланс лицевого счёта — последняя запись accounts_register.
+
+    По конвенции («КОНВЕНЦИЯ ЗНАКОВ» в models.py) это долг по услугам:
+    = SUM(income) - SUM(expense) по accounts_register. Положительный = долг;
+    переплата (деньги сверх распределённых) тут не отражается — см.
+    _account_debt_overpayment в отчёте.
+    """
     value = db.execute(
         text("SELECT balance_after FROM accounts_register WHERE account_id = :account_id "
              "ORDER BY operation_date DESC, id DESC LIMIT 1"),
         {"account_id": account_id},
     ).scalar()
     return float(value) if value is not None else 0.0
+
+
+def _account_debt_overpayment(db: Session, account_id: int) -> tuple[float, float]:
+    """Возвращает (долг, переплата) по счёту на основе регистров.
+
+    - долг = начислено - списано (>=0);
+    - переплата = внесено на счёт - списано (>=0) — аванс сверх распределённых услуг.
+    Согласовано с метриками отчёта build_account_statement (баланс/квитанции сходятся).
+    """
+    accrued_total = db.execute(
+        text("SELECT COALESCE(SUM(income),0) FROM accounts_register WHERE account_id=:a AND services_type_id IS NOT NULL"),
+        {"a": account_id},
+    ).scalar()
+    paid_total = db.execute(
+        text("SELECT COALESCE(SUM(expense),0) FROM accounts_register WHERE account_id=:a AND services_type_id IS NOT NULL"),
+        {"a": account_id},
+    ).scalar()
+    available = db.execute(
+        text("SELECT COALESCE(SUM(income - expense),0) FROM cash_register WHERE account_id=:a"),
+        {"a": account_id},
+    ).scalar()
+    accrued_total = float(accrued_total or 0.0)
+    paid_total = float(paid_total or 0.0)
+    available = float(available or 0.0)
+    debt = max(0.0, accrued_total - paid_total)
+    overpayment = max(0.0, available - paid_total)
+    return debt, overpayment
 
 
 def _service_name(db: Session, services_type_id) -> str:
@@ -1748,10 +1839,9 @@ def generate_receipt_document(db: Session, account: Account, year: int, month: i
     db.add(receipt)
     db.flush()
 
-    # Текущий баланс счёта: положительный — долг, отрицательный — переплата
-    balance = _current_account_balance(db, account.id)
-    debt = max(0.0, balance)
-    overpayment = max(0.0, -balance)
+    # Долг и переплата счёта на основе регистров (см. «КОНВЕНЦИЯ ЗНАКОВ»):
+    # долг = начислено - списано, переплата = внесено - списано (аванс).
+    debt, overpayment = _account_debt_overpayment(db, account.id)
 
     total_amount = 0.0
     created_items: list[ReceiptItem] = []
@@ -1843,6 +1933,158 @@ def generate_receipts(
         db.refresh(rec)
         rows.append(serializer(rec) if serializer else {"id": rec.id})
     return {"year": year, "month": month, "created": rows}
+
+
+@api_router.post("/write_offs/run", status_code=201)
+def run_write_offs(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Операция «Списание задолженностей».
+
+    Распределяет доступные деньги каждого лицевого счёта по видам услуг
+    в порядке приоритета (services_type.priority) и пишет результат
+    в Регистр взаиморасчётов. Идемпотентна: существующие строки списания
+    для затронутых счетов перестраиваются заново.
+
+    Запускается: по кнопке, по регламенту (cron) или при создании
+    «Приход/Расход».
+    """
+    raw_ids = payload.get("account_ids")
+    if raw_ids is None:
+        account_ids = None
+    elif isinstance(raw_ids, list):
+        account_ids = [int(x) for x in raw_ids]
+    else:
+        raise HTTPException(status_code=422, detail="Поле 'account_ids' должно быть списком или отсутствовать")
+
+    try:
+        result = calculate_write_offs(db, account_ids)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Ошибка списания задолженностей")
+        raise HTTPException(status_code=409, detail=f"Не удалось выполнить списание: {str(exc)}")
+
+    return result
+
+
+# --- ОТЧЁТ ПО ЛИЦЕВОМУ СЧЁТУ ---
+
+
+def build_account_statement(db: Session, account_id: int) -> dict:
+    """
+    Сводка по лицевому счёту для отчёта / личного кабинета.
+
+    Метрики считаются НЕПОСРЕДСТВЕННО из регистров (а не по-знаковому balance_after),
+    поэтому корректны при целевой конвенции знаков (income = начислено, expense = списано):
+
+      - начислено по услугам  = Σ income записей accounts_register с видом услуги;
+      - оплачено по услугам   = Σ expense записей accounts_register с видом услуги
+                                 (это же и есть строки «списание»);
+      - внесено на счёт       = Σ(income - expense) из cash_register;
+      - долг по услуге        = начислено - оплачено;
+      - переплата (аванс)     = внесено - оплачено (>=0) — свободные деньги сверх
+                                 распределённых по услугам.
+    """
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise KeyError(account_id)
+
+    # Свод по услугам из регистра взаиморасчётов.
+    svc_rows = db.execute(
+        text("""
+            SELECT services_type_id,
+                   COALESCE(SUM(income), 0)  AS accrued,
+                   COALESCE(SUM(expense), 0) AS paid
+            FROM accounts_register
+            WHERE account_id = :a AND services_type_id IS NOT NULL
+            GROUP BY services_type_id
+            ORDER BY MIN(id)
+        """),
+        {"a": account_id},
+    ).fetchall()
+
+    services = []
+    accrued_total = 0.0
+    paid_total = 0.0
+    for row in svc_rows:
+        svc_id = row[0]
+        accrued = float(row[1] or 0.0)
+        paid = float(row[2] or 0.0)
+        debt = max(0.0, accrued - paid)
+        accrued_total += accrued
+        paid_total += paid
+        services.append(
+            {
+                "services_type_id": svc_id,
+                "service_name": _service_name(db, svc_id),
+                "accrued": round(accrued, 2),
+                "paid": round(paid, 2),
+                "debt": round(debt, 2),
+            }
+        )
+
+    services.sort(key=lambda s: (s["service_name"] or ""))
+
+    # Внесено (доступно) из регистра денежных средств.
+    available = db.execute(
+        text("SELECT COALESCE(SUM(income - expense), 0) FROM cash_register WHERE account_id = :a"),
+        {"a": account_id},
+    ).scalar()
+    available = float(available or 0.0)
+
+    debt_total = max(0.0, accrued_total - paid_total)
+    overpayment = max(0.0, available - paid_total)
+    balance = _current_account_balance(db, account_id)
+
+    apartment = account.apartment
+    owner = apartment.owner if apartment else None
+
+    return {
+        "account": {
+            "id": account.id,
+            "account_number": account.account_number,
+            "account_name": account.account_name,
+        },
+        "apartment": (
+            {
+                "id": apartment.id,
+                "apartment_number": apartment.apartment_number,
+                "address": apartment.address,
+            }
+            if apartment
+            else None
+        ),
+        "owner": (
+            {
+                "id": owner.id,
+                "full_name": owner.full_name,
+                "phone": owner.phone,
+            }
+            if owner
+            else None
+        ),
+        "metrics": {
+            "accrued_total": round(accrued_total, 2),
+            "paid_total": round(paid_total, 2),
+            "available": round(available, 2),
+            "debt_total": round(debt_total, 2),
+            "overpayment": round(overpayment, 2),
+            "balance": round(balance, 2),
+        },
+        "services": services,
+    }
+
+
+@api_router.get("/accounts/{account_id}/statement")
+def get_account_statement(account_id: int, db: Session = Depends(get_db)):
+    """Отчёт по лицевому счёту: начислено / оплачено / долг по услугам, внесено / переплата."""
+    try:
+        return build_account_statement(db, account_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Лицевой счёт не найден")
 
 
 @api_router.get("/receipt_documents/{document_id}/items")
@@ -2179,6 +2421,11 @@ def get_list(
             joinedload(AccountsRegister.accrual).joinedload(AccrualsRegister.accrual_document),
             joinedload(AccountsRegister.transaction),
         )
+    elif resource == "cash_register":
+        query = query.options(
+            joinedload(CashRegister.account).joinedload(Account.apartment),
+            joinedload(CashRegister.transaction),
+        )
     elif resource == "accruals_register":
         query = query.options(
             joinedload(AccrualsRegister.account).joinedload(Account.apartment),
@@ -2243,10 +2490,14 @@ def get_list(
                     )
                 )
         elif _sort == "apartment.apartment_number":
-            # Сортировка по № квартиры. Для начислений/взаиморасчётов квартира
-            # находится через лицевой счёт, для показаний — напрямую.
-            if resource in ("accruals_register", "accounts_register"):
-                table = "accruals_register" if resource == "accruals_register" else "accounts_register"
+            # Сортировка по № квартиры. Для регистров (начислений, взаиморасчётов,
+            # денежных средств) квартира находится через лицевой счёт, для показаний — напрямую.
+            if resource in ("accruals_register", "accounts_register", "cash_register"):
+                table = {
+                    "accruals_register": "accruals_register",
+                    "accounts_register": "accounts_register",
+                    "cash_register": "cash_register",
+                }[resource]
                 query = query.order_by(
                     order_func(
                         text("""(SELECT a.apartment_number FROM apartments a
@@ -2298,6 +2549,11 @@ async def get_resource_item(
             joinedload(AccountsRegister.services_type),
             joinedload(AccountsRegister.accrual).joinedload(AccrualsRegister.accrual_document),
             joinedload(AccountsRegister.transaction),
+        ).filter(model.id == item_id).first()
+    elif resource == "cash_register":
+        item = db.query(model).options(
+            joinedload(CashRegister.account).joinedload(Account.apartment),
+            joinedload(CashRegister.transaction),
         ).filter(model.id == item_id).first()
     elif resource == "accruals_register":
         item = db.query(model).options(
@@ -2357,7 +2613,7 @@ async def get_resource_item(
 async def create_resource_item(
     resource: str, payload: dict[str, Any] = Body(...), db: Session = Depends(get_db)
 ):
-    if resource in ["accounts_register"]:
+    if resource in ["accounts_register", "cash_register"]:
         raise HTTPException(
             status_code=403,
             detail=f"Создание записей в '{resource}' запрещено."
@@ -2400,6 +2656,17 @@ async def create_resource_item(
         db.commit()
         db.refresh(item)
 
+        # Шаг 3.4: автоматически выполняем списание задолженности по счёту документа.
+        # Документ «Приход/Расход» уже записал движение в cash_register; пересчитываем
+        # разнесение по услугам. Идемпотентно (списание перестраивается заново).
+        # Ошибка здесь не откатывает создание самого документа.
+        try:
+            calculate_write_offs(db, [item.account_id])
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Ошибка авт. списания при создании документа Приход/Расход")
+
     serializer = SERIALIZERS.get(model)
     row = serializer(item) if serializer else {"id": item.id}
     return row
@@ -2412,7 +2679,7 @@ async def update_resource_item(
     payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
 ):
-    if resource in ["accounts_register"]:
+    if resource in ["accounts_register", "cash_register"]:
         raise HTTPException(
             status_code=403,
             detail=f"Обновление записей в '{resource}' запрещено."
@@ -2466,7 +2733,7 @@ async def update_resource_item(
 async def delete_resource_item(
     resource: str, item_id: int, db: Session = Depends(get_db)
 ):
-    if resource in ["accounts_register"]:
+    if resource in ["accounts_register", "cash_register"]:
         raise HTTPException(
             status_code=403,
             detail=f"Удаление записей из '{resource}' запрещено."

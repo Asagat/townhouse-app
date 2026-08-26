@@ -38,7 +38,7 @@ def seed():
         db.flush()
 
         # 3. Создаем Тип услуги (теперь с правильным полем services_type)
-        service = ServiceType(services_type="Холодная вода")
+        service = ServiceType(services_type="Холодная вода", priority=2)
         db.add(service)
         db.flush()
 

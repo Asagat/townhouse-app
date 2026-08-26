@@ -23,6 +23,8 @@ import { RecordFormModal } from "../components/common/RecordFormModal";
 import { BulkReadingsModal } from "../components/meter-readings/BulkReadingsModal";
 import { AccrualsCalculationModal } from "../components/accruals/AccrualsCalculationModal";
 import { ReceiptsModal } from "../components/receipts/ReceiptsModal";
+import { ReceiptViewModal } from "../components/receipts/ReceiptViewModal";
+import { WriteOffsModal } from "../components/writeoffs/WriteOffsModal";
 import type { SortOrder } from "antd/es/table/interface";
 import { BRAND } from "../config/colors";
 
@@ -169,12 +171,14 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const [accrualsModalOpen, setAccrualsModalOpen] = useState(false);
     const [editingAccrualDocumentId, setEditingAccrualDocumentId] = useState<number | undefined>(undefined);
     const [receiptsModalOpen, setReceiptsModalOpen] = useState(false);
+    const [receiptViewId, setReceiptViewId] = useState<number | undefined>(undefined);
+    const [writeOffsModalOpen, setWriteOffsModalOpen] = useState(false);
 
     const isAccrualsRegister = resourceName === "accruals_register";
     const isAccrualDocuments = resourceName === "accrual_documents";
     const isMeterReadingDocuments = resourceName === "meter_reading_documents";
     const isMeterReadings = resourceName === "meter_readings";
-    const isReadOnly = resourceName === "accounts_register";
+    const isReadOnly = resourceName === "accounts_register" || resourceName === "cash_register";
     const isReceiptDocuments = resourceName === "receipt_documents";
     // Регистры формируются документами и не поддерживают прямое редактирование/удаление
     const isRegister = isAccrualsRegister || isMeterReadings || isReadOnly;
@@ -288,12 +292,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                   <Space>
                                       <Button
                                           size="small"
-                                          onClick={() =>
-                                              window.open(
-                                                  `${apiUrl}/receipt_documents/${record.id}/pdf?inline=1`,
-                                                  "_blank",
-                                              )
-                                          }
+                                          onClick={() => setReceiptViewId(record.id)}
                                       >
                                           Просмотр
                                       </Button>
@@ -512,6 +511,15 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         </Button>
                     )}
 
+                    {resourceName === "payments" && (
+                        <Button
+                            type="primary"
+                            onClick={() => setWriteOffsModalOpen(true)}
+                        >
+                            Выполнить списание
+                        </Button>
+                    )}
+
                     {!isReadOnly && !isAccrualsRegister && !isAccrualDocuments && !isMeterReadingDocuments && !isMeterReadings && !isReceiptDocuments && (
                         <Button
                             type="primary"
@@ -584,9 +592,25 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             )}
 
             {isReceiptDocuments && (
+                <ReceiptViewModal
+                    open={receiptViewId !== undefined}
+                    receiptId={receiptViewId}
+                    onClose={() => setReceiptViewId(undefined)}
+                />
+            )}
+
+            {isReceiptDocuments && (
                 <ReceiptsModal
                     open={receiptsModalOpen}
                     onClose={() => setReceiptsModalOpen(false)}
+                    onSaved={() => tableQuery.refetch()}
+                />
+            )}
+
+            {resourceName === "payments" && (
+                <WriteOffsModal
+                    open={writeOffsModalOpen}
+                    onClose={() => setWriteOffsModalOpen(false)}
                     onSaved={() => tableQuery.refetch()}
                 />
             )}

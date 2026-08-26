@@ -6,3 +6,4 @@ sqladmin
 pydantic
 pydantic-settings
 reportlab
+pytest

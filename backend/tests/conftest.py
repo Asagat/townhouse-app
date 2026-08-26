@@ -1,0 +1,108 @@
+# tests/conftest.py
+
+"""
+Настройка pytest для бэкенда.
+
+Тесты работают против реальной БД PostgreSQL (см. backend/database.py), используя
+ОТДЕЛЬНЫЕ сущности с уникальными метками (owner.first_name == маркер теста), которые
+всегда удаляются после прохождения теста. Подходить к БД без изолированной схемы
+нельзя назвать идеальным, но для проекта без Alembic/тестовой схемы это единственный
+прагматичный вариант: тесты идемпотентны и не оставляют следов.
+
+Запуск из каталога backend:  python -m pytest tests/ -q
+Для корректного импорта модулей (модели используют неявные относительные импорты)
+тесты добавляют каталог backend в sys.path.
+"""
+
+import os
+import sys
+
+import pytest
+
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
+
+from database import SessionLocal  # noqa: E402
+from models import (  # noqa: E402
+    Account,
+    Apartment,
+    CashPoint,
+    Owner,
+    Transaction,
+    TransactionTypeEnum,
+)
+from sqlalchemy import text  # noqa: E402
+
+
+@pytest.fixture()
+def db():
+    """Сессия БД. Каждый тест получает свежую сессию."""
+    session = SessionLocal()
+    yield session
+    session.close()
+
+
+@pytest.fixture()
+def account_factory(db):
+    """
+    Фабрика создания лицевого счёта с уникальной меткой и автоочисткой.
+
+    Возвращает функцию, которая создаёт owner/apartment/account/cash_point и
+    возвращает dict с ключами: account_id, owner_id, apartment_id, cash_point_id.
+    Все созданные сущности гарантированно удаляются по завершении теста.
+    """
+    created: list[dict] = []
+
+    def _make(marker: str):
+        own = Owner(full_name=f"{marker} T", first_name=marker, last_name="O")
+        db.add(own)
+        db.flush()
+        apt = Apartment(
+            apartment_number=_next_apartment_number(db),
+            address=marker,
+            square=1,
+            owner_id=own.id,
+        )
+        db.add(apt)
+        db.flush()
+        acc = Account(
+            account_number=f"{marker}-ACCT",
+            account_name=marker,
+            is_active=True,
+            apartment_id=apt.id,
+        )
+        db.add(acc)
+        db.flush()
+        cp = CashPoint(name=f"{marker}-CP")
+        db.add(cp)
+        db.flush()
+        db.commit()
+        record = {
+            "account_id": acc.id,
+            "owner_id": own.id,
+            "apartment_id": apt.id,
+            "cash_point_id": cp.id,
+        }
+        created.append(record)
+        return record
+
+    yield _make
+
+    # Очистка: удаляем в правильном порядке (обратном связям).
+    for rec in created:
+        account_id = rec["account_id"]
+        db.execute(text("DELETE FROM cash_register WHERE account_id = :a"), {"a": account_id})
+        db.execute(text("DELETE FROM accounts_register WHERE account_id = :a"), {"a": account_id})
+        db.execute(text("DELETE FROM transactions WHERE account_id = :a"), {"a": account_id})
+        db.execute(text("DELETE FROM accounts WHERE id = :a"), {"a": account_id})
+        db.execute(text("DELETE FROM apartments WHERE id = :a"), {"a": rec["apartment_id"]})
+        db.execute(text("DELETE FROM owners WHERE id = :a"), {"a": rec["owner_id"]})
+        db.execute(text("DELETE FROM cash_points WHERE id = :a"), {"a": rec["cash_point_id"]})
+    db.commit()
+
+
+def _next_apartment_number(db) -> int:
+    """Возвращает уникальный номер квартиры, не конфликтующий с существующими."""
+    max_val = db.execute(text("SELECT COALESCE(MAX(apartment_number), 0) FROM apartments")).scalar()
+    return int(max_val or 0) + 100000  # заведомо выше реальных
