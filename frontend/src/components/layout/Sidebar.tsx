@@ -3,11 +3,12 @@ import { useLogout, useGetIdentity } from "@refinedev/core";
 import { Button, Tooltip } from "antd";
 import { LogoutOutlined, UserOutlined } from "@ant-design/icons";
 import { COLORS } from "../../config/colors";
-import { categories } from "../../config/menu";
+import { categories as allCategories } from "../../config/menu";
 import { useSidebarState } from "../../hooks/useSidebarState";
 import { SidebarHeader } from "./SidebarHeader";
 import { SidebarCollapsedCategory } from "./SidebarCollapsedCategory";
 import { SidebarExpandedCategory } from "./SidebarExpandedCategory";
+import { filterCategoriesByRole } from "../../auth/menuAccess";
 
 // --- БОКОВОЕ МЕНЮ (визуально повторяет админ-панель sqladmin) ---
 export const Sidebar = () => {
@@ -21,6 +22,9 @@ export const Sidebar = () => {
 
     const displayName =
         identity?.full_name || identity?.username || identity?.role_name || identity?.role || "";
+
+    // Меню фильтруется по роли текущего пользователя.
+    const categories = filterCategoriesByRole(identity?.role ?? "", allCategories);
 
     return (
         <div

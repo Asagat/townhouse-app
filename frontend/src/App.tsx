@@ -14,7 +14,7 @@ import { ConfigProvider, Spin } from "antd";
 import ruRU from "antd/locale/ru_RU";
 import "dayjs/locale/ru";
 import "antd/dist/reset.css";
-import { allResources } from "./config/menu";
+import { categories } from "./config/menu";
 import { BRAND, ANT_PRIMARY } from "./config/colors";
 import { Sidebar } from "./components/layout/Sidebar";
 import { GenericList } from "./pages/GenericList";
@@ -22,6 +22,11 @@ import { Login } from "./pages/Login";
 import { Users } from "./pages/Users";
 import { authProvider } from "./auth/authProvider";
 import { apiUrl, http } from "./auth/http";
+import { filterCategoriesByRole } from "./auth/menuAccess";
+import { getIdentity } from "./auth/token";
+
+const resourceForRoute = (key: string) =>
+    key === "users" ? <Users /> : <GenericList resourceName={key} />;
 
 // Обёртка защищённых страниц: если нет авторизации — на /login.
 const ProtectedLayout = () => {
@@ -49,6 +54,12 @@ const ProtectedLayout = () => {
 };
 
 const App = () => {
+    // Ресурсы, видимые текущему пользователю (сокрытие меню/роутов по роли).
+    const role = getIdentity()?.role ?? "";
+    const visibleCategories = filterCategoriesByRole(role, categories);
+    const visibleItems = visibleCategories.flatMap((c) => c.items);
+    const defaultResource = visibleItems[0]?.key ?? "owners";
+
     return (
         <ConfigProvider
             locale={ruRU}
@@ -76,7 +87,7 @@ const App = () => {
                     dataProvider={dataProvider(apiUrl, http)}
                     authProvider={authProvider}
                     routerProvider={routerBindings}
-                    resources={allResources.map((r) => ({
+                    resources={visibleItems.map((r) => ({
                         name: r.key,
                         list: `/${r.key}`,
                     }))}
@@ -86,19 +97,13 @@ const App = () => {
                         <Route element={<ProtectedLayout />}>
                             <Route
                                 index
-                                element={<NavigateToResource resource="owners" />}
+                                element={<NavigateToResource resource={defaultResource} />}
                             />
-                            {allResources.map((r) => (
+                            {visibleItems.map((r) => (
                                 <Route
                                     key={r.key}
                                     path={`/${r.key}`}
-                                    element={
-                                        r.key === "users" ? (
-                                            <Users />
-                                        ) : (
-                                            <GenericList resourceName={r.key} />
-                                        )
-                                    }
+                                    element={resourceForRoute(r.key)}
                                 />
                             ))}
                         </Route>
