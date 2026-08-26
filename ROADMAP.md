@@ -73,4 +73,13 @@
 - ✅ Отчёт по лицевому счёту `GET /api/accounts/{id}/statement`: начислено / оплачено / долг по услугам, внесено / переплата (для отчёта и будущего ЛК).
 - ✅ pytest: 8 тестов в `backend/tests/` (регистр денежных средств, приоритет списания, идемпотентность, переплата, отчёт) — зафиксирована логика Фаз 1–4.
 - ✅ Скрипт миграции исторических данных `backend/migrations/migrate_old_payments_to_cash_register.py` (перенос старых оплат из `accounts_register` в `cash_register` с защитой от дублей).
+
+### ✅ Аутентификация и ролевой доступ
+- ✅ Пункт 1.3: модель `User` + роль (5 ролей: admin/operator/cashier/controller/resident), миграция Alembic `0001_users` (legacy `users` пустая — пересоздана чисто).
+- ✅ JWT-логин: `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/users` (только admin). Хеш паролей PBKDF2-SHA256 (stdlib).
+- ✅ Ролевой доступ: `permissions.py` (generic CRUD по (метод, ресурс)) + защита спец-эндпоинтов (начисление/списание/пересбор/отчёт).
+- ✅ CORS: явные origins из `CORS_ORIGINS` (по умолчанию `townhouse.sagacloud.kz` + localhost), вместо `['*']`.
+- ✅ CLI: `backend/create_user.py` для первоначального заведения админа.
+- ✅ pytest: тесты auth (хеш, JWT, login, andери-роли) + HTTP-тесты ролевого доступа через TestClient (httpx).
+- ⏳ Экран ЛК резидента (только свой счёт) — отдельный этап.
 - ⏳ Дальнейшее: Alembic вместо ручных миграций, аутентификация, экран ЛК потребителя (использует `statement`).

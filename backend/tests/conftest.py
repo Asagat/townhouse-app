@@ -31,8 +31,11 @@ from models import (  # noqa: E402
     Owner,
     Transaction,
     TransactionTypeEnum,
+    User,
+    UserRole,
 )
 from sqlalchemy import text  # noqa: E402
+from auth import hash_password  # noqa: E402
 
 
 @pytest.fixture()
@@ -41,6 +44,32 @@ def db():
     session = SessionLocal()
     yield session
     session.close()
+
+
+@pytest.fixture()
+def user_factory(db):
+    """Фабрика создания пользователя с автоочисткой."""
+    created_ids: list[int] = []
+
+    def _make(marker: str, role: UserRole, password: str = "pass123"):
+        u = User(
+            username=f"{marker}-user",
+            password_hash=hash_password(password),
+            full_name=marker,
+            role=role,
+            is_active=True,
+        )
+        db.add(u)
+        db.commit()
+        db.refresh(u)
+        created_ids.append(u.id)
+        return u
+
+    yield _make
+
+    if created_ids:
+        db.execute(text("DELETE FROM users WHERE id = ANY(:ids)"), {"ids": created_ids})
+        db.commit()
 
 
 @pytest.fixture()

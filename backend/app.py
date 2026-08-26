@@ -12,9 +12,21 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 from database import engine, get_db
-from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Query, Response
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+
+from auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -48,6 +60,8 @@ from models import (
     TariffType,
     Transaction,
     TransactionTypeEnum,
+    User,
+    UserRole,
     recalculate_account_balance,
 )
 from sqlalchemy.exc import IntegrityError
@@ -56,15 +70,22 @@ from sqlalchemy import desc, asc, text
 
 import receipt_config as rc
 from writeoffs import calculate_write_offs, rebuild_accounts_register, check_register_integrity
+from permissions import require_resource_access
 
 # Инициализация основного приложения
 app = FastAPI(title="Townhouse ERP System")
 logger = logging.getLogger(__name__)
 
 # --- НАСТРОЙКА CORS ---
+# Разрешённые источники берутся из CORS_ORIGINS (разделитель — запятая).
+# По умолчанию — прод-домен и localhost для разработки. allow_origins=["*"]
+# совместно с allow_credentials=True браузерами не поддерживается, поэтому листим явно.
+_DEFAULT_ORIGINS = "https://townhouse.sagacloud.kz,http://localhost:5173"
+_cors_src = os.getenv("CORS_ORIGINS", _DEFAULT_ORIGINS)
+_cors_origins = [o.strip() for o in _cors_src.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -73,6 +94,84 @@ app.add_middleware(
 
 # --- НАСТРОЙКА API РОУТЕРА ---
 api_router = APIRouter(prefix="/api")
+
+# --- АУТЕНТИФИКАЦИЯ ---
+# Отдельный роутер, включается РАНЬШЕ api_router, чтобы /api/auth/* не попадал
+# в catch-all api_router (POST /{resource}).
+auth_router = APIRouter(prefix="/api/auth")
+
+
+def _user_serializer(user: User) -> dict:
+    return {
+        "id": user.id,
+        "username": user.username,
+        "full_name": user.full_name,
+        "role": user.role.name if hasattr(user.role, "name") else str(user.role),
+        "role_name": user.role.value if hasattr(user.role, "value") else str(user.role),
+        "is_active": user.is_active,
+    }
+
+
+@auth_router.post("/login")
+def login(payload: dict[str, Any] = Body(...), db: Session = Depends(get_db)):
+    """Вход по логину/паролю. Возвращает JWT и данные пользователя."""
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+    if not username or not password:
+        raise HTTPException(status_code=422, detail="Укажите логин и пароль")
+
+    user = db.query(User).filter(User.username == username).first()
+    # Одинаковый ответ и при «нет пользователя», и при неверном пароле — не выдаём,
+    # какой из вариантов сработал.
+    if not user or not user.is_active or not verify_password(password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+
+    token = create_access_token(user)
+    return {"access_token": token, "token_type": "bearer", "user": _user_serializer(user)}
+
+
+@auth_router.get("/me")
+def me(user: User = Depends(get_current_user)):
+    """Текущий пользователь по токену."""
+    return _user_serializer(user)
+
+
+@auth_router.post("/users", status_code=status.HTTP_201_CREATED)
+def create_user(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("admin")),
+):
+    """Создание пользователя (только администратор)."""
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+    role_raw = payload.get("role") or "cashier"
+    full_name = payload.get("full_name")
+
+    if not username or not password:
+        raise HTTPException(status_code=422, detail="Логин и пароль обязательны")
+    try:
+        role = UserRole[role_raw]
+    except KeyError:
+        raise HTTPException(status_code=422, detail="Недопустимая роль")
+    if db.query(User).filter(User.username == username).first():
+        raise HTTPException(status_code=409, detail="Пользователь с таким логином уже существует")
+
+    user = User(
+        username=username,
+        password_hash=hash_password(password),
+        full_name=full_name,
+        role=role,
+        is_active=True,
+    )
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Не удалось создать пользователя") from exc
+    db.refresh(user)
+    return _user_serializer(user)
 
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ СЕРИАЛИЗАЦИИ ---
@@ -1532,7 +1631,8 @@ async def calculate_accruals(
 @api_router.post("/accruals_register/generate", status_code=201)
 async def generate_accruals(
     payload: dict[str, Any] = Body(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _auth: User = Depends(require_roles("operator", "admin")),
 ):
     """
     Создаёт документ начислений и строки регистра за одну транзакцию.
@@ -1939,6 +2039,7 @@ def generate_receipts(
 def run_write_offs(
     payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
+    _auth: User = Depends(require_roles("operator", "admin")),
 ):
     """
     Операция «Списание задолженностей».
@@ -1974,6 +2075,7 @@ def run_write_offs(
 def rebuild_registers(
     payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
+    _auth: User = Depends(require_roles("operator", "admin")),
 ):
     """
     Полный пересбор производного среза (accounts_register) «с нуля» из первичных
@@ -2122,8 +2224,16 @@ def build_account_statement(db: Session, account_id: int) -> dict:
 
 
 @api_router.get("/accounts/{account_id}/statement")
-def get_account_statement(account_id: int, db: Session = Depends(get_db)):
-    """Отчёт по лицевому счёту: начислено / оплачено / долг по услугам, внесено / переплата."""
+def get_account_statement(
+    account_id: int,
+    db: Session = Depends(get_db),
+    _auth: User = Depends(get_current_user),
+):
+    """Отчёт по лицевому счёту: начислено / оплачено / долг по услугам, внесено / переплата.
+
+    Доступен любой аутентифицированной роли. Для роли resident в будущем (ЛК)
+    будет ограничение только своим счётом.
+    """
     try:
         return build_account_statement(db, account_id)
     except KeyError:
@@ -2449,7 +2559,9 @@ def get_list(
     _end: int = 10,
     _sort: str | None = None,
     _order: str | None = None,
-    db: Session = Depends(get_db)
+    request: Request = None,
+    db: Session = Depends(get_db),
+    _auth: User = Depends(require_resource_access),
 ):
     if resource not in MODEL_MAP:
         raise HTTPException(status_code=404, detail="Resource not found")
@@ -2580,7 +2692,9 @@ def get_list(
 async def get_resource_item(
     resource: str,
     item_id: int,
-    db: Session = Depends(get_db)
+    request: Request = None,
+    db: Session = Depends(get_db),
+    _auth: User = Depends(require_resource_access),
 ):
     model = MODEL_MAP.get(resource)
     if not model:
@@ -2654,7 +2768,11 @@ async def get_resource_item(
 
 @api_router.post("/{resource}", status_code=201)
 async def create_resource_item(
-    resource: str, payload: dict[str, Any] = Body(...), db: Session = Depends(get_db)
+    resource: str,
+    payload: dict[str, Any] = Body(...),
+    request: Request = None,
+    db: Session = Depends(get_db),
+    _auth: User = Depends(require_resource_access),
 ):
     if resource in ["accounts_register", "cash_register"]:
         raise HTTPException(
@@ -2720,7 +2838,9 @@ async def update_resource_item(
     resource: str,
     item_id: int,
     payload: dict[str, Any] = Body(...),
+    request: Request = None,
     db: Session = Depends(get_db),
+    _auth: User = Depends(require_resource_access),
 ):
     if resource in ["accounts_register", "cash_register"]:
         raise HTTPException(
@@ -2774,7 +2894,11 @@ async def update_resource_item(
 
 @api_router.delete("/{resource}/{item_id}", status_code=204)
 async def delete_resource_item(
-    resource: str, item_id: int, db: Session = Depends(get_db)
+    resource: str,
+    item_id: int,
+    request: Request = None,
+    db: Session = Depends(get_db),
+    _auth: User = Depends(require_resource_access),
 ):
     if resource in ["accounts_register", "cash_register"]:
         raise HTTPException(
@@ -2803,4 +2927,5 @@ async def delete_resource_item(
     return Response(status_code=204)
 
 
+app.include_router(auth_router)
 app.include_router(api_router)

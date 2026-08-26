@@ -28,6 +28,32 @@ class TransactionTypeEnum(enum.Enum):
     out_bank = "Расход из банка"
 
 
+class UserRole(enum.Enum):
+    admin = "Администратор"
+    operator = "Оператор"
+    cashier = "Кассир"
+    controller = "Контролер"
+    resident = "Житель"
+
+
+# --- ПОЛЬЗОВАТЕЛИ ---
+
+
+class User(Base):
+    """Пользователь системы с ролью для доступа к функциям."""
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(100), nullable=False, unique=True)
+    # Соль и хеш пароля (PBKDF2-SHA256), формат: <iterations>$<salt_hex>$<hash_hex>.
+    password_hash = Column(String(255), nullable=False)
+    full_name = Column(String(255))
+    # Роль хранится строкой (имя члена UserRole, напр. 'admin'), без нативного PG-enum.
+    role = Column(Enum(UserRole, native_enum=False), nullable=False, default=UserRole.cashier)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+
 # --- СПРАВОЧНИКИ ---
 
 

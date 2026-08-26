@@ -8,3 +8,5 @@ pydantic-settings
 reportlab
 pytest
 alembic
+PyJWT
+httpx
