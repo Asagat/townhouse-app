@@ -1965,7 +1965,7 @@ def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
         _fmt_amount2(receipt.payable_amount),
     ])
 
-    col_widths = [110, 70, 70, 62, 62, 80, 62, 70, 80]
+    col_widths = [88, 48, 48, 55, 55, 72, 55, 58, 66]
     table = Table(data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
@@ -1990,7 +1990,10 @@ def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
 
     story = header + [Spacer(1, 2), table] + footer
     buf = io.BytesIO()
-    SimpleDocTemplate(buf, pagesize=A4, topMargin=40, bottomMargin=40, leftMargin=40, rightMargin=40).build(story)
+    SimpleDocTemplate(
+        buf, pagesize=A4,
+        topMargin=40, bottomMargin=40, leftMargin=25, rightMargin=25,
+    ).build(story)
     return buf.getvalue()
 
 
