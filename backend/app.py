@@ -5,6 +5,7 @@ import enum
 import io
 import json
 import logging
+import os
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
@@ -20,6 +21,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
+    Image,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -1930,21 +1932,55 @@ def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
         "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
     ]
     period = f"{month_names[receipt.period_month - 1].capitalize()} {receipt.period_year}"
-    header = [
-        Paragraph("Квитанция", title_style),
-        Paragraph("Family Townhouse", title_style),
-        Paragraph(period, period_style),
+    # Логотип (если файл доступен) — слева в шапке
+    logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "FTH.png")
+    has_logo = os.path.exists(logo_path)
+
+    logo_w = 46.0
+    # FTH.png 73x90: сохраняем пропорции
+    logo_h = logo_w * (90 / 73)
+
+    header = []
+    if has_logo:
+        brand = Table(
+            [
+                [
+                    Image(logo_path, width=logo_w, height=logo_h),
+                    Table(
+                        [[Paragraph("Квитанция", title_style)],
+                         [Paragraph("Family Townhouse", title_style)]],
+                        colWidths=[None],
+                    ),
+                ]
+            ],
+            colWidths=[logo_w + 8, None],
+            hAlign="LEFT",
+        )
+        brand.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                   ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                   ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+        header.append(brand)
+    else:
+        header.append(Paragraph("Квитанция", title_style))
+        header.append(Paragraph("Family Townhouse", title_style))
+    header.append(Paragraph(period, period_style))
+    header.append(
         Paragraph(
             f"Квартира № {receipt.apartment_number} {receipt.owner_name}",
             head_style,
-        ),
-    ]
+        )
+    )
 
-    columns = [
-        "Услуга", "Последние", "Предыдущие", "Количество",
-        "Тариф", "Сумма", "Долг", "Переплата", "К оплате",
+    # Двухуровневая шапка: «Показания» — объединённая ячейка над Посл./Пред.
+    data = [
+        [
+            "Услуга", "Показания", "Показания", "Кол-во",
+            "Тариф", "Сумма", "Долг", "Переплата", "К оплате",
+        ],
+        [
+            "", "Посл.", "Пред.", "", "", "", "", "", "",
+        ],
     ]
-    data = [columns]
     for it in sorted(receipt.items, key=lambda x: (x.services_type_id is None, x.id)):
         data.append([
             it.service_name,
@@ -1958,24 +1994,35 @@ def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
             _fmt_amount2(it.payable),
         ])
     data.append([
-        "Итого", "", "", "",
-        "", _fmt_amount2(receipt.total_amount),
+        "Итого", "", "", "", "", _fmt_amount2(receipt.total_amount),
         _fmt_amount2(receipt.debt) if receipt.debt else "0,00",
         _fmt_amount2(receipt.overpayment) if receipt.overpayment else "0,00",
         _fmt_amount2(receipt.payable_amount),
     ])
 
     col_widths = [88, 48, 48, 55, 55, 72, 55, 58, 66]
-    table = Table(data, colWidths=col_widths, repeatRows=1)
+    table = Table(data, colWidths=col_widths, repeatRows=2)
     table.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.Color(0.93, 0.93, 0.93)),
+        ("BACKGROUND", (0, 0), (-1, 1), colors.Color(0.93, 0.93, 0.93)),
         ("FONTNAME", (0, 0), (-1, -1), FONT),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+        ("FONTNAME", (0, 0), (-1, 1), FONT_B),
+        ("ALIGN", (1, 2), (-1, -1), "RIGHT"),
+        ("ALIGN", (1, 0), (-1, 1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        # Объединение ячеек шапки (строка 0 и 1)
+        ("SPAN", (1, 0), (2, 0)),
+        ("SPAN", (0, 0), (0, 1)),
+        ("SPAN", (3, 0), (3, 1)),
+        ("SPAN", (4, 0), (4, 1)),
+        ("SPAN", (5, 0), (5, 1)),
+        ("SPAN", (6, 0), (6, 1)),
+        ("SPAN", (7, 0), (7, 1)),
+        ("SPAN", (8, 0), (8, 1)),
+        ("SPAN", (0, -1), (4, -1)),
         ("FONTNAME", (0, -1), (-1, -1), FONT_B),
         ("BACKGROUND", (0, -1), (-1, -1), colors.Color(0.96, 0.96, 0.96)),
     ]))
