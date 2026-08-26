@@ -1,6 +1,6 @@
 // --- App.tsx ---
 
-import { Refine } from "@refinedev/core";
+import { Refine, useIsAuthenticated } from "@refinedev/core";
 import dataProvider from "@refinedev/simple-rest";
 import routerBindings, { NavigateToResource } from "@refinedev/react-router-v6";
 import {
@@ -8,8 +8,9 @@ import {
     Routes,
     Route,
     Outlet,
+    Navigate,
 } from "react-router-dom";
-import { ConfigProvider } from "antd";
+import { ConfigProvider, Spin } from "antd";
 import ruRU from "antd/locale/ru_RU";
 import "dayjs/locale/ru";
 import "antd/dist/reset.css";
@@ -17,6 +18,34 @@ import { allResources } from "./config/menu";
 import { BRAND, ANT_PRIMARY } from "./config/colors";
 import { Sidebar } from "./components/layout/Sidebar";
 import { GenericList } from "./pages/GenericList";
+import { Login } from "./pages/Login";
+import { authProvider } from "./auth/authProvider";
+import { apiUrl, http } from "./auth/http";
+
+// Обёртка защищённых страниц: если нет авторизации — на /login.
+const ProtectedLayout = () => {
+    const { data, isLoading } = useIsAuthenticated();
+    const authenticated = data?.authenticated === true;
+
+    if (isLoading) {
+        return (
+            <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Spin size="large" />
+            </div>
+        );
+    }
+    if (!authenticated) {
+        return <Navigate to="/login" replace />;
+    }
+    return (
+        <div style={{ display: "flex", minHeight: "100vh" }}>
+            <Sidebar />
+            <div style={{ flex: 1, padding: "40px", background: "#f2f8f3" }}>
+                <Outlet />
+            </div>
+        </div>
+    );
+};
 
 const App = () => {
     return (
@@ -43,7 +72,8 @@ const App = () => {
         >
             <BrowserRouter>
                 <Refine
-                    dataProvider={dataProvider("/api")}
+                    dataProvider={dataProvider(apiUrl, http)}
+                    authProvider={authProvider}
                     routerProvider={routerBindings}
                     resources={allResources.map((r) => ({
                         name: r.key,
@@ -51,22 +81,8 @@ const App = () => {
                     }))}
                 >
                     <Routes>
-                        <Route
-                            element={
-                                <div style={{ display: "flex", minHeight: "100vh" }}>
-                                    <Sidebar />
-                                    <div
-                                        style={{
-                                            flex: 1,
-                                            padding: "40px",
-                                            background: "#f2f8f3",
-                                        }}
-                                    >
-                                        <Outlet />
-                                    </div>
-                                </div>
-                            }
-                        >
+                        <Route path="/login" element={<Login />} />
+                        <Route element={<ProtectedLayout />}>
                             <Route
                                 index
                                 element={<NavigateToResource resource="owners" />}
