@@ -10,6 +10,7 @@ from sqlalchemy import (
     Date,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -345,6 +346,10 @@ class CashRegister(Base):
     expense = реальный расход. Смысл знаков см. в блоке «КОНВЕНЦИЯ ЗНАКОВ».
     """
     __tablename__ = "cash_register"
+    # Индекс для быстрого пересчёта баланса регистра по счёту (ORDER BY operation_date, id).
+    __table_args__ = (
+        Index("idx_cash_register_account_date", "account_id", "operation_date", "id"),
+    )
     id = Column(Integer, primary_key=True, autoincrement=True)
     operation_date = Column(TIMESTAMP, server_default=func.now())
     account_id = Column(
