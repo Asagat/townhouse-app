@@ -24,6 +24,7 @@ import { BulkReadingsModal } from "../components/meter-readings/BulkReadingsModa
 import { AccrualsCalculationModal } from "../components/accruals/AccrualsCalculationModal";
 import { ReceiptsModal } from "../components/receipts/ReceiptsModal";
 import type { SortOrder } from "antd/es/table/interface";
+import { BRAND } from "../config/colors";
 
 interface GenericListProps {
     resourceName: string;
@@ -457,7 +458,9 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     return (
         <div
             style={{
-                background: "#fff",
+                background: "#ffffff",
+                border: `1px solid ${BRAND.fade}`,
+                boxShadow: "0 1px 3px rgba(34,174,46,0.06)",
                 padding: "30px",
                 borderRadius: "12px",
                 width: "100%",
@@ -472,7 +475,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     marginBottom: 20,
                 }}
             >
-                <h1 style={{ color: "#1f1f1f", margin: 0 }}>
+                <h1 style={{ color: "#14501d", margin: 0 }}>
                     {meta?.label ?? resourceName}
                 </h1>
                 <Space>

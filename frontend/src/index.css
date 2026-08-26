@@ -13,14 +13,29 @@ body,
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
-  background-color: #0f172a;
+  background-color: #f2f8f3;
   min-width: 320px;
 }
 
 a {
   text-decoration: none;
+}
+
+/* Фон закреплённых колонок таблицы (например, «Действия») —
+   приводим к зелёному тону шапки и белому телу, вместо серой подложки antd */
+.ant-table-cell-fix-right,
+.ant-table-cell-fix-left {
+  background-clip: padding-box;
+}
+.ant-table-thead .ant-table-cell-fix-right,
+.ant-table-thead .ant-table-cell-fix-left {
+  background: #e3f3e6 !important;
+}
+.ant-table-tbody .ant-table-cell-fix-right,
+.ant-table-tbody .ant-table-cell-fix-left {
+  background: #ffffff !important;
 }

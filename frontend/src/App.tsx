@@ -14,12 +14,33 @@ import ruRU from "antd/locale/ru_RU";
 import "dayjs/locale/ru";
 import "antd/dist/reset.css";
 import { allResources } from "./config/menu";
+import { BRAND, ANT_PRIMARY } from "./config/colors";
 import { Sidebar } from "./components/layout/Sidebar";
 import { GenericList } from "./pages/GenericList";
 
 const App = () => {
     return (
-        <ConfigProvider locale={ruRU}>
+        <ConfigProvider
+            locale={ruRU}
+            theme={{
+                token: {
+                    colorPrimary: ANT_PRIMARY,
+                    colorLink: ANT_PRIMARY,
+                    colorInfo: BRAND.primary,
+                },
+                components: {
+                    Layout: {
+                        bodyBg: "#f4faf5",
+                    },
+                    Table: {
+                        rowHoverBg: "rgba(34,174,46,0.08)",
+                        headerBg: "#e3f3e6",
+                        headerColor: "#0f4d38",
+                        headerSortActiveBg: "#d5eedb",
+                    },
+                },
+            }}
+        >
             <BrowserRouter>
                 <Refine
                     dataProvider={dataProvider("/api")}
@@ -38,7 +59,7 @@ const App = () => {
                                         style={{
                                             flex: 1,
                                             padding: "40px",
-                                            background: "#f0f2f5",
+                                            background: "#f2f8f3",
                                         }}
                                     >
                                         <Outlet />

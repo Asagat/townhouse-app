@@ -27,7 +27,7 @@ export const SidebarExpandedCategory = ({
                     justifyContent: "space-between",
                     alignItems: "center",
                     padding: "10px 24px",
-                    fontSize: 13,
+                    fontSize: 15,
                     cursor: "pointer",
                     userSelect: "none",
                     color: hasActiveItem ? COLORS.textActive : COLORS.textMuted,
