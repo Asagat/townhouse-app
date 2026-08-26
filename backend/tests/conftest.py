@@ -126,6 +126,9 @@ def account_factory(db):
         db.execute(text("DELETE FROM accruals_register WHERE account_id = :a"), {"a": account_id})
         db.execute(text("DELETE FROM transactions WHERE account_id = :a"), {"a": account_id})
         db.execute(text("DELETE FROM accounts WHERE id = :a"), {"a": account_id})
+        # Показания/счётчики могут быть созданы в тесте; FK к apartments в БД RESTRICT.
+        db.execute(text("DELETE FROM meter_readings WHERE apartment_id = :apt"), {"apt": rec["apartment_id"]})
+        db.execute(text("DELETE FROM meters WHERE apartment_id = :apt"), {"apt": rec["apartment_id"]})
         db.execute(text("DELETE FROM apartments WHERE id = :a"), {"a": rec["apartment_id"]})
         db.execute(text("DELETE FROM owners WHERE id = :a"), {"a": rec["owner_id"]})
         db.execute(text("DELETE FROM cash_points WHERE id = :a"), {"a": rec["cash_point_id"]})

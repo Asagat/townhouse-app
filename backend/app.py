@@ -1242,24 +1242,56 @@ def calculate_accrual_for_account_service(
 
             consumption = current_reading - past_reading
 
+    # Определяем тип тарифа (служебный справочник — защищён от изменений):
+    #  - «По счетчику»   : сумма = тариф × (текущее − предыдущее показание)
+    #  - «Фиксированный» : сумма = тариф (не зависит от счётчика/площади)
+    #  - «По площади»    : сумма = тариф × площадь квартиры
     tariff_type = db.query(TariffType).filter(TariffType.id == tariff.tariff_type_id).first()
     tariff_type_name = tariff_type.name if tariff_type else ""
 
-    if tariff_type_name == "Постоянный":
+    if tariff_type_name == "По площади":
+        square = float(apartment.square or 0.0)
+        amount = float(tariff.price) * square
+        return {
+            "account_id": account.id,
+            "account_id_label": f"№ {apartment.apartment_number} — {apartment.address}",
+            "services_type_id": service_type.id,
+            "services_type_id_label": service_type.services_type,
+            "tariff_id": tariff.id,
+            "tariff_id_label": f"{float(tariff.price)} ₸ × {square} м²",
+            "past_reading_value": past_reading,
+            "current_reading_value": current_reading,
+            "consumption": consumption,
+            "amount": amount,
+        }
+
+    # «Фиксированный» — всегда начисляется, от показаний/площади не зависит.
+    if tariff_type_name == "Фиксированный":
         amount = float(tariff.price)
-    else:
-        amount = consumption * float(tariff.price)
+        return {
+            "account_id": account.id,
+            "account_id_label": f"№ {apartment.apartment_number} — {apartment.address}",
+            "services_type_id": service_type.id,
+            "services_type_id_label": service_type.services_type,
+            "tariff_id": tariff.id,
+            "tariff_id_label": f"{float(tariff.price)} ₸",
+            "past_reading_value": past_reading,
+            "current_reading_value": current_reading,
+            "consumption": consumption,
+            "amount": amount,
+        }
 
-    if consumption <= 0 and tariff_type_name != "Постоянный":
+    # «По счетчику» (и любой иной тип по умолчанию) — по потреблению.
+    if consumption <= 0:
         return None
-
+    amount = float(tariff.price) * consumption
     return {
         "account_id": account.id,
         "account_id_label": f"№ {apartment.apartment_number} — {apartment.address}",
         "services_type_id": service_type.id,
         "services_type_id_label": service_type.services_type,
         "tariff_id": tariff.id,
-        "tariff_id_label": f"{float(tariff.price)} ₸",
+        "tariff_id_label": f"{float(tariff.price)} ₸ × {consumption}",
         "past_reading_value": past_reading,
         "current_reading_value": current_reading,
         "consumption": consumption,
@@ -2846,7 +2878,7 @@ async def create_resource_item(
     db: Session = Depends(get_db),
     _auth: User = Depends(require_resource_access),
 ):
-    if resource in ["accounts_register", "cash_register"]:
+    if resource in ["accounts_register", "cash_register", "tariff_types"]:
         raise HTTPException(
             status_code=403,
             detail=f"Создание записей в '{resource}' запрещено."
@@ -2914,10 +2946,10 @@ async def update_resource_item(
     db: Session = Depends(get_db),
     _auth: User = Depends(require_resource_access),
 ):
-    if resource in ["accounts_register", "cash_register"]:
+    if resource in ["accounts_register", "cash_register", "tariff_types"]:
         raise HTTPException(
             status_code=403,
-            detail=f"Обновление записей в '{resource}' запрещено."
+            detail=f"Редактирование записей в '{resource}' запрещено."
         )
 
     model = MODEL_MAP.get(resource)
@@ -2972,7 +3004,7 @@ async def delete_resource_item(
     db: Session = Depends(get_db),
     _auth: User = Depends(require_resource_access),
 ):
-    if resource in ["accounts_register", "cash_register"]:
+    if resource in ["accounts_register", "cash_register", "tariff_types"]:
         raise HTTPException(
             status_code=403,
             detail=f"Удаление записей из '{resource}' запрещено."

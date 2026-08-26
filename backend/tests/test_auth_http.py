@@ -145,3 +145,19 @@ def test_controller_cannot_edit_apartments_but_can_edit_meters(client, db, seed_
     t_id = db.execute(text("SELECT id FROM tariffs ORDER BY id LIMIT 1")).scalar()
     if t_id:
         assert client.patch(f"/api/tariffs/{t_id}", headers=h, json={"price": 1}).status_code == 403
+
+
+def test_tariff_types_locked_even_for_admin(client, seed_users):
+    # Типы тарифов «зашиты»: даже админ не может создать/изменить/удалить.
+    h = _auth(client, "http_admin")
+    tt_id = db_first_id(client, h, "tariff_types")
+    assert client.patch(f"/api/tariff_types/{tt_id}", headers=h, json={"name": "X"}).status_code == 403
+    assert client.delete(f"/api/tariff_types/{tt_id}", headers=h).status_code == 403
+    assert client.post("/api/tariff_types", headers=h, json={"name": "Новый тип"}).status_code == 403
+
+
+def db_first_id(client, h, resource):
+    r = client.get(f"/api/{resource}?_start=0&_end=10", headers=h)
+    assert r.status_code == 200
+    data = r.json()
+    return data[0]["id"] if isinstance(data, list) and data else None

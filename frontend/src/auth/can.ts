@@ -5,6 +5,9 @@
 
 const SETTINGS_RESOURCES = ["tariffs", "services_type", "tariff_types", "cash_points"];
 const REGISTER_RESOURCES = ["accounts_register", "accruals_register", "cash_register", "meter_readings"];
+
+// Типы тарифов — системный справочник, «зашит»: не редактируется/не удаляется даже админом.
+const LOCKED_RESOURCES = ["tariff_types"];
 const OPERATION_WRITE_DELETE = [
     "payments",
     "transactions",
@@ -27,6 +30,7 @@ const CASHIER_EDIT = ["apartments", "accounts", "owners"];
 const CONTROLLER_CREATE = ["meter_reading_documents", "meters"];
 
 export const canCreate = (role: string, resource: string): boolean => {
+    if (LOCKED_RESOURCES.includes(resource)) return false;
     if (role === "admin") return true;
     if (role === "operator") return !SETTINGS_RESOURCES.includes(resource) && !REGISTER_RESOURCES.includes(resource);
     if (role === "cashier") return CASHIER_CREATE.includes(resource) && !REGISTER_RESOURCES.includes(resource);
@@ -35,6 +39,7 @@ export const canCreate = (role: string, resource: string): boolean => {
 };
 
 export const canEdit = (role: string, resource: string): boolean => {
+    if (LOCKED_RESOURCES.includes(resource)) return false;
     if (role === "admin") return true;
     if (role === "operator") return !SETTINGS_RESOURCES.includes(resource) && !REGISTER_RESOURCES.includes(resource);
     if (role === "cashier") return CASHIER_EDIT.includes(resource);
@@ -43,6 +48,7 @@ export const canEdit = (role: string, resource: string): boolean => {
 };
 
 export const canDelete = (role: string, resource: string): boolean => {
+    if (LOCKED_RESOURCES.includes(resource)) return false;
     if (role === "admin") return true;
     if (role === "operator") return OPERATION_WRITE_DELETE.includes(resource);
     return false; // cashier / controller / resident
