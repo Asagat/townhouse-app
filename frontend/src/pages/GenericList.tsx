@@ -289,6 +289,17 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                           size="small"
                                           onClick={() =>
                                               window.open(
+                                                  `${apiUrl}/receipt_documents/${record.id}/pdf?inline=1`,
+                                                  "_blank",
+                                              )
+                                          }
+                                      >
+                                          Просмотр
+                                      </Button>
+                                      <Button
+                                          size="small"
+                                          onClick={() =>
+                                              window.open(
                                                   `${apiUrl}/receipt_documents/${record.id}/pdf`,
                                                   "_blank",
                                               )

@@ -11,7 +11,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 from database import engine, get_db
-from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Response
+from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -51,6 +51,8 @@ from models import (
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, asc, text
+
+import receipt_config as rc
 
 # Инициализация основного приложения
 app = FastAPI(title="Townhouse ERP System")
@@ -1861,9 +1863,10 @@ def get_receipt_items(
 @api_router.get("/receipt_documents/{document_id}/pdf")
 def get_receipt_pdf(
     document_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    inline: bool = Query(False, description="inline=true — показать в браузере, иначе скачивание"),
 ):
-    """Генерирует PDF квитанции на лету по образцу безобразtemplate."""
+    """Генерирует PDF квитанции на лету. inline=true открывает в просмотрщике, иначе скачивает."""
     receipt = (
         db.query(ReceiptDocument)
         .options(joinedload(ReceiptDocument.items))
@@ -1874,6 +1877,12 @@ def get_receipt_pdf(
 
     pdf_bytes = build_receipt_pdf(receipt)
     filename = f"receipt_{receipt.id}_{receipt.period_month:02d}_{receipt.period_year}.pdf"
+    if inline:
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename=\"{filename}\""},
+        )
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
@@ -1908,23 +1917,34 @@ def _fmt_reading(value) -> str:
 def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
     """Вёрстка PDF квитанции в стиле шаблона «Квитанция.pdf» (+ столбец «Переплата»)."""
     # Поддержка кириллицы: регистрируем TTF-шрифты.
-    FONT = "DejaVuSans"
-    FONT_B = "DejaVuSans-Bold"
+    FONT = rc.FONT_REGULAR
+    FONT_B = rc.FONT_BOLD
     if FONT not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(TTFont(FONT, "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"))
+        pdfmetrics.registerFont(TTFont(FONT, rc.FONT_REGULAR_PATH))
     if FONT_B not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(TTFont(FONT_B, "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))
+        pdfmetrics.registerFont(TTFont(FONT_B, rc.FONT_BOLD_PATH))
 
     styles = getSampleStyleSheet()
 
     title_style = ParagraphStyle(
-        "Title2", parent=styles["Title"], fontSize=16, spaceAfter=2, fontName=FONT_B
+        "Title2", parent=styles["Normal"], fontSize=rc.TITLE_SIZE,
+        leading=rc.TITLE_SIZE + 3, spaceAfter=2, leftIndent=0, fontName=FONT_B,
+        textColor=colors.HexColor(rc.COLOR_TEXT_TITLE),
+    )
+    brand_style = ParagraphStyle(
+        "Brand", parent=styles["Normal"], fontSize=rc.BRAND_SIZE,
+        leading=rc.BRAND_SIZE + 2, fontName=FONT_B,
+        textColor=colors.HexColor(rc.COLOR_BRAND_TEXT),
     )
     period_style = ParagraphStyle(
-        "Period", parent=styles["Normal"], fontSize=12, spaceAfter=6, fontName=FONT_B
+        "Period", parent=styles["Normal"], fontSize=rc.PERIOD_SIZE,
+        spaceAfter=6, leftIndent=0, fontName=FONT_B,
+        textColor=colors.HexColor(rc.COLOR_TEXT_PERIOD),
     )
     head_style = ParagraphStyle(
-        "Head", parent=styles["Normal"], fontSize=12, spaceAfter=14, fontName=FONT_B
+        "Head", parent=styles["Normal"], fontSize=rc.HEAD_SIZE,
+        spaceAfter=14, leftIndent=0, fontName=FONT_B,
+        textColor=colors.HexColor(rc.COLOR_TEXT_HEAD),
     )
 
     month_names = [
@@ -1932,37 +1952,59 @@ def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
         "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
     ]
     period = f"{month_names[receipt.period_month - 1].capitalize()} {receipt.period_year}"
-    # Логотип (если файл доступен) — слева в шапке
-    logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "FTH.png")
+    # Логотип (если файл доступен)
+    logo_path = rc.LOGO_PATH
+    if not os.path.isabs(logo_path):
+        logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), logo_path)
     has_logo = os.path.exists(logo_path)
+    logo_w = rc.LOGO_WIDTH
+    # Пропорции: если включена высота не задана — берём из реального файла
+    if rc.LOGO_HEIGHT:
+        logo_h = rc.LOGO_HEIGHT
+    elif has_logo:
+        from PIL import Image as _PILImage
+        _w, _h = _PILImage.open(logo_path).size
+        logo_h = logo_w * (_h / _w) if _w else logo_w
+    else:
+        logo_h = logo_w * (90 / 73)
 
-    logo_w = 46.0
-    # FTH.png 73x90: сохраняем пропорции
-    logo_h = logo_w * (90 / 73)
-
-    header = []
+    # Строка шапки: слева «Квитанция», справа логотип + «Family Townhouse» (прижато вправо)
+    left = Paragraph(rc.TEXT_TITLE, title_style)
+    brand_text = Paragraph(rc.TEXT_BRAND, brand_style)
     if has_logo:
         brand = Table(
-            [
-                [
-                    Image(logo_path, width=logo_w, height=logo_h),
-                    Table(
-                        [[Paragraph("Квитанция", title_style)],
-                         [Paragraph("Family Townhouse", title_style)]],
-                        colWidths=[None],
-                    ),
-                ]
-            ],
-            colWidths=[logo_w + 8, None],
+            [[
+                Image(logo_path, width=logo_w, height=logo_h),
+                brand_text,
+            ]],
+            colWidths=[logo_w + 6, 150],
             hAlign="LEFT",
         )
-        brand.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                                   ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                                   ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
-        header.append(brand)
+        brand.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        # head_row: левый блок, растягивающийся пустырь, brand — прижат вправо
+        head_row = Table(
+            [[left, "", brand]],
+            colWidths=[120, None, 196],
+            hAlign="LEFT",
+        )
     else:
-        header.append(Paragraph("Квитанция", title_style))
-        header.append(Paragraph("Family Townhouse", title_style))
+        head_row = Table(
+            [[left, "", brand_text]],
+            colWidths=[120, None, 196],
+            hAlign="LEFT",
+        )
+    head_row.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
+    head_row.spaceBefore = 0
+    header = [Spacer(1, rc.HEADER_SPACER), head_row]
     header.append(Paragraph(period, period_style))
     header.append(
         Paragraph(
@@ -1971,21 +2013,21 @@ def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
         )
     )
 
-    # Двухуровневая шапка: «Показания» — объединённая ячейка над Посл./Пред.
+    # Двухуровневая шапка: «Показания» — объединённая ячейка над Пред./Послед.
     data = [
         [
-            "Услуга", "Показания", "Показания", "Кол-во",
-            "Тариф", "Сумма", "Долг", "Переплата", "К оплате",
+            rc.COL_Услуга, rc.COL_Показания, rc.COL_Показания, rc.COL_Колво,
+            rc.COL_Тариф, rc.COL_Сумма, rc.COL_Долг, rc.COL_Переплата, rc.COL_Коплате,
         ],
         [
-            "", "Посл.", "Пред.", "", "", "", "", "", "",
+            "", rc.COL_Пред, rc.COL_Послед, "", "", "", "", "", "",
         ],
     ]
     for it in sorted(receipt.items, key=lambda x: (x.services_type_id is None, x.id)):
         data.append([
             it.service_name,
-            _fmt_reading(it.reading_curr),
-            _fmt_reading(it.reading_prev),
+            _fmt_reading(it.reading_prev),   # Пред.
+            _fmt_reading(it.reading_curr),   # Послед.
             _fmt_amount2(it.quantity) if it.quantity is not None else "-",
             _fmt_amount2(it.tariff) if it.tariff is not None else "-",
             _fmt_amount2(it.amount),
@@ -1994,25 +2036,36 @@ def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
             _fmt_amount2(it.payable),
         ])
     data.append([
-        "Итого", "", "", "", "", _fmt_amount2(receipt.total_amount),
+        rc.COL_Итого, "", "", "", "", _fmt_amount2(receipt.total_amount),
         _fmt_amount2(receipt.debt) if receipt.debt else "0,00",
         _fmt_amount2(receipt.overpayment) if receipt.overpayment else "0,00",
         _fmt_amount2(receipt.payable_amount),
     ])
 
-    col_widths = [88, 48, 48, 55, 55, 72, 55, 58, 66]
+    col_widths = rc.COL_WIDTHS
     table = Table(data, colWidths=col_widths, repeatRows=2)
+    gray = colors.HexColor(rc.COLOR_TABLE_GRID)          # серые границы
+    even = colors.HexColor(rc.COLOR_ROW_EVEN)            # чётная строка
+    odd = colors.HexColor(rc.COLOR_ROW_ODD)              # нечётная строка
+    header_bg = colors.HexColor(rc.COLOR_HEADER_BG)
+    total_bg = colors.HexColor(rc.COLOR_TOTAL_BG)
     table.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-        ("BACKGROUND", (0, 0), (-1, 1), colors.Color(0.93, 0.93, 0.93)),
+        ("GRID", (0, 0), (-1, -1), 0.5, gray),
+        ("BOX", (0, 0), (-1, -1), 0.8, gray),
+        # Чередование фона строк данных (перекрывается нижними командами для шапки/итога)
+        ("ROWBACKGROUNDS", (0, 0), (-1, -1), [even, odd]),
+        ("BACKGROUND", (0, 0), (-1, 1), header_bg),
+        ("TEXTCOLOR", (0, 0), (-1, 1), colors.HexColor(rc.COLOR_TEXT_HEADER_TABLE)),
+        ("TEXTCOLOR", (0, 2), (-1, -2), colors.HexColor(rc.COLOR_TEXT_CELL)),
+        ("TEXTCOLOR", (0, -1), (-1, -1), colors.HexColor(rc.COLOR_TEXT_TOTAL)),
         ("FONTNAME", (0, 0), (-1, -1), FONT),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("FONTSIZE", (0, 0), (-1, -1), rc.TABLE_SIZE),
         ("FONTNAME", (0, 0), (-1, 1), FONT_B),
         ("ALIGN", (1, 2), (-1, -1), "RIGHT"),
         ("ALIGN", (1, 0), (-1, 1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), rc.CELL_TOP_PADDING),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), rc.CELL_BOTTOM_PADDING),
         # Объединение ячеек шапки (строка 0 и 1)
         ("SPAN", (1, 0), (2, 0)),
         ("SPAN", (0, 0), (0, 1)),
@@ -2024,13 +2077,13 @@ def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
         ("SPAN", (8, 0), (8, 1)),
         ("SPAN", (0, -1), (4, -1)),
         ("FONTNAME", (0, -1), (-1, -1), FONT_B),
-        ("BACKGROUND", (0, -1), (-1, -1), colors.Color(0.96, 0.96, 0.96)),
+        ("BACKGROUND", (0, -1), (-1, -1), total_bg),
     ]))
 
     issued = receipt.issued_at
     stamp = issued.strftime("%d.%m.%Y %H:%M:%S") if issued else ""
     date_style = ParagraphStyle(
-        "DateS", parent=styles["Normal"], fontSize=9, textColor=colors.grey,
+        "DateS", parent=styles["Normal"], fontSize=9, textColor=colors.HexColor(rc.COLOR_STAMP),
         spaceBefore=18, alignment=2, fontName=FONT,
     )
     footer = [Paragraph(stamp, date_style)]
@@ -2039,7 +2092,8 @@ def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
     buf = io.BytesIO()
     SimpleDocTemplate(
         buf, pagesize=A4,
-        topMargin=40, bottomMargin=40, leftMargin=25, rightMargin=25,
+        topMargin=rc.PAGE_TOP_MARGIN, bottomMargin=rc.PAGE_BOTTOM_MARGIN,
+        leftMargin=rc.PAGE_LEFT_MARGIN, rightMargin=rc.PAGE_RIGHT_MARGIN,
     ).build(story)
     return buf.getvalue()
 
