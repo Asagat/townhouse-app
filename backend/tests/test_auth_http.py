@@ -75,3 +75,38 @@ def test_operator_cannot_change_settings(client, seed_users):
     assert client.patch("/api/tariffs/4", headers=h, json={"price": 51}).status_code == 403
     assert client.post("/api/auth/users", headers=h, json={"username": "nx", "password": "p", "role": "cashier"}).status_code == 403
     assert client.get("/api/meter_readings?_start=0&_end=10", headers=h).status_code == 200
+
+
+def test_admin_list_and_update_user(client, db, seed_users):
+    h = _auth(client, "http_admin")
+    # список пользователей
+    r = client.get("/api/auth/users", headers=h)
+    assert r.status_code == 200
+    users = r.json()
+    cash = next(u for u in users if u["username"] == "http_cash")
+    # смена роли кассира на оператора
+    r = client.patch(f"/api/auth/users/{cash['id']}", headers=h, json={"role": "operator"})
+    assert r.status_code == 200 and r.json()["role"] == "operator"
+    # смена пароля
+    r = client.patch(f"/api/auth/users/{cash['id']}", headers=h, json={"password": "newpass1"})
+    assert r.status_code == 200
+    # вход под новым паролем
+    assert _token(client, "http_cash", "newpass1")
+
+
+def test_admin_cannot_deactivate_or_remove_self(client, seed_users):
+    h = _auth(client, "http_admin")
+    adm = client.get("/api/auth/users", headers=h).json()
+    adm_id = next(u for u in adm if u["username"] == "http_admin")["id"]
+    assert client.patch(f"/api/auth/users/{adm_id}", headers=h, json={"is_active": False}).status_code == 403
+    assert client.delete(f"/api/auth/users/{adm_id}", headers=h).status_code == 403
+
+
+def test_admin_delete_user(client, db, seed_users):
+    h = _auth(client, "http_admin")
+    # создадим пользователя и удалим его
+    r = client.post("/api/auth/users", headers=h, json={"username": "to_delete", "password": "pw123456", "role": "cashier"})
+    assert r.status_code == 201
+    uid = r.json()["id"]
+    assert client.delete(f"/api/auth/users/{uid}", headers=h).status_code == 204
+    assert client.get("/api/auth/users", headers=h).status_code == 200

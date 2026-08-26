@@ -174,6 +174,78 @@ def create_user(
     return _user_serializer(user)
 
 
+@auth_router.get("/users")
+def list_users(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("admin")),
+):
+    """Список пользователей (только администратор)."""
+    users = db.query(User).order_by(User.id.asc()).all()
+    return [_user_serializer(u) for u in users]
+
+
+@auth_router.patch("/users/{user_id}")
+def update_user(
+    user_id: int,
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("admin")),
+):
+    """Обновление пользователя: роль, имя, активность, опционально пароль (admin)."""
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    if "role" in payload and payload["role"]:
+        try:
+            role = UserRole[payload["role"]]
+        except KeyError:
+            raise HTTPException(status_code=422, detail="Недопустимая роль")
+        if target.role == UserRole.admin and role != UserRole.admin and admin.id == target.id:
+            raise HTTPException(status_code=403, detail="Нельзя изменить роль собственного аккаунта")
+        target.role = role
+
+    if "full_name" in payload:
+        target.full_name = payload["full_name"] or None
+
+    if "is_active" in payload:
+        new_active = bool(payload["is_active"])
+        if not new_active and admin.id == target.id:
+            raise HTTPException(status_code=403, detail="Нельзя отключить собственный аккаунт")
+        target.is_active = new_active
+
+    if payload.get("password"):
+        if len(payload["password"]) < 6:
+            raise HTTPException(status_code=422, detail="Пароль слишком короткий (мин. 6 символов)")
+        target.password_hash = hash_password(payload["password"])
+
+    db.add(target)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Не удалось обновить пользователя") from exc
+    db.refresh(target)
+    return _user_serializer(target)
+
+
+@auth_router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("admin")),
+):
+    """Удаление пользователя (только администратор). Нельзя удалить самого себя."""
+    if admin.id == user_id:
+        raise HTTPException(status_code=403, detail="Нельзя удалить собственный аккаунт")
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    db.delete(target)
+    db.commit()
+    return Response(status_code=204)
+
+
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ СЕРИАЛИЗАЦИИ ---
 
 MONTH_NAMES_RU = [

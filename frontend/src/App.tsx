@@ -19,6 +19,7 @@ import { BRAND, ANT_PRIMARY } from "./config/colors";
 import { Sidebar } from "./components/layout/Sidebar";
 import { GenericList } from "./pages/GenericList";
 import { Login } from "./pages/Login";
+import { Users } from "./pages/Users";
 import { authProvider } from "./auth/authProvider";
 import { apiUrl, http } from "./auth/http";
 
@@ -91,7 +92,13 @@ const App = () => {
                                 <Route
                                     key={r.key}
                                     path={`/${r.key}`}
-                                    element={<GenericList resourceName={r.key} />}
+                                    element={
+                                        r.key === "users" ? (
+                                            <Users />
+                                        ) : (
+                                            <GenericList resourceName={r.key} />
+                                        )
+                                    }
                                 />
                             ))}
                         </Route>

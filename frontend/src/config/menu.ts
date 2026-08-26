@@ -103,6 +103,16 @@ export const categories: Category[] = [
             },
         ],
     },
+    {
+        title: "5. Администрирование",
+        items: [
+            {
+              key: "users",
+              label: "Пользователи и права",
+              icon: "fa-solid fa-user-shield",
+            },
+        ],
+    },
 ];
 
 export const allResources = categories.flatMap((c) => c.items);
