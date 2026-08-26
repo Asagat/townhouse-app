@@ -40,3 +40,29 @@ a {
 .ant-table-tbody > tr:hover > .ant-table-cell-fix-left {
   background: rgba(34, 174, 46, 0.08) !important;
 }
+
+/* --- Просмотр квитанции (максимально похоже на PDF) --- */
+.receipt-preview .ant-table {
+  color: #444444;
+}
+.receipt-preview .ant-table small .ant-table-cell {
+  padding: 5px 6px 3px !important;
+}
+.receipt-preview .ant-table-thead > tr > th {
+  background: #e6ffea;
+  color: #666666;
+  font-weight: 700;
+  border-color: #b8b8b8 !important;
+  text-align: left;
+}
+.receipt-head-group {
+  text-align: center !important;
+}
+.receipt-row-odd td {
+  background: #f2fff4 !important;
+}
+.receipt-row-total td {
+  background: #e6ffea !important;
+  color: #666666;
+  font-weight: 700;
+}

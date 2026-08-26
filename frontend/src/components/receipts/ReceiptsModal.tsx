@@ -175,11 +175,11 @@ export const ReceiptsModal = ({ open, onClose, onSaved }: ReceiptsModalProps) =>
                     onConfirm={handleDeleteAll}
                 >
                     <Button danger loading={deleting}>
-                        Удалить за период
+                        Удалить
                     </Button>
                 </Popconfirm>,
                 <Button key="dl" loading={downloading} onClick={handleDownloadAll}>
-                    Скачать все (ZIP)
+                    Скачать (ZIP)
                 </Button>,
                 <Button
                     key="go"
@@ -187,7 +187,7 @@ export const ReceiptsModal = ({ open, onClose, onSaved }: ReceiptsModalProps) =>
                     loading={generating}
                     onClick={handleGenerate}
                 >
-                    Сформировать по всем квартирам
+                    Сформировать
                 </Button>,
             ]}
         >
