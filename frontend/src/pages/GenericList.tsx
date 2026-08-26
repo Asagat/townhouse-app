@@ -28,6 +28,7 @@ import { ReceiptViewModal } from "../components/receipts/ReceiptViewModal";
 import { WriteOffsModal } from "../components/writeoffs/WriteOffsModal";
 import type { SortOrder } from "antd/es/table/interface";
 import { BRAND } from "../config/colors";
+import { canCreate, canEdit, canDelete } from "../auth/can";
 
 interface GenericListProps {
     resourceName: string;
@@ -185,8 +186,12 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const isReceiptDocuments = resourceName === "receipt_documents";
     // Регистры формируются документами и не поддерживают прямое редактирование/удаление
     const isRegister = isAccrualsRegister || isMeterReadings || isReadOnly;
-    // Роль «Житель»: только просмотр своего счёта — без кнопок «Выполнить списание» и «Добавить».
-    const isResident = identity?.role === "resident";
+    // Роль «Житель»: только просмотр — кнопки скрываются через canCreate/canEdit/canDelete.
+    const role = identity?.role ?? "";
+    // Права на действия для текущего раздела.
+    const roleCanCreate = canCreate(role, resourceName);
+    const roleCanEdit = canEdit(role, resourceName);
+    const roleCanDelete = canDelete(role, resourceName);
 
     const columns = getColumnsForResource(resourceName);
     const meta = allResources.find((r) => r.key === resourceName);
@@ -312,6 +317,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                       >
                                           PDF
                                       </Button>
+                                      {roleCanDelete && (
                                       <Popconfirm
                                           title="Удалить квитанцию?"
                                           okText="Удалить"
@@ -334,6 +340,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                               Удалить
                                           </Button>
                                       </Popconfirm>
+                                      )}
                                   </Space>
                               );
                           }
@@ -341,6 +348,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                           if (isAccrualDocuments) {
                               return (
                                   <Space>
+                                      {roleCanEdit && (
                                       <Button
                                           size="small"
                                           onClick={() => {
@@ -350,6 +358,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                       >
                                           Редактировать
                                       </Button>
+                                      )}
+                                      {roleCanDelete && (
                                       <Popconfirm
                                           title="Удалить документ начислений? Все связанные записи в регистре начислений также будут удалены."
                                           okText="Удалить"
@@ -375,6 +385,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                               Удалить
                                           </Button>
                                       </Popconfirm>
+                                      )}
                                   </Space>
                               );
                           }
@@ -382,6 +393,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                           if (isMeterReadingDocuments) {
                               return (
                                   <Space>
+                                      {roleCanEdit && (
                                       <Button
                                           size="small"
                                           onClick={() => {
@@ -391,6 +403,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                       >
                                           Редактировать
                                       </Button>
+                                      )}
+                                      {roleCanDelete && (
                                       <Popconfirm
                                           title="Удалить документ показаний? Все связанные показания также будут удалены."
                                           okText="Удалить"
@@ -416,6 +430,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                               Удалить
                                           </Button>
                                       </Popconfirm>
+                                      )}
                                   </Space>
                               );
                           }
@@ -423,12 +438,15 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                           if (!isReadOnly) {
                               return (
                                   <Space>
+                                      {roleCanEdit && (
                                       <Button
                                           size="small"
                                           onClick={() => setModalState({ mode: "edit", record })}
                                       >
                                           Редактировать
                                       </Button>
+                                      )}
+                                      {roleCanDelete && (
                                       <Popconfirm
                                           title="Удалить запись?"
                                           okText="Удалить"
@@ -451,6 +469,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                               Удалить
                                           </Button>
                                       </Popconfirm>
+                                      )}
                                   </Space>
                               );
                           }
@@ -516,7 +535,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         </Button>
                     )}
 
-                    {resourceName === "payments" && !isResident && (
+                    {resourceName === "payments" && (role === "admin" || role === "operator") && (
                         <Button
                             type="primary"
                             onClick={() => setWriteOffsModalOpen(true)}
@@ -525,7 +544,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         </Button>
                     )}
 
-                    {!isResident && !isReadOnly && !isAccrualsRegister && !isAccrualDocuments && !isMeterReadingDocuments && !isMeterReadings && !isReceiptDocuments && (
+                    {roleCanCreate && !isReadOnly && !isAccrualsRegister && !isAccrualDocuments && !isMeterReadingDocuments && !isMeterReadings && !isReceiptDocuments && (
                         <Button
                             type="primary"
                             disabled={metaLoading}

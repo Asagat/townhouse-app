@@ -12,30 +12,34 @@ export const ROLE_OPTIONS_LABELS: Record<string, string> = {
 };
 
 // Роли, которым доступен каждый раздел меню (по ключу ресурса).
+// Кассир (Вариант A — строгий): только Приход/Расход, Квартиры/Лицевые счета/
+// Контрагенты, и Регистры (чтение). Показания/Счетчики/Настройки/Начисления/
+// Квитанции/Кассы кассиру НЕ показываем.
+// Контролер — только показания (+ квартиры/счета/контрагенты/счетчики для выбора).
 export const resourceRoles: Record<string, string[]> = {
     // Документы
     payments: ["admin", "operator", "cashier"],
-    accrual_documents: ["admin", "operator", "cashier"],
-    meter_reading_documents: ["admin", "operator", "cashier", "controller"],
-    receipt_documents: ["admin", "operator", "cashier"],
+    accrual_documents: ["admin", "operator"],
+    meter_reading_documents: ["admin", "operator", "controller"],
+    receipt_documents: ["admin", "operator"],
 
     // Справочники
-    tariffs: ["admin", "operator", "cashier"],
+    tariffs: ["admin", "operator"],
     cash_points: ["admin", "operator"],
     owners: ["admin", "operator", "cashier", "controller"],
     apartments: ["admin", "operator", "cashier", "controller"],
     accounts: ["admin", "operator", "cashier", "controller"],
 
     // Регистры
-    meter_readings: ["admin", "operator", "cashier", "controller"],
+    meter_readings: ["admin", "operator", "controller"],
     accounts_register: ["admin", "operator", "cashier"],
     accruals_register: ["admin", "operator", "cashier"],
     cash_register: ["admin", "operator", "cashier"],
 
     // Настройки
-    tariff_types: ["admin", "operator", "cashier"],
-    services_type: ["admin", "operator", "cashier"],
-    meters: ["admin", "operator", "cashier", "controller"],
+    tariff_types: ["admin", "operator"],
+    services_type: ["admin", "operator"],
+    meters: ["admin", "operator", "controller"],
 
     // Администрирование
     users: ["admin"],
