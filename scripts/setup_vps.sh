@@ -16,6 +16,13 @@
 # ============================================================
 set -euo pipefail
 
+# Гарантируем UTF-8 для Python-скриптов (alembic/init_data/create_user) независимо
+# от локали сервера (LANG/LC_ALL могут быть ASCII, иначе кириллица вызовет
+# UnicodeEncodeError в stdout). PYTHONUTF8 включает UTF-8 mode при старте Python.
+export PYTHONUTF8=1
+# PYTHONUTF8 задаёт utf-8; PYTHONIOENCODING страхует для явно перенаправленных потоков.
+export PYTHONIOENCODING=utf-8
+
 # --- Настройки (при необходимости измените) -------------------------
 GIT_REPO="${GIT_REPO:-https://github.com/Asagat/townhouse-app.git}"
 BRANCH="${BRANCH:-main}"

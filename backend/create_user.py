@@ -27,6 +27,17 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Гарантируем UTF-8 для stdout/stderr (кириллица в логах на любом окружении,
+# включая серверы с локалью ASCII). PYTHONUTF8 обычно уже решает это при старте,
+# но страхуемся и здесь — обёрнуто в try/except, чтобы сбой кодировки никогда
+# не обрывал реальную работу скрипта.
+try:
+    for _stream in (sys.stdout, sys.stderr):
+        if _stream and hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8")
+except Exception:  # noqa: BLE001
+    pass
+
 from database import SessionLocal  # noqa: E402
 from models import User, UserRole  # noqa: E402
 from auth import hash_password  # noqa: E402
