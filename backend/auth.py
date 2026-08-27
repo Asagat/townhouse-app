@@ -12,6 +12,7 @@
 
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 import uuid
@@ -23,13 +24,23 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+# database.py уже загружает переменные из .env (корень репо / backend/), поэтому здесь
+# полагаемся на уже загруженное окружение.
 from database import get_db
 from models import User, UserRole
 
 JWT_ALGORITHM = "HS256"
 TOKEN_TTL_SECONDS = int(os.getenv("AUTH_TOKEN_TTL_SECONDS", "28800"))  # 8 ч по умолчанию
-# Секрет для подписи JWT. В продакшене задаётся через AUTH_SECRET_KEY.
-_SECRET = os.getenv("AUTH_SECRET_KEY") or "dev-only-insecure-secret-change-me"
+# Секрет для подписи JWT. В продакшене ОБЯЗАТЕЛЬНО задайте своё значение AUTH_SECRET_KEY
+# (см. .env.example). Значение по умолчанию — ТОЛЬКО для локальной разработки.
+_DEV_SECRET = "dev-only-insecure-secret-change-me"
+_SECRET = os.getenv("AUTH_SECRET_KEY") or _DEV_SECRET
+
+if _SECRET == _DEV_SECRET:
+    logging.getLogger(__name__).warning(
+        "AUTH_SECRET_KEY не задан — используется dev-секрет. "
+        "В продакшене обязательно задайте AUTH_SECRET_KEY в .env!"
+    )
 
 _PBKDF2_ITERATIONS = 260000
 

@@ -1,13 +1,20 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Загружаем переменные из .env, если он есть (полезно для локальной разработки)
-load_dotenv()
+# Загружаем переменные из .env. Ищем файл в корне репозитория и — на всякий случай —
+# в каталоге backend/. Явный путь избавляет от зависимости от текущей рабочей директории
+# запуска (uvicorn можно стартовать из любого каталога).
+_BACKEND_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _BACKEND_DIR.parent
+load_dotenv(_REPO_ROOT / ".env")
+load_dotenv(_BACKEND_DIR / ".env")
 
-# Пытаемся взять URL из окружения, если нет — используем локальный Fedora Postgres
+# Пытаемся взять URL из окружения, если нет — используем локальный Postgres.
+# В продакшене всегда задавайте DATABASE_URL явно.
 SQLALCHEMY_DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:5432/townhouse_db"
 )
