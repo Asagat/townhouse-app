@@ -40,6 +40,23 @@ cp .env.example .env
 
 ## 3. Установка «с нуля» (локальная разработка или новый VPS)
 
+### 3.0. Новый VPS (чистый сервер) — автоматически
+
+Для **нового** сервера (Ubuntu/Debian, ничего ещё не стоит) есть готовый скрипт
+[`scripts/setup_vps.sh`](scripts/setup_vps.sh): он ставит системные пакеты, клонирует
+репозиторий, делает venv/зависимости, `.env`, схему/справочники/админа, systemd-юнит
+бэкенда и production-сборку фронтенда. Останется только nginx + DNS (подсказки скрипт
+печатает в конце).
+
+```bash
+# на новом сервере, от root/sudo:
+sudo bash -c 'curl -fsSL -o /tmp/setup_vps.sh https://raw.githubusercontent.com/Asagat/townhouse-app/main/scripts/setup_vps.sh && bash /tmp/setup_vps.sh'
+# или — предварительно скопировать репо и:
+bash scripts/setup_vps.sh
+```
+
+> Перед первым успешным прогоном отредактируйте созданный `.env` (БД, пароли, CORS).
+
 Ключевой принцип: **инициализация схемы — только через Alembic** (`alembic upgrade head`).
 Отдельный `bootstrap_db.py` (raw `create_all`) для развёртывания **не нужен** — вся схема
 воспроизводится ревизиями Alembic (включая масштабирующую ревизию `0002_schema_squash`).
@@ -199,4 +216,5 @@ gunzip < townhouse_db.sql.gz | psql "$DATABASE_URL"
 | `uvicorn app:app --host 0.0.0.0 --port 8000` | Запустить API |
 | `npm run dev` (в `frontend/`) | Dev-сервер Vite (автосоздаёт `frontend/.env`, проксирует `/api`) |
 | `./scripts/dev.sh` | Локальное развёртывание + запуск uvicorn (`--full` — pip install) |
+| `./scripts/setup_vps.sh` | Полная установка на НОВОМ VPS (пакеты, clone, .env, БД, systemd, build) |
 | `./scripts/deploy_vps.sh` | Обновление VPS (pull, alembic, справочники, админ, restart) |
