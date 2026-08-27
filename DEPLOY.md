@@ -131,7 +131,34 @@ docker compose up -d --build
 
 ---
 
-## 8. Ключевые команды / скрипты
+## 8. Резервное копирование БД (дамп)
+
+Дамп PostgreSQL хранится в **корне проекта** как файл `townhouse_db.sql.gz`.
+Он содержит данные (включая чувствительные), поэтому **в git не коммитится**
+(см. `.gitignore`). Используется для переноса локальной базы на VPS и обратно,
+а также как точка восстановления.
+
+Создать дамп (с параметрами подключения из `.env`, из корня проекта):
+
+```bash
+.venv/bin/python -c "from dotenv import load_dotenv;load_dotenv();import os;print(os.getenv('DATABASE_URL'))"
+# затем:
+pg_dump "$DATABASE_URL" | gzip > townhouse_db.sql.gz
+```
+
+Восстановить из дампа (пересоздав базу):
+
+```bash
+gunzip < townhouse_db.sql.gz | psql "$DATABASE_URL"
+```
+
+> Если `pg_dump`/`psql` недоступны в PATH, их можно взять из контейнера `postgres`
+> (`docker exec -i <pg-container> pg_dump ...`). Точную схему/VARS удобно считывать через
+> `DATABASE_URL` из `.env`.
+
+---
+
+## 9. Ключевые команды / скрипты
 
 | Команда (из каталога backend) | Назначение |
 |---|---|

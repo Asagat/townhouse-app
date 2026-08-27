@@ -19,6 +19,11 @@ venv~/
 *.sqlite3
 *.db
 
+# Дампы БД (содержат данные — в репозиторий не коммитим)
+# Локальный дамп обычно лежит в корне проекта как townhouse_db.sql.gz.
+*.sql.gz
+townhouse_db.sql.gz
+
 # OS
 .DS_Store
 .directory
