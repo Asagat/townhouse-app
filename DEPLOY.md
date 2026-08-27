@@ -14,44 +14,57 @@ cp .env.example .env
 # отредактируйте .env: DATABASE_URL, AUTH_SECRET_KEY, CORS_ORIGINS, ...
 ```
 
-Никогда не коммитьте `.env`. Шаблон всех переменных — в `.env.example`.
-Пароль администратора передаётся через `ADMIN_PASSWORD` (или генерируется случайно) — см. `backend/create_user.py`.
+- Никогда не коммитьте `.env` (он в `.gitignore`). Шаблон всех переменных — в `.env.example`.
+- Пароль администратора передаётся через `ADMIN_PASSWORD` (или генерируется случайно) — см. `backend/create_user.py`.
 
 ---
 
-## 2. Развёртывание «с нуля» (локальная разработка или новый VPS)
+## 2. Требования / предусловия
 
-Порядок для **свежей, пустой** БД:
+- **Python 3.11+** и доступ к **PostgreSQL**.
+- **PostgreSQL должен быть запущен** и доступен по `DATABASE_URL` из `.env` (хост, порт, пользователь, пароль, имя БД). Проверка подключения:
+  ```bash
+  python -c "import os;from dotenv import load_dotenv;load_dotenv();import psycopg2;psycopg2.connect(os.getenv('DATABASE_URL'));print('DB ok')"
+  ```
+  Если СУБД не запущена — запустите Postgres (или контейнер `docker run -d -e POSTGRES_PASSWORD=... postgres`) и создайте базу.
+- **Node 18+/npm** для фронтенда.
+
+---
+
+## 3. Установка «с нуля» (локальная разработка или новый VPS)
+
+Ключевой принцип: **инициализация схемы — только через Alembic** (`alembic upgrade head`).
+Отдельный `bootstrap_db.py` (raw `create_all`) для развёртывания **не нужен** — вся схема
+воспроизводится ревизиями Alembic (включая масштабирующую ревизию `0002_schema_squash`).
 
 ```bash
-# 1) Установка python-зависимостей (в каталоге с виртуальным окружением)
+# 1) Python- зависимости в виртуальном окружении
 python -m venv .venv
 . .venv/bin/activate
 pip install -r backend/requirements.txt
 
-# 2) Создание СХЕМЫ БД из моделей (идемпотентно, «create_all»)
-python backend/bootstrap_db.py
+# 2) СХЕМА БД — только Alembic (создаёт все таблицы + users + alembic_version)
+#    Выполняется ИЗ КАТАЛОГА backend (alembic.env.py добавляет backend в sys.path).
+cd backend
+alembic upgrade head
+cd ..
 
 # 3) Системные справочники (типы тарифов, услуги, тарифы по умолчанию) — идемпотентно
 python backend/init_data.py
 
-# 4) Применить Alembic-миграции (пользователи и последующие изменения)
-cd backend && alembic upgrade head && cd ..
+# 4) Создать администратора (пароль из ADMIN_PASSWORD или будет сгенерирован)
+python backend/create_user.py
 
-# 5) Создать администратора (пароль из ADMIN_PASSWORD или будет сгенерирован)
-cd backend && python create_user.py && cd ..
-
-# 6) Запуск API
+# 5) Запуск API (из backend/)
 cd backend && uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-> `bootstrap_db.py` создаёт только отсутствующие таблицы и безопасен на уже
-> развёрнутой БД. `init_data.py` идемпотентен — создаёт только недостающие
-> справочники. `alembic upgrade head` приводит схему к актуальному состоянию.
+> `init_data.py` идемпотентен — создаёт только недостающие справочники.
+> `create_user.py` выводит сгенерированный пароль один раз в консоль.
 
 ---
 
-## 3. Фронтенд
+## 4. Фронтенд
 
 ```bash
 cd frontend
@@ -65,23 +78,34 @@ Production-сборка: `npm run build` (соберёт в `dist/`, стати�
 
 ---
 
-## 4. Обновление уже развёрнутого окружения (VPS)
+## 5. Обновление уже развёрнутого окружения (VPS)
 
 ```bash
 cd /opt/townhouse
-git pull                  # забрать код и миграции
-cd backend && alembic upgrade head   # применить новые миграции
-# перезапустить сервис (см. ниже)
+git pull                       # забрать код и миграции
+cd backend
+alembic upgrade head            # применить новые миграции схемы
+cd ..
+# перезапустить сервис (см. пункт 7)
 ```
 
-Новые файлы бэкенда в venv не требуют переустановки java-зависимостей, кроме
-случаев изменения `requirements.txt` (тогда `pip install -r requirements.txt`).
+Новые файлы бэкенда используют установленные Python-зависимости; переустановка
+`requirements.txt` нужна только если в нём изменились зависимости.
 
 ---
 
-## 5. Запуск через Docker (опционально)
+## 6. Тесты
 
-В корне проекта используется `docker-compose.yml`:
+```bash
+cd backend && python -m pytest tests/ -q   # тесты бэкенда
+cd frontend && npx tsc --noEmit             # проверка типов фронтенда
+```
+
+---
+
+## 7. Запуск через Docker (опционально)
+
+В корне проекта есть `docker-compose.yml`:
 
 ```bash
 docker compose up -d --build
@@ -95,13 +119,13 @@ docker compose up -d --build
 
 ---
 
-## 6. Ключевые команды / скрипты
+## 8. Ключевые команды / скрипты
 
-| Команда | Назначение |
+| Команда (из каталога backend) | Назначение |
 |---|---|
-| `backend/bootstrap_db.py` | Создать схему из моделей (create_all) |
-| `backend/init_data.py` | Системные справочники (типы тарифов, услуги, тарифы) |
-| `backend/create_user.py` | Создать пользователя (пароль из env/cлучайный) |
-| `alembic upgrade head` | Применить миграции Alembic |
-| `cd backend && python -m pytest tests/ -q` | Запустить тесты бэкенда |
-| `cd frontend && npx tsc --noEmit` | Проверка типов фронтенда |
+| `alembic upgrade head` | Применить миграции Alembic (создание всей схемы с нуля — единственный канал) |
+| `python init_data.py` | Системные справочники (типы тарифов, услуги, тарифы) |
+| `python create_user.py` | Создать пользователя (пароль из env/случайный) |
+| `python bootstrap_db.py` | **Только отладочный fallback** (raw `create_all`). Для развёртывания не нужен. |
+| `python -m pytest tests/ -q` | Запустить тесты бэкенда |
+| `uvicorn app:app --host 0.0.0.0 --port 8000` | Запустить API |
