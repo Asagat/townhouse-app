@@ -38,6 +38,27 @@ def _available_cash(db: Session, account_id: int) -> float:
     return float(value or 0.0)
 
 
+def _cash_ledger(db: Session, account_id: int) -> list[tuple[int, float]]:
+    """Упорядоченная (FIFO) история денег по счёту: пары (transaction_id, net).
+
+    net = income - expense по каждой строке cash_register. Возвращает хронологически
+    упорядоченный список (по operation_date, id), чтобы при разнесении списания можно
+    было связать каждую строку Регистра взаиморасчётов с документом «Приход/Расход»,
+    который её профинансировал (для поля «Документ» в UI). Расходные строки (net<0)
+    уменьшают доступную сумму и тоже учитываются по порядку.
+    """
+    rows = db.execute(
+        text("""
+            SELECT transaction_id, COALESCE(income, 0) - COALESCE(expense, 0)
+            FROM cash_register
+            WHERE account_id = :a
+            ORDER BY operation_date ASC, id ASC
+        """),
+        {"a": account_id},
+    ).fetchall()
+    return [(int(r[0]), float(r[1] or 0.0)) for r in rows]
+
+
 def _accrued_per_service(db: Session, account_id: int) -> dict[int, float]:
     """
     Начислено по каждому виду услуги (income-строки accounts_register с видом услуги).
@@ -255,7 +276,10 @@ def _distribute(
 
         accrued = _accrued_per_service(db, account_id)
         total_debt = sum(accrued.values())
-        available = _available_cash(db, account_id)
+        # FIFO-очередь денег из cash_register с привязкой к документу «Приход/Расход»,
+        # чтобы каждая строка списания получила transaction_id (для поля «Документ»).
+        cash_queue = _cash_ledger(db, account_id)
+        available = sum(net for _, net in cash_queue)
         to_allocate = min(available, total_debt)
 
         allocations: list[dict] = []
@@ -272,26 +296,43 @@ def _distribute(
                 if debt_amt <= 0:
                     continue
                 amount = min(remaining, debt_amt)
-                rounded = round(amount, 2)
-                if rounded <= 0:
-                    continue
-                db.execute(
-                    text("""
-                        INSERT INTO accounts_register
-                            (operation_date, account_id, services_type_id, income, expense, balance_after, writeoff_id)
-                        VALUES (:op, :a, :svc, 0, :expense, 0, :wo)
-                    """),
-                    {
-                        "op": op_date,
-                        "a": account_id,
-                        "svc": svc_id,
-                        "expense": rounded,
-                        "wo": writeoff_id,
-                    },
-                )
+
+                # Потребляем FIFO-очередь денег: на каждую (услуга, документ) пишем
+                # отдельную строку списания с transaction_id конкретного прихода/расхода.
+                need = amount
+                while need > 0 and cash_queue:
+                    tx_id, net = cash_queue[0]
+                    take = min(net, need)
+                    if take <= 0:
+                        # Расходная строка (net<=0): отбрасываем, она лишь уменьшает доступ.
+                        cash_queue.pop(0)
+                        continue
+                    rounded = round(take, 2)
+                    if rounded > 0:
+                        db.execute(
+                            text("""
+                                INSERT INTO accounts_register
+                                    (operation_date, account_id, services_type_id, income, expense,
+                                     balance_after, writeoff_id, transaction_id)
+                                VALUES (:op, :a, :svc, 0, :expense, 0, :wo, :tx)
+                            """),
+                            {
+                                "op": op_date,
+                                "a": account_id,
+                                "svc": svc_id,
+                                "expense": rounded,
+                                "wo": writeoff_id,
+                                "tx": tx_id,
+                            },
+                        )
+                        need -= rounded
+                        allocations.append({"services_type_id": svc_id, "allocated": rounded})
+                    cash_queue[0] = (tx_id, net - take)
+                    if net - take <= 1e-9:
+                        cash_queue.pop(0)
+
+                allocated_total += amount
                 remaining -= amount
-                allocated_total += rounded
-                allocations.append({"services_type_id": svc_id, "allocated": rounded})
 
         recalculate_account_balance(db, account_id)
         processed.append(

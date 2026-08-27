@@ -112,6 +112,49 @@ def test_payment_writes_cash_register_not_accounts_register(db, account_factory)
     assert _count(db, "accounts_register", rec["account_id"]) == 0
 
 
+def test_writeoff_rows_link_to_payment_transaction(db, account_factory):
+    """В Регистре взаиморасчётов строки списания, порождённые деньгами документа
+    «Приход/Расход», привязаны к `transaction_id` — поле «Документ» показывает название
+    прихода/расхода (перезаписываемо через rebuild из cash_register)."""
+    from writeoffs import calculate_write_offs, rebuild_accounts_register
+    from services import set_transaction_title
+
+    rec = account_factory("wtx0")
+    _real_accrual(db, rec["account_id"], 1, 1000)
+    tx_id = _payment(db, rec["account_id"], rec["cash_point_id"], 600)
+    tx = db.get(Transaction, tx_id)
+    set_transaction_title(db, tx)  # как при создании документа через приложение
+    db.commit()
+
+    calculate_write_offs(db, [rec["account_id"]])
+    db.commit()
+
+    # Строка списания привязана к документу прихода/расхода.
+    expense_row = (
+        db.query(AccountsRegister)
+        .filter(AccountsRegister.account_id == rec["account_id"], AccountsRegister.expense > 0)
+        .one()
+    )
+    assert expense_row.transaction_id == tx_id
+    assert expense_row.transaction is not None
+    assert expense_row.transaction.title == tx.title
+
+    # Серверный сериализатор отдаёт название прихода/расхода в «Документ».
+    from serializers import accounts_register_serializer
+    payload = accounts_register_serializer(expense_row)
+    assert payload["document_title"] == tx.title
+
+    # Привязка переживает пересоздание производного среза (rebuild).
+    rebuild_accounts_register(db, [rec["account_id"]])
+    db.commit()
+    expense_rows = (
+        db.query(AccountsRegister)
+        .filter(AccountsRegister.account_id == rec["account_id"], AccountsRegister.expense > 0)
+        .all()
+    )
+    assert expense_rows and all(r.transaction_id == tx_id for r in expense_rows)
+
+
 def test_payment_update_recalculates_cash_balance(db, account_factory):
     rec = account_factory("w1")
     tx_id = _payment(db, rec["account_id"], rec["cash_point_id"], 500)
