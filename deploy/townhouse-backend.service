@@ -1,0 +1,18 @@
+[Unit]
+Description=Townhouse ERP backend (uvicorn)
+After=network.target postgresql.service
+Wants=network-online.target
+
+[Service]
+# Запуск без --reload (production). venv, путь и .env — в /opt/townhouse.
+Type=simple
+User=root
+WorkingDirectory=/opt/townhouse/backend
+EnvironmentFile=/opt/townhouse/.env
+ExecStart=/opt/townhouse/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=3
+# python-dotenv подхватывает перечисленные переменные из .env через EnvironmentFile.
+
+[Install]
+WantedBy=multi-user.target

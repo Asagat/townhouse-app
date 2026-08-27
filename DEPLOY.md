@@ -109,6 +109,26 @@ cd ..
 Новые файлы бэкенда используют установленные Python-зависимости; переустановка
 `requirements.txt` нужна только если в нём изменились зависимости.
 
+> **Рекомендуемый способ — скрипты (см. `scripts/`):**
+>
+> ```bash
+> # Локальная разработка (venv, alembic, справочники, админ, uvicorn --reload):
+> ./scripts/dev.sh
+> # --full — дополнительно pip install по requirements.txt.
+>
+> # Обновление VPS (git pull, alembic, справочники, админ, restart сервиса):
+> ./scripts/deploy_vps.sh
+> ```
+>
+> Для надёжного запуска бэкенда на VPS используйте systemd-юнит
+> `deploy/townhouse-backend.service` (управляет uvicorn без `--reload`):
+>
+> ```bash
+> cp deploy/townhouse-backend.service /etc/systemd/system/
+> systemctl daemon-reload
+> systemctl enable --now townhouse-backend
+> ```
+
 ---
 
 ## 6. Тесты
@@ -178,3 +198,5 @@ gunzip < townhouse_db.sql.gz | psql "$DATABASE_URL"
 | `python -m pytest tests/ -q` | Запустить тесты бэкенда |
 | `uvicorn app:app --host 0.0.0.0 --port 8000` | Запустить API |
 | `npm run dev` (в `frontend/`) | Dev-сервер Vite (автосоздаёт `frontend/.env`, проксирует `/api`) |
+| `./scripts/dev.sh` | Локальное развёртывание + запуск uvicorn (`--full` — pip install) |
+| `./scripts/deploy_vps.sh` | Обновление VPS (pull, alembic, справочники, админ, restart) |
