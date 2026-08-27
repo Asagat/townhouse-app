@@ -194,10 +194,17 @@ class MeterReadingDocument(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
+    # Аудит документа (п. 2.9): автор и последнее изменение.
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    change_description = Column(String(500), nullable=True)
+
     services_type = relationship("ServiceType", back_populates="meter_reading_documents")
     readings = relationship(
         "MeterReading", back_populates="document", passive_deletes=True
     )
+    creator = relationship("User", foreign_keys=[created_by], lazy="joined")
+    updater = relationship("User", foreign_keys=[updated_by], lazy="joined")
 
 
 class MeterReading(Base):
@@ -236,10 +243,18 @@ class Transaction(Base):
     # «Тип операции + №(ID) + дата операции» в момент создания/изменения.
     title = Column(String(255), nullable=True)
 
+    # Аудит документа (п. 2.9): автор, последнее изменение и что именно изменилось.
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+    change_description = Column(String(500), nullable=True)
+
     account = relationship("Account", back_populates="transactions")
     cash_point = relationship("CashPoint", back_populates="transactions")
     accounts_register = relationship("AccountsRegister", back_populates="transaction", passive_deletes=True)
     cash_register = relationship("CashRegister", back_populates="transaction", passive_deletes=True)
+    creator = relationship("User", foreign_keys=[created_by], lazy="joined")
+    updater = relationship("User", foreign_keys=[updated_by], lazy="joined")
 
 
 # backend/models.py
@@ -254,11 +269,19 @@ class AccrualDocument(Base):
     title = Column(String(255), nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
+    # Аудит документа (п. 2.9).
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+    change_description = Column(String(500), nullable=True)
+
     accruals = relationship(
         "AccrualsRegister",
         back_populates="accrual_document",
         passive_deletes=True
     )
+    creator = relationship("User", foreign_keys=[created_by], lazy="joined")
+    updater = relationship("User", foreign_keys=[updated_by], lazy="joined")
 
 
 # =====================================================================
@@ -560,8 +583,16 @@ class ReceiptDocument(Base):
 
     issued_at = Column(TIMESTAMP, server_default=func.now())
 
+    # Аудит документа (п. 2.9).
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+    change_description = Column(String(500), nullable=True)
+
     account = relationship("Account", back_populates="receipts")
     items = relationship("ReceiptItem", back_populates="receipt", passive_deletes=True)
+    creator = relationship("User", foreign_keys=[created_by], lazy="joined")
+    updater = relationship("User", foreign_keys=[updated_by], lazy="joined")
 
 
 class ReceiptItem(Base):
@@ -605,8 +636,13 @@ class WriteoffDocument(Base):
     # Автор операции (связь с 2.9 «аудит документов»).
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+    change_description = Column(String(500), nullable=True)
 
     items = relationship("WriteoffItem", back_populates="document", passive_deletes=True)
+    creator = relationship("User", foreign_keys=[created_by], lazy="joined")
+    updater = relationship("User", foreign_keys=[updated_by], lazy="joined")
 
 
 class WriteoffItem(Base):

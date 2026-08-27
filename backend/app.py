@@ -79,7 +79,7 @@ from writeoffs import (
 from permissions import require_resource_access
 from field_config import FIELD_CONFIG, MODEL_MAP, coerce_field_value
 from serializers import SERIALIZERS, _user_serializer
-from services import (build_accrual_register_items, build_transaction_title, calculate_accrual_for_account_service, calculate_accruals_preview, create_accounts_register_entries_for_accruals, resolve_meter_reading_values, resolve_transaction_values, set_transaction_title)
+from services import (build_accrual_register_items, build_transaction_title, calculate_accrual_for_account_service, calculate_accruals_preview, create_accounts_register_entries_for_accruals, resolve_meter_reading_values, resolve_transaction_values, set_transaction_title, audit_document_create, audit_document_update)
 
 
 # Инициализация основного приложения
@@ -536,6 +536,8 @@ async def create_resource_item(
 
     item = model(**values)
     db.add(item)
+    # Аудит: фиксируем автора и время создания документа (п. 2.9).
+    audit_document_create(item, _auth.id)
     try:
         db.commit()
     except IntegrityError as exc:
@@ -597,6 +599,9 @@ async def update_resource_item(
             if not field:
                 continue
             setattr(item, name, coerce_field_value(raw_value, field))
+
+    # Аудит: фиксируем автора последнего изменения (п. 2.9).
+    audit_document_update(item, _auth.id)
 
     try:
         db.commit()

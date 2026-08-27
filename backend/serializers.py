@@ -120,6 +120,12 @@ def transaction_serializer(item: Transaction) -> dict:
         "transaction_type": item.transaction_type.value if hasattr(item.transaction_type, "value") else item.transaction_type,
         "amount": float(item.amount) if item.amount is not None else 0.0,
         "notes": item.notes,
+        "created_by": item.created_by,
+        "updated_by": item.updated_by,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        "change_description": item.change_description,
+        "created_by_name": item.creator.full_name if item.creator else None,
+        "updated_by_name": item.updater.full_name if item.updater else None,
     }
 
     if account and account.apartment:
@@ -214,6 +220,12 @@ def meter_reading_document_serializer(item: MeterReadingDocument) -> dict:
         } if item.services_type else None,
         "readings_count": len(item.readings) if item.readings else 0,
         "created_at": item.created_at.isoformat() if item.created_at else None,
+        "created_by": item.created_by,
+        "updated_by": item.updated_by,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        "change_description": item.change_description,
+        "created_by_name": item.creator.full_name if item.creator else None,
+        "updated_by_name": item.updater.full_name if item.updater else None,
     }
 
 
@@ -338,6 +350,12 @@ def accrual_document_serializer(item: AccrualDocument) -> dict:
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "accruals_count": len(item.accruals) if item.accruals else 0,
         "total_amount": sum(float(a.amount) for a in item.accruals) if item.accruals else 0.0,
+        "created_by": item.created_by,
+        "updated_by": item.updated_by,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        "change_description": item.change_description,
+        "created_by_name": item.creator.full_name if item.creator else None,
+        "updated_by_name": item.updater.full_name if item.updater else None,
     }
 
 
@@ -459,6 +477,12 @@ def receipt_document_serializer(item: ReceiptDocument) -> dict:
         "payable_amount": float(item.payable_amount) if item.payable_amount is not None else 0.0,
         "issued_at": item.issued_at.isoformat() if item.issued_at else None,
         "items_count": len(item.items) if item.items else 0,
+        "created_by": item.created_by,
+        "updated_by": item.updated_by,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        "change_description": item.change_description,
+        "created_by_name": item.creator.full_name if item.creator else None,
+        "updated_by_name": item.updater.full_name if item.updater else None,
     }
 
     if item.account:
@@ -484,6 +508,11 @@ def writeoff_document_serializer(item: WriteoffDocument) -> dict:
         "status": item.status,
         "created_by": item.created_by,
         "created_at": item.created_at.isoformat() if item.created_at else None,
+        "updated_by": item.updated_by,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        "change_description": item.change_description,
+        "created_by_name": item.creator.full_name if item.creator else None,
+        "updated_by_name": item.updater.full_name if item.updater else None,
         "items_count": len(item.items) if item.items else 0,
         "total_allocated": total_allocated,
     }

@@ -29,6 +29,8 @@ from services import (
     build_accrual_register_items,
     calculate_accruals_preview,
     create_accounts_register_entries_for_accruals,
+    audit_document_create,
+    audit_document_update,
 )
 from writeoffs import (
     cancel_writeoff_document,
@@ -105,6 +107,7 @@ async def generate_accruals(
     # Создаём документ начислений в той же транзакции, чтобы исключить документы-сирот
     title = payload.get("title") or default_accrual_document_title(accrual_date)
     document = AccrualDocument(accrual_date=accrual_date, title=title)
+    audit_document_create(document, _auth.id)
     db.add(document)
     db.flush()  # получаем document.id до commit
 
@@ -216,6 +219,8 @@ def cancel_writeoff(
     document = cancel_writeoff_document(db, document_id)
     if not document:
         raise HTTPException(status_code=404, detail="Документ списания не найден")
+    document.updated_by = user.id
+    document.change_description = "Отмена документа списания"
     db.commit()
     db.refresh(document)
     return writeoff_document_serializer(document)

@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from auth import get_current_user
 from models import (
     AccrualDocument,
     AccrualsRegister,
@@ -24,6 +25,7 @@ from models import (
     Meter,
     MeterReading,
     MeterReadingDocument,
+    User,
     recalculate_account_balance,
 )
 from serializers import (
@@ -32,7 +34,12 @@ from serializers import (
     meter_reading_document_serializer,
     meter_reading_serializer,
 )
-from services import build_accrual_register_items, create_accounts_register_entries_for_accruals
+from services import (
+    audit_document_create,
+    audit_document_update,
+    build_accrual_register_items,
+    create_accounts_register_entries_for_accruals,
+)
 from writeoffs import auto_recalculate_writeoffs
 
 
@@ -57,7 +64,8 @@ def default_accrual_document_title(accrual_date: date) -> str:
 @router.post("/accrual_documents", status_code=201)
 def create_accrual_document(
     payload: dict[str, Any],
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     accrual_date = payload.get("accrual_date")
     if not accrual_date:
@@ -70,6 +78,7 @@ def create_accrual_document(
         accrual_date=parsed_date,
         title=title,
     )
+    audit_document_create(document, user.id)
     db.add(document)
     db.commit()
     db.refresh(document)
@@ -92,7 +101,8 @@ def get_accrual_document(
 def update_accrual_document(
     document_id: int,
     payload: dict[str, Any],
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     document = db.query(AccrualDocument).filter(AccrualDocument.id == document_id).first()
     if not document:
@@ -109,6 +119,7 @@ def update_accrual_document(
             else default_accrual_document_title(document.accrual_date)
         )
 
+    audit_document_update(document, user.id)
     db.commit()
     db.refresh(document)
     return accrual_document_serializer(document)
@@ -149,7 +160,8 @@ def delete_accrual_document(
 @router.post("/meter_readings/bulk", status_code=201)
 def bulk_create_readings(
     payload: dict[str, Any] = Body(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Массовое создание показаний с документом-шапкой"""
     title = payload.get("title")
@@ -173,6 +185,7 @@ def bulk_create_readings(
         reading_date=parsed_date,
         services_type_id=int(services_type_id),
     )
+    audit_document_create(document, user.id)
     db.add(document)
     db.flush()
 
@@ -249,7 +262,8 @@ def get_document_readings(
 def update_meter_reading_document_full(
     document_id: int,
     payload: dict[str, Any] = Body(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """
     Полностью обновляет документ показаний и пересоздаёт его строки: старые показания удаляются,
@@ -279,6 +293,7 @@ def update_meter_reading_document_full(
     document.title = title
     document.reading_date = parsed_date
     document.services_type_id = services_type_id
+    audit_document_update(document, user.id, "Изменение документа показаний")
 
     # Удаляем старые показания этого документа и создаём новые из присланного списка
     db.query(MeterReading).filter(MeterReading.document_id == document_id).delete(synchronize_session=False)
@@ -368,7 +383,8 @@ def get_accrual_document_details(
 async def update_accrual_document_full(
     document_id: int,
     payload: dict[str, Any] = Body(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """
     Полностью пересоздаёт строки регистра начислений для документа: старые строки удаляются,
@@ -448,6 +464,7 @@ async def update_accrual_document_full(
         affected_accounts.update(item.account_id for item in new_items)
         for account_id in affected_accounts:
             recalculate_account_balance(db, account_id)
+        audit_document_update(document, user.id, "Изменение документа начислений")
         db.commit()
     except Exception as exc:
         db.rollback()

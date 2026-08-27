@@ -35,9 +35,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 import receipt_config as rc
-from models import Account, AccrualsRegister, ReceiptDocument, ReceiptItem, ServiceType
+from auth import get_current_user
+from models import Account, AccrualsRegister, ReceiptDocument, ReceiptItem, ServiceType, User
 from serializers import SERIALIZERS, receipt_document_serializer
-from services import FUND_SERVICE_FALLBACK, _service_name
+from services import FUND_SERVICE_FALLBACK, _service_name, audit_document_create
 
 
 router = APIRouter(prefix="/api")
@@ -82,7 +83,9 @@ def _account_debt_overpayment(db: Session, account_id: int) -> tuple[float, floa
     return debt, overpayment
 
 
-def generate_receipt_document(db: Session, account: Account, year: int, month: int) -> ReceiptDocument | None:
+def generate_receipt_document(
+    db: Session, account: Account, year: int, month: int, user_id: int | None = None
+) -> ReceiptDocument | None:
     """
     Формирует квитанцию для одного лицевого счёта за период.
     Возвращает None, если за период нет начислений.
@@ -114,6 +117,7 @@ def generate_receipt_document(db: Session, account: Account, year: int, month: i
         owner_name=owner_name,
         account_number=account.account_number,
     )
+    audit_document_create(receipt, user_id)
     db.add(receipt)
     db.flush()
 
@@ -181,7 +185,8 @@ def generate_receipt_document(db: Session, account: Account, year: int, month: i
 @router.post("/receipt_documents/generate", status_code=201)
 def generate_receipts(
     payload: dict[str, Any] = Body(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Массово формирует квитанции по всем активным лицевым счетам за период."""
     year = payload.get("year")
@@ -196,7 +201,7 @@ def generate_receipts(
     accounts = db.query(Account).filter(Account.is_active == True).all()
     created = []
     for account in accounts:
-        rec = generate_receipt_document(db, account, year, month)
+        rec = generate_receipt_document(db, account, year, month, user_id=user.id)
         if rec:
             created.append(rec)
 

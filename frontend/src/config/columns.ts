@@ -47,6 +47,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'transaction_type', label: 'Тип операции' },
         { key: 'amount', label: 'Сумма', format: formatNumber },
         { key: 'notes', label: 'Примечание' },
+        { key: 'created_by_name', label: 'Автор' },
     ],
 
     transactions: [
@@ -59,6 +60,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'transaction_type', label: 'Тип операции' },
         { key: 'amount', label: 'Сумма', format: formatNumber },
         { key: 'notes', label: 'Примечание' },
+        { key: 'created_by_name', label: 'Автор' },
     ],
 
     accrual_documents: [
@@ -67,6 +69,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'accruals_count', label: 'Количество записей' },
         { key: 'total_amount', label: 'Общая сумма', format: formatNumber },
         { key: 'created_at', label: 'Дата создания', format: formatDateTime },
+        { key: 'created_by_name', label: 'Автор' },
     ],
 
     accruals_register: [
@@ -141,6 +144,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'services_type.services_type', label: 'Вид услуги' },
         { key: 'readings_count', label: 'Количество записей' },
         { key: 'created_at', label: 'Дата создания', format: formatDateTime },
+        { key: 'created_by_name', label: 'Автор' },
     ],
 
     receipt_documents: [
@@ -153,6 +157,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'debt', label: 'Долг', format: formatNumber },
         { key: 'overpayment', label: 'Переплата', format: formatNumber },
         { key: 'payable_amount', label: 'К оплате', format: formatNumber },
+        { key: 'created_by_name', label: 'Автор' },
     ],
 
     writeoff_documents: [
@@ -162,6 +167,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'total_allocated', label: 'Распределено', format: formatNumber },
         { key: 'title', label: 'Название' },
         { key: 'created_at', label: 'Создан', format: formatDateTime },
+        { key: 'created_by_name', label: 'Автор' },
     ],
 };
 

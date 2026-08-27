@@ -31,6 +31,28 @@ from models import (
 )
 
 
+def audit_document_create(item: Any, user_id: int | None, description: str | None = None) -> None:
+    """Проставляет метаданные автора при создании документа (п. 2.9).
+
+    Работает только если у объекта есть соответствующие аудит-поля.
+    """
+    if hasattr(item, "created_by"):
+        item.created_by = user_id
+    if hasattr(item, "updated_by"):
+        item.updated_by = user_id
+    if hasattr(item, "change_description") and description:
+        item.change_description = description
+
+
+def audit_document_update(item: Any, user_id: int | None, description: str | None = None) -> None:
+    """Обновляет метаданные автора при изменении документа (п. 2.9).
+    `updated_at` обновляется на уровне СУБД (onupdate)."""
+    if hasattr(item, "updated_by"):
+        item.updated_by = user_id
+    if hasattr(item, "change_description") and description:
+        item.change_description = description
+
+
 def resolve_transaction_values(
     db: Session, payload: dict[str, Any], exclude_id: int | None = None
 ) -> dict[str, Any]:
