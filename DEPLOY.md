@@ -57,6 +57,134 @@ bash scripts/setup_vps.sh
 
 > Перед первым успешным прогоном отредактируйте созданный `.env` (БД, пароли, CORS).
 
+### 3.1. Ручные действия — подробная инструкция (после установки на новом VPS)
+
+После `setup_vps.sh` остаются шаги, которые нельзя автоматизировать полностью
+(требуют вашего ввода: домен, реквизиты СУБД, DNS). По шагам:
+
+#### 1) Создать базу данных и пользователя PostgreSQL
+
+Если Postgres ещё не установлен/не создана база — выполните от root:
+
+```bash
+apt-get install -y postgresql
+systemctl enable --now postgresql
+```
+
+Затем от пользователя `postgres` создайте роль и БД. Имена возьмите те же, что указаны
+в `.env` (`POSTGRES_USER` / `POSTGRES_DB` / `POSTGRES_PASSWORD`):
+
+```bash
+sudo -u postgres psql <<'SQL'
+CREATE USER townhouse_user WITH PASSWORD 'сложный-пароль';
+CREATE DATABASE townhouse OWNER townhouse_user;
+SQL
+```
+
+Убедитесь, что в `.env` установлено:
+```ini
+POSTGRES_USER=townhouse_user
+POSTGRES_PASSWORD=сложный-пароль
+POSTGRES_DB=townhouse
+POSTGRES_HOST=127.0.0.1   # или IP сервера БД
+POSTGRES_PORT=5432
+```
+
+> Если строка `.env` задана через `DATABASE_URL=postgresql://...`, не дублируйте —
+> хватает либо `DATABASE_URL`, либо набора `POSTGRES_*`.
+
+#### 2) Проверить подключение к БД и повторно прогнать установку
+
+Повторный запуск `setup_vps.sh` **идемпотентен** (не сломает готовые части):
+
+```bash
+bash scripts/setup_vps.sh
+```
+
+Он создаст схему (Alembic), справочники и админа, запустит systemd-юнит.
+
+#### 3) Проверить, что бэкенд поднялся
+
+```bash
+systemctl status townhouse-backend
+curl -s http://127.0.0.1:8000/health   # или любой эндпоинт — ожидается ответ API
+```
+
+Если сервис не встал — смотрите логи:
+```bash
+journalctl -u townhouse-backend -n 50 --no-pager
+```
+
+#### 4) Настроить nginx
+
+Из шаблона `deploy/nginx.conf.template` создайте конфиг, заменив `__DOMAIN__`
+и `__APP_DIR__`:
+
+```bash
+sed -e 's|__DOMAIN__|ваш-домен.example|' \
+    -e 's|__APP_DIR__|/opt/townhouse|' \
+    deploy/nginx.conf.template \
+    > /etc/nginx/sites-available/townhouse
+
+ln -s /etc/nginx/sites-available/townhouse /etc/nginx/sites-enabled/townhouse
+nginx -t
+systemctl reload nginx
+```
+
+Шаблон обрабатывает:
+- `location /api/` → прокси на `127.0.0.1:8000` (бэкенд);
+- `location /` → отдаёт статику SPA из `frontend/dist`;
+- заголовки `X-Real-IP`/`X-Forwarded-*` для корректного логирования и CORS.
+
+> В dev-режиме, если фронт на Vite (`:5173`), в шаблоне раскомментируйте
+> `location / { proxy_pass http://127.0.0.1:5173; }` вместо статики.
+
+#### 5) DNS-запись
+
+На ваш DNS-провайдер добавьте A/AAAA-запись:
+
+```text
+townhouse.sagacloud.kz.   IN   A   <IP-вашего-VPS>
+```
+
+Проверка:
+```bash
+dig townhouse.sagacloud.kz +short
+# должно вернуть IP сервера
+```
+
+#### 6) HTTPS (рекомендуется)
+
+Установите TLS через Let's Encrypt / certbot:
+
+```bash
+apt-get install -y certbot python3-certbot-nginx
+certbot --nginx -d townhouse.sagacloud.kz
+# certbot самостоятельно пропишет SSL в nginx и настроит продление
+```
+
+#### 7) Администратор и первичные данные
+
+Администратор создаётся автоматически скриптом (`create_user.py`). Если нужно
+обновить его пароль — повторно из `backend/`:
+
+```bash
+cd /opt/townhouse/backend
+ADMIN_PASSWORD='новый-пароль' ../.venv/bin/python create_user.py
+systemctl restart townhouse-backend
+```
+
+#### 8) Секреты и прод-безопасность
+
+- `AUTH_SECRET_KEY` обязательно замените на случайный (лог предупредит, если не задан):
+  ```bash
+  python -c "import secrets; print(secrets.token_hex(32))"
+  ```
+- `CORS_ORIGINS` оставьте свой домен, уберите лишние `localhost`-значения при необходимости.
+- Пароль админа / строка БД не должны попадать в git (`.env` — в `.gitignore`).
+
+### 3.2. Ручная установка (без скриптов, как альтернатива)
+
 Ключевой принцип: **инициализация схемы — только через Alembic** (`alembic upgrade head`).
 Отдельный `bootstrap_db.py` (raw `create_all`) для развёртывания **не нужен** — вся схема
 воспроизводится ревизиями Alembic (включая масштабирующую ревизию `0002_schema_squash`).
