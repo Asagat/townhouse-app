@@ -16,6 +16,8 @@ cp .env.example .env
 
 - Никогда не коммитьте `.env` (он в `.gitignore`). Шаблон всех переменных — в `.env.example`.
 - Пароль администратора передаётся через `ADMIN_PASSWORD` (или генерируется случайно) — см. `backend/create_user.py`.
+- `create_user.py` **идемпотентен**: повторный запуск не ошибка — он обновляет пароль (и роль/имя)
+  существующего пользователя на актуальный. Это удобно при многократном развёртывании.
 
 ---
 
@@ -68,7 +70,8 @@ uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 > каталога `backend/` — так модули (`database`, `models`, `auth`) корректно попадают в
 > `sys.path`. Отдельная передача `PYTHONPATH=backend` не требуется.
 > `init_data.py` идемпотентен — создаёт только недостающие справочники.
-> `create_user.py` выводит сгенерированный пароль один раз в консоль.
+> `create_user.py` создаёт пользователя, а при повторном запуске обновляет его пароль
+> (идемпотентно); сгенерированный пароль печатается один раз в консоль.
 
 ---
 
@@ -77,10 +80,16 @@ uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 ```bash
 cd frontend
 npm install
-# для локального dev:
-echo "VITE_DEV_HOST=localhost" >> .env
 npm run dev          # dev-сервер на http://localhost:5173
 ```
+
+- **`frontend/.env` создаётся автоматически**: скрипт `predev` (`ensure-env`) копирует
+  `frontend/.env.example` в `frontend/.env`, если его ещё нет. Явно создавать `.env` не обязательно.
+- **Dev-прокси по умолчанию**: `vite.config.ts` переадресует запросы `/api` на бэкенд
+  (`VITE_PROXY_TARGET`, по умолчанию `http://localhost:8000`). Поэтому локально внешний
+  адрес/CORS для бэкенда не нужны — фронтенд на :5173 сам проксирует запросы.
+- Локальные переменные уточняйте в `frontend/.env`: `VITE_PROXY_TARGET`, `VITE_DEV_HOST=localhost`,
+  `VITE_DEV_PORT`.
 
 Production-сборка: `npm run build` (соберёт в `dist/`, статику отдаёт nginx).
 
@@ -120,7 +129,7 @@ docker compose up -d --build
 ```
 
 - `backend` читает окружение из `.env` (`env_file: .env`) и подключается к вашей Postgres.
-- `frontend` — dev-сервер Vite с `VITE_API_URL`.
+- `frontend` — dev-сервер Vite (проксирует `/api` на бэкенд через `VITE_PROXY_TARGET`).
 
 **Локально (нужна БД):** в `docker-compose.yml` раскомментируйте сервис `postgres`
 (поднимет БД из `POSTGRES_*`). Тогда `docker compose up -d --build` создаст и БД, и сервисы.
@@ -163,8 +172,9 @@ gunzip < townhouse_db.sql.gz | psql "$DATABASE_URL"
 | Команда (из каталога backend) | Назначение |
 |---|---|
 | `alembic upgrade head` | Применить миграции Alembic (создание всей схемы с нуля — единственный канал) |
-| `python init_data.py` | Системные справочники (типы тарифов, услуги, тарифы) |
-| `python create_user.py` | Создать пользователя (пароль из env/случайный) |
+| `python init_data.py` | Системные справочники (типы тарифов, услуги, тарифы) — идемпотентно |
+| `python create_user.py` | Создать/обновить пользователя (пароль из env/случайный; повторный запуск обновляет пароль) |
 | `python bootstrap_db.py` | **Только отладочный fallback** (raw `create_all`). Для развёртывания не нужен. |
 | `python -m pytest tests/ -q` | Запустить тесты бэкенда |
 | `uvicorn app:app --host 0.0.0.0 --port 8000` | Запустить API |
+| `npm run dev` (в `frontend/`) | Dev-сервер Vite (автосоздаёт `frontend/.env`, проксирует `/api`) |
