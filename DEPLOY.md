@@ -26,7 +26,12 @@ cp .env.example .env
   ```bash
   python -c "import os;from dotenv import load_dotenv;load_dotenv();from sqlalchemy import create_engine;create_engine(os.getenv('DATABASE_URL')).connect().close();print('DB ok')"
   ```
-  Если СУБД не запущена — запустите Postgres (или контейнер `docker run -d -e POSTGRES_PASSWORD=... postgres`) и создайте базу.
+  Если СУБД не запущена — запустите Postgres (или контейнер `docker run -d -e POSTGRES_USER=... -e POSTGRES_PASSWORD=... -e POSTGRES_DB=... -p 5432:5432 postgres:16`) и создайте базу.
+
+> **Автоматическая сборка `DATABASE_URL`.** Если в `.env` не задан `DATABASE_URL`, строка
+> подключения к Postgres собирается автоматически из `POSTGRES_HOST`/`POSTGRES_PORT`/
+> `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` (см. `backend/database.py`). Поэтому
+> достаточно задать либо `DATABASE_URL`, либо набор `POSTGRES_*` — дублировать не нужно.
 - **Node 18+/npm** для фронтенда.
 
 ---
@@ -116,6 +121,10 @@ docker compose up -d --build
 
 - `backend` читает окружение из `.env` (`env_file: .env`) и подключается к вашей Postgres.
 - `frontend` — dev-сервер Vite с `VITE_API_URL`.
+
+**Локально (нужна БД):** в `docker-compose.yml` раскомментируйте сервис `postgres`
+(поднимет БД из `POSTGRES_*`). Тогда `docker compose up -d --build` создаст и БД, и сервисы.
+На VPS сервис `postgres` закомментирован — там Postgres внешний.
 
 Для продакшена бэкенд лучше запускать через systemd-юнит (uvicorn) + nginx,
 а не dev-режимом.

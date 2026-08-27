@@ -1,4 +1,22 @@
 services:
+  # ----- PostgreSQL (ОПЦИОНАЛЬНО, для локальной разработки) -----
+  # Раскомментируйте, чтобы docker compose поднял и БД из POSTGRES_* (.env).
+  # Использует обычную сеть (НЕ host), поэтому порт 5432 берётся с localhost.
+  # На VPS, где Postgres внешний (host-сеть), этот сервис не нужен — оставьте
+  # закомментированным.
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: townhouse-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+  #     POSTGRES_DB: ${POSTGRES_DB:-townhouse}
+  #   ports:
+  #     - "${POSTGRES_PORT:-5432}:5432"
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+
   backend:
     build:
       context: ./backend
@@ -26,3 +44,6 @@ services:
       - CHOKIDAR_USEPOLLING=true
     security_opt:
       - "apparmor:unconfined"
+
+volumes:
+  pgdata:
