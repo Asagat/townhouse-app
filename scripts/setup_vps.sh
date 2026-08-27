@@ -83,21 +83,34 @@ source .venv/bin/activate
 pip install --upgrade pip
 pip install -r backend/requirements.txt
 
-# 5) Проверка подключения к БД
-python - <<'PY'
+# 5) Проверка подключения к БД и её кодировки (кириллица ⇒ нужен UTF8, не SQL_ASCII)
+python -X utf8 - <<'PY'
 import os, sys
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from pathlib import Path
 sys.path.insert(0, str(Path("backend").resolve()))
 os.chdir("backend")
 from database import SQLALCHEMY_DATABASE_URL
+engine = None
 try:
-    create_engine(SQLALCHEMY_DATABASE_URL).connect().close()
-    print("▶ Подключение к БД — OK")
+    engine = create_engine(SQLALCHEMY_DATABASE_URL)
+    with engine.connect() as conn:
+        enc = conn.execute(text("SHOW server_encoding")).scalar()
+    print(f"▶ Подключение к БД — OK (server_encoding={enc})")
+    if enc and enc != "UTF8":
+        print("❌ Кодировка БД не UTF8, а", enc, "— кириллица будет падать с UnicodeEncodeError.")
+        print("   Пересоздайте БД с ENCODING 'UTF8' (см. DEPLOY.md):")
+        print("     CREATE DATABASE townhouse OWNER townhouse_user ENCODING 'UTF8' LC_COLLATE 'C.UTF-8' LC_CTYPE 'C.UTF-8' TEMPLATE template0;")
+        sys.exit(1)
+except SystemExit:
+    raise
 except Exception as e:
     print("❌ Не удалось подключиться к БД:", e)
     print("   Создайте базу (см. ниже) и исправьте .env, затем повторите.")
     sys.exit(1)
+finally:
+    if engine is not None:
+        engine.dispose()
 PY
 
 # 6) Схема, справочники, админ

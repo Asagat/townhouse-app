@@ -77,8 +77,26 @@ systemctl enable --now postgresql
 ```bash
 sudo -u postgres psql <<'SQL'
 CREATE USER townhouse_user WITH PASSWORD 'сложный-пароль';
-CREATE DATABASE townhouse OWNER townhouse_user;
+-- ВАЖНО: DB должна быть UTF8, а НЕ SQL_ASCII (по умолчанию на кластере с локалью C).
+-- При SQL_ASCII кириллица в справочниках/документах приведёт к
+-- UnicodeEncodeError: 'ascii' codec can't encode ... при psycopg2.
+CREATE DATABASE townhouse OWNER townhouse_user ENCODING 'UTF8' LC_COLLATE 'C.UTF-8' LC_CTYPE 'C.UTF-8' TEMPLATE template0;
 SQL
+```
+
+Если база уже создана без `ENCODING 'UTF8'` (т.е. в `SQL_ASCII`) — кодировку БД нельзя изменить
+на лету: пересоздайте её (данные тестовые можно сбросить):
+
+```bash
+sudo -u postgres psql <<'SQL'
+DROP DATABASE IF EXISTS townhouse;
+CREATE DATABASE townhouse OWNER townhouse_user ENCODING 'UTF8' LC_COLLATE 'C.UTF-8' LC_CTYPE 'C.UTF-8' TEMPLATE template0;
+SQL
+```
+
+Проверка кодировки:
+```bash
+sudo -u postgres psql -d townhouse -c "SHOW server_encoding;"   # должно быть UTF8
 ```
 
 Убедитесь, что в `.env` установлено:
