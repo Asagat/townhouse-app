@@ -17,16 +17,22 @@ from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from models import AccrualDocument, AccrualsRegister, User
+from models import AccrualDocument, AccrualsRegister, User, WriteoffDocument
 from routers.documents import default_accrual_document_title
-from serializers import SERIALIZERS, accrual_document_serializer
+from serializers import (
+    SERIALIZERS,
+    accrual_document_serializer,
+    writeoff_document_serializer,
+    writeoff_item_serializer,
+)
 from services import (
     build_accrual_register_items,
     calculate_accruals_preview,
     create_accounts_register_entries_for_accruals,
 )
 from writeoffs import (
-    calculate_write_offs,
+    cancel_writeoff_document,
+    create_writeoff_document,
     rebuild_accounts_register,
     check_register_integrity,
 )
@@ -138,22 +144,19 @@ async def generate_accruals(
     }
 
 
-@router.post("/write_offs/run", status_code=201)
-def run_write_offs(
-    payload: dict[str, Any] = Body(...),
+@router.post("/writeoff_documents/run", status_code=201)
+def run_writeoff_document(
+    payload: dict[str, Any] = Body(default={}),
     db: Session = Depends(get_db),
-    _auth: User = Depends(require_roles("operator", "admin")),
+    user: User = Depends(require_roles("operator", "admin")),
 ):
-    """
-    Операция «Списание задолженностей».
+    """Выполняет списание задолженностей и оформляет его документом (п. 2.5).
 
-    Распределяет доступные деньги каждого лицевого счёта по видам услуг
-    в порядке приоритета (services_type.priority) и пишет результат
-    в Регистр взаиморасчётов. Идемпотентна: существующие строки списания
-    для затронутых счетов перестраиваются заново.
-
-    Запускается: по кнопке, по регламенту (cron) или при создании
-    «Приход/Расход».
+    Распределяет доступные средства счетов по услугам в порядке приоритета,
+    создаёт документ «Списание задолженностей» (`writeoff_documents`),
+    строки (`writeoff_items`) и проставляет ссылку на документ в строках
+    `accounts_register` (для каскадной отмены). Прежние активные документы
+    списания затронутых счетов помечаются «cancelled».
     """
     raw_ids = payload.get("account_ids")
     if raw_ids is None:
@@ -164,14 +167,52 @@ def run_write_offs(
         raise HTTPException(status_code=422, detail="Поле 'account_ids' должно быть списком или отсутствовать")
 
     try:
-        result = calculate_write_offs(db, account_ids)
+        result = create_writeoff_document(db, account_ids, user_id=user.id)
+        db.flush()
         db.commit()
+        db.refresh(result["document"])
     except Exception as exc:
         db.rollback()
         logger.exception("Ошибка списания задолженностей")
         raise HTTPException(status_code=409, detail=f"Не удалось выполнить списание: {str(exc)}")
 
-    return result
+    return {
+        "document": writeoff_document_serializer(result["document"]),
+        "items": [writeoff_item_serializer(i) for i in result["items"]],
+        "processed": result["processed"],
+    }
+
+
+@router.get("/writeoff_documents/{document_id}/items", status_code=200)
+def get_writeoff_document_items(
+    document_id: int,
+    db: Session = Depends(get_db),
+):
+    """Возвращает документ списания вместе со строками распределения (для просмотра)."""
+    document = db.get(WriteoffDocument, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Документ списания не найден")
+    items = sorted(document.items, key=lambda i: i.id)
+    return {
+        "document": writeoff_document_serializer(document),
+        "items": [writeoff_item_serializer(i) for i in items],
+    }
+
+
+@router.post("/writeoff_documents/{document_id}/cancel", status_code=200)
+def cancel_writeoff(
+    document_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("operator", "admin")),
+):
+    """Отменяет документ списания: статус 'cancelled', строки списания из
+    `accounts_register` удаляются, балансы затронутых счетов пересчитываются."""
+    document = cancel_writeoff_document(db, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Документ списания не найден")
+    db.commit()
+    db.refresh(document)
+    return writeoff_document_serializer(document)
 
 
 @router.post("/maintenance/rebuild_registers", status_code=201)

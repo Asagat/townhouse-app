@@ -16,7 +16,12 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from models import ServiceType, recalculate_account_balance
+from models import (
+    ServiceType,
+    WriteoffDocument,
+    WriteoffItem,
+    recalculate_account_balance,
+)
 
 
 def _active_account_ids(db: Session) -> list[int]:
@@ -82,34 +87,149 @@ def _services_in_priority_order(db: Session) -> list[ServiceType]:
 
 def calculate_write_offs(db: Session, account_ids: list[int] | None = None) -> dict:
     """
-    Выполняет списание задолженностей.
+    Выполняет списание задолженностей (историческое ядро, без документа).
 
-    A. Для каждого счёта определяется начислено по видам услуг (accounts_register,
-       income-строки начислений).
-    B. Определяется доступная сумма по счёту (cash_register: SUM(income - expense)).
-    C. Доступная сумма распределяется по услугам в порядке приоритета и записывается
-       в accounts_register как списание (expense-строки с видом услуги).
+    Используется при пересоздании производного среза (`rebuild_accounts_register`)
+    и в тестах. Распределяет доступные деньги по услугам в порядке приоритета и
+    пишет строки списания в `accounts_register` (без привязки к документу —
+    `writeoff_id` остаётся NULL). Для операции со стороны пользователя используй
+    `create_writeoff_document`.
 
-    Конвенция знаков: income = начислено (долг растёт), expense = списано (долг падает),
-    balance_after = SUM(income) - SUM(expense) — положительный = долг, отрицательный = переплата.
-
-    Если доступных денег больше суммы всех начислений, переплата остаётся висящей
-    отрицательным остатком balance_after счёта — дополнительные строки не создаём
-    (вариант 1).
-
-    account_ids=None — все активные счета. Итог предназначен для отчёта/фронтенда.
+    account_ids=None — все активные счета.
     """
+    distributed = _distribute(db, account_ids, writeoff_id=None)
+    return {"processed": distributed}
+
+
+def _cancel_active_documents_for_accounts(db: Session, account_ids: list[int]) -> None:
+    """Помечает активные документы списания, затрагивающие указанные счета, как
+    отменённые и удаляет их строки из `accounts_register` (консистентность: на счёт
+    действует максимум один активный документ списания)."""
+    doc_ids = [
+        r[0]
+        for r in db.execute(
+            text("""
+                SELECT DISTINCT wi.document_id
+                FROM writeoff_items wi
+                JOIN writeoff_documents wd ON wd.id = wi.document_id
+                WHERE wi.account_id = ANY(:accs) AND wd.status = 'new'
+            """),
+            {"accs": account_ids},
+        ).fetchall()
+    ]
+    for did in doc_ids:
+        db.execute(text("UPDATE writeoff_documents SET status = 'cancelled' WHERE id = :d"), {"d": did})
+        # Удаляем строки списания этого документа (документ оставляем в журнале как «отменён»).
+        db.execute(text("DELETE FROM accounts_register WHERE writeoff_id = :d"), {"d": did})
+
+
+def create_writeoff_document(
+    db: Session,
+    account_ids: list[int] | None = None,
+    user_id: int | None = None,
+) -> dict:
+    """Создаёт документ «Списание задолженностей» и выполняет распределение (п. 2.5).
+
+    - Помечает прежние активные документы списания затронутых счетов как отменённые.
+    - Создаёт `WriteoffDocument` (шапку) со статусом 'new'.
+    - Распределяет доступные средства по услугам (приоритет) и пишет строки списания
+      в `accounts_register` c привязкой к документу (`writeoff_id`).
+    - Для каждого распределения создаёт строку `WriteoffItem`.
+
+    commit выполняет вызывающий код.
+
+    Возвращает {"document": WriteoffDocument, "processed": [...], "items": [WriteoffItem]}.
+    """
+    from datetime import date as _date
+
     if account_ids is None:
         account_ids = _active_account_ids(db)
     elif isinstance(account_ids, int):
         account_ids = [account_ids]
 
+    _cancel_active_documents_for_accounts(db, account_ids)
+
+    # Убираем «бесхозные» строки списания (без документа), оставшиеся от прежней
+    # логики, чтобы новый документ был единственным источником распределения.
+    db.execute(
+        text("""
+            DELETE FROM accounts_register
+            WHERE account_id = ANY(:accs)
+              AND services_type_id IS NOT NULL
+              AND expense > 0
+              AND writeoff_id IS NULL
+        """),
+        {"accs": account_ids},
+    )
+
+    document = WriteoffDocument(
+        writeoff_date=_date.today(),
+        status="new",
+        created_by=user_id,
+    )
+    db.add(document)
+    db.flush()  # получаем document.id
+
+    processed = _distribute(db, account_ids, writeoff_id=document.id)
+
+    # Строки документа по фактическому распределению.
+    items: list[WriteoffItem] = []
+    for p in processed:
+        account_id = p["account_id"]
+        last_balance = db.execute(
+            text("SELECT balance_after FROM accounts_register WHERE account_id = :a "
+                 "ORDER BY operation_date DESC, id DESC LIMIT 1"),
+            {"a": account_id},
+        ).scalar()
+        for al in p["allocations"]:
+            item = WriteoffItem(
+                document_id=document.id,
+                account_id=account_id,
+                services_type_id=al["services_type_id"],
+                allocated=al["allocated"],
+                balance_after=last_balance,
+            )
+            db.add(item)
+            items.append(item)
+
+    return {"document": document, "processed": processed, "items": items}
+
+
+def cancel_writeoff_document(db: Session, document_id: int) -> WriteoffDocument | None:
+    """Отменяет документ списания: статус 'cancelled', строки `accounts_register` с
+    `writeoff_id` удаляются, балансы затронутых счетов пересчитываются."""
+    document = db.get(WriteoffDocument, document_id)
+    if not document:
+        return None
+    document.status = "cancelled"
+    account_ids = [
+        r[0]
+        for r in db.execute(
+            text("SELECT DISTINCT account_id FROM writeoff_items WHERE document_id = :d"),
+            {"d": document_id},
+        ).fetchall()
+    ]
+    db.execute(text("DELETE FROM accounts_register WHERE writeoff_id = :d"), {"d": document_id})
+    for aid in account_ids:
+        recalculate_account_balance(db, aid)
+    return document
+
+
+def _distribute(
+    db: Session,
+    account_ids: list[int] | None,
+    writeoff_id: int | None,
+) -> list[dict]:
+    """Внутреннее распределение денег по услугам (ядро списания)."""
     services = _services_in_priority_order(db)
     processed: list[dict] = []
 
-    for account_id in account_ids:
-        # Удаляем прежние строки списания, чтобы перестроить разнесение с нуля.
-        _delete_writeoffs(db, account_id)
+    for account_id in account_ids or []:
+        # При документном списании прежние активные строки уже отменены в
+        # _cancel_active_documents_for_accounts; здесь чистим только «бесхозные»
+        # (writeoff_id IS NULL) на случай повторного вызова без документа.
+        if writeoff_id is None:
+            _delete_writeoffs(db, account_id)
 
         accrued = _accrued_per_service(db, account_id)
         total_debt = sum(accrued.values())
@@ -136,14 +256,15 @@ def calculate_write_offs(db: Session, account_ids: list[int] | None = None) -> d
                 db.execute(
                     text("""
                         INSERT INTO accounts_register
-                            (operation_date, account_id, services_type_id, income, expense, balance_after)
-                        VALUES (:op, :a, :svc, 0, :expense, 0)
+                            (operation_date, account_id, services_type_id, income, expense, balance_after, writeoff_id)
+                        VALUES (:op, :a, :svc, 0, :expense, 0, :wo)
                     """),
                     {
                         "op": op_date,
                         "a": account_id,
                         "svc": svc_id,
                         "expense": rounded,
+                        "wo": writeoff_id,
                     },
                 )
                 remaining -= amount
@@ -161,7 +282,7 @@ def calculate_write_offs(db: Session, account_ids: list[int] | None = None) -> d
             }
         )
 
-    return {"processed": processed}
+    return processed
 
 
 # --- ПЕРЕСОЗДАНИЕ ПРОИЗВОДНОГО СРЕЗА (пункт 3.3 роадмапа) ---

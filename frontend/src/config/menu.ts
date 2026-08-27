@@ -26,6 +26,11 @@ export const categories: Category[] = [
               label: 'Квитанции',
               icon: 'fa-solid fa-file-invoice-dollar',
             },
+            {
+              key: 'writeoff_documents',
+              label: 'Списания',
+              icon: 'fa-solid fa-arrow-right-arrow-left',
+            },
         ],
     },
     {

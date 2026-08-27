@@ -22,6 +22,7 @@ export const resourceRoles: Record<string, string[]> = {
     accrual_documents: ["admin", "operator"],
     meter_reading_documents: ["admin", "operator", "controller"],
     receipt_documents: ["admin", "operator"],
+    writeoff_documents: ["admin", "operator"],
 
     // Справочники
     tariffs: ["admin", "operator"],

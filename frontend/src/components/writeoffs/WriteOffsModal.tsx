@@ -18,10 +18,17 @@ interface AccountResult {
     written_off: number;
 }
 
+interface WriteoffDoc {
+    id: number;
+    status: string;
+    total_allocated: number;
+}
+
 export const WriteOffsModal = ({ open, onClose, onSaved }: WriteOffsModalProps) => {
     const apiUrl = useApiUrl();
     const [running, setRunning] = useState(false);
     const [result, setResult] = useState<AccountResult[] | null>(null);
+    const [doc, setDoc] = useState<WriteoffDoc | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     const { mutate } = useCustomMutation();
@@ -29,6 +36,7 @@ export const WriteOffsModal = ({ open, onClose, onSaved }: WriteOffsModalProps) 
     const reset = () => {
         setRunning(false);
         setResult(null);
+        setDoc(null);
         setError(null);
     };
 
@@ -36,15 +44,21 @@ export const WriteOffsModal = ({ open, onClose, onSaved }: WriteOffsModalProps) 
         setRunning(true);
         setError(null);
         setResult(null);
+        setDoc(null);
         mutate(
             {
-                url: `${apiUrl}/write_offs/run`,
+                url: `${apiUrl}/writeoff_documents/run`,
                 method: "post",
                 values: {},
             },
             {
                 onSuccess: (response) => {
                     const data = (response.data as any) ?? {};
+                    setDoc({
+                        id: data.document?.id ?? 0,
+                        status: data.document?.status ?? "new",
+                        total_allocated: data.document?.total_allocated ?? 0,
+                    });
                     const processed = Array.isArray(data.processed) ? data.processed : [];
                     const rows: AccountResult[] = processed.map((p: any) => ({
                         account_id: p.account_id,
@@ -57,7 +71,7 @@ export const WriteOffsModal = ({ open, onClose, onSaved }: WriteOffsModalProps) 
                     const total = rows.reduce((s, r) => s + (r.written_off ?? 0), 0);
                     message.success(
                         total > 0
-                            ? `Списание выполнено: распределено ${formatNumber(total)} по ${rows.length} счетам`
+                            ? `Списание выполнено (документ №${data.document?.id ?? 0}): распределено ${formatNumber(total)} по ${rows.length} счетам`
                             : "Списание выполнено: нет задолженности для распределения",
                     );
                     onSaved();
@@ -116,6 +130,7 @@ export const WriteOffsModal = ({ open, onClose, onSaved }: WriteOffsModalProps) 
             {result && (
                 <div style={{ marginBottom: 16 }}>
                     <Typography.Text strong>
+                        {doc && doc.id ? `Документ «Списание задолженностей» №${doc.id} (${doc.status}). ` : ""}
                         Итог: списано {formatNumber(totalWritten)} по {totalAccounts} счетам.
                         Переплата (если есть) остаётся отрицательным остатком счёта.
                     </Typography.Text>

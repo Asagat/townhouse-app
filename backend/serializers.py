@@ -28,6 +28,8 @@ from models import (
     TariffType,
     Transaction,
     User,
+    WriteoffDocument,
+    WriteoffItem,
 )
 
 
@@ -471,6 +473,38 @@ def receipt_document_serializer(item: ReceiptDocument) -> dict:
     return result
 
 
+def writeoff_document_serializer(item: WriteoffDocument) -> dict:
+    total_allocated = (
+        sum(float(i.allocated or 0.0) for i in item.items) if item.items else 0.0
+    )
+    return {
+        "id": item.id,
+        "writeoff_date": item.writeoff_date.isoformat() if item.writeoff_date else None,
+        "title": item.title,
+        "status": item.status,
+        "created_by": item.created_by,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "items_count": len(item.items) if item.items else 0,
+        "total_allocated": total_allocated,
+    }
+
+
+def writeoff_item_serializer(item: WriteoffItem) -> dict:
+    account = item.account
+    services_type = item.services_type
+    return {
+        "id": item.id,
+        "document_id": item.document_id,
+        "account_id": item.account_id,
+        "services_type_id": item.services_type_id,
+        "allocated": float(item.allocated or 0.0),
+        "balance_after": float(item.balance_after) if item.balance_after is not None else None,
+        "account_number": account.account_number if account else None,
+        "account_name": f"кв. {account.apartment.apartment_number}" if account and account.apartment else None,
+        "services_type": services_type.services_type if services_type else None,
+    }
+
+
 SERIALIZERS = {
     Owner: make_serializer([
         "full_name", "first_name", "last_name", "middle_name",
@@ -492,4 +526,6 @@ SERIALIZERS = {
     AccrualDocument: accrual_document_serializer,
     ReceiptDocument: receipt_document_serializer,
     ReceiptItem: receipt_item_serializer,
+    WriteoffDocument: writeoff_document_serializer,
+    WriteoffItem: writeoff_item_serializer,
 }

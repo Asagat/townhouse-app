@@ -31,6 +31,8 @@ from models import (
     TariffType,
     Transaction,
     TransactionTypeEnum,
+    WriteoffDocument,
+    WriteoffItem,
 )
 
 
@@ -53,6 +55,8 @@ MODEL_MAP = {
     "accrual_documents": AccrualDocument,
     "receipt_documents": ReceiptDocument,
     "receipt_items": ReceiptItem,
+    "writeoff_documents": WriteoffDocument,
+    "writeoff_items": WriteoffItem,
 }
 
 
@@ -321,6 +325,22 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         {"name": "receipt_id", "label": "Квитанция", "type": "integer", "required": False},
         {"name": "service_name", "label": "Услуга", "type": "string", "required": False},
         {"name": "amount", "label": "Сумма", "type": "decimal", "required": False},
+    ],
+    "writeoff_documents": [
+        {"name": "writeoff_date", "label": "Дата списания", "type": "date", "required": True},
+        {"name": "title", "label": "Название", "type": "string", "required": False},
+        {"name": "status", "label": "Статус", "type": "string", "required": False},
+        {"name": "created_by", "label": "Автор", "type": "string", "required": False},
+        {"name": "created_at", "label": "Дата создания", "type": "datetime", "required": False},
+        {"name": "items_count", "label": "Количество записей", "type": "integer", "required": False},
+        {"name": "total_allocated", "label": "Распределено", "type": "decimal", "required": False},
+    ],
+    "writeoff_items": [
+        {"name": "document_id", "label": "Документ", "type": "integer", "required": False},
+        {"name": "account_id", "label": "Лицевой счёт", "type": "reference", "reference": "accounts", "required": False},
+        {"name": "services_type_id", "label": "Вид услуги", "type": "reference", "reference": "services_type", "required": False},
+        {"name": "allocated", "label": "Списано", "type": "decimal", "required": False},
+        {"name": "balance_after", "label": "Баланс после", "type": "decimal", "required": False},
     ],
 }
 

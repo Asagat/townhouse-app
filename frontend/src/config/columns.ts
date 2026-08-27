@@ -154,6 +154,15 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'overpayment', label: 'Переплата', format: formatNumber },
         { key: 'payable_amount', label: 'К оплате', format: formatNumber },
     ],
+
+    writeoff_documents: [
+        { key: 'writeoff_date', label: 'Дата', format: formatDate },
+        { key: 'status', label: 'Статус' },
+        { key: 'items_count', label: 'Записей' },
+        { key: 'total_allocated', label: 'Распределено', format: formatNumber },
+        { key: 'title', label: 'Название' },
+        { key: 'created_at', label: 'Создан', format: formatDateTime },
+    ],
 };
 
 /**

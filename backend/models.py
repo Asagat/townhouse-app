@@ -342,6 +342,11 @@ class AccountsRegister(Base):
     accrual_id = Column(
         Integer, ForeignKey("accruals_register.id", ondelete="CASCADE"), nullable=True
     )
+    # Ссылка на документ «Списание задолженностей» — строки списания создаются
+    # документом списания; удаление документа каскадно удаляет и его строки.
+    writeoff_id = Column(
+        Integer, ForeignKey("writeoff_documents.id", ondelete="CASCADE"), nullable=True
+    )
     # Вид услуги — привязка записи к конкретной услуге. Заполняется для начислений
     # и для записей списания (разнесённых по услугам); записи денежного регистра
     # (см. cash_register, Фаза 1) услугу не имеют.
@@ -360,6 +365,7 @@ class AccountsRegister(Base):
     account = relationship("Account", back_populates="accounts_register")
     transaction = relationship("Transaction", back_populates="accounts_register")
     accrual = relationship("AccrualsRegister", back_populates="accounts_register")
+    writeoff = relationship("WriteoffDocument")
     services_type = relationship("ServiceType")
 
 
@@ -578,4 +584,47 @@ class ReceiptItem(Base):
     payable = Column(Numeric(15, 2), default=0)         # к оплате по строке = amount + debt - overpayment
 
     receipt = relationship("ReceiptDocument", back_populates="items")
+    services_type = relationship("ServiceType")
+
+
+class WriteoffDocument(Base):
+    """Документ «Списание задолженностей» — шапка.
+
+    Создаётся при распределении доступных средств счетов по видам услуг в порядке
+    приоритета. Объединяет строки списания (WriteoffItem) для всех затронутых счетов
+    и даёт операции списания атрибуты документа (дата, № в журнале, автор, статус),
+    а также возможность отмены/пересоздания (п. 2.5 роадмапа).
+    """
+    __tablename__ = "writeoff_documents"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    writeoff_date = Column(Date, nullable=False)
+    title = Column(String(255), nullable=True)
+    # Статус: new / cancelled. При отмене строки списания из accounts_register
+    # удаляются каскадом (AccountsRegister.writeoff_id), а запись в журнале остаётся.
+    status = Column(String(20), nullable=False, default="new")
+    # Автор операции (связь с 2.9 «аудит документов»).
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    items = relationship("WriteoffItem", back_populates="document", passive_deletes=True)
+
+
+class WriteoffItem(Base):
+    """Строка документа «Списание задолженностей»: распределение по (счёт, услуга)."""
+    __tablename__ = "writeoff_items"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    document_id = Column(
+        Integer, ForeignKey("writeoff_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    account_id = Column(
+        Integer, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
+    )
+    services_type_id = Column(
+        Integer, ForeignKey("services_type.id", ondelete="RESTRICT"), nullable=False
+    )
+    allocated = Column(Numeric(15, 2), nullable=False)  # списано по этой услуге
+    balance_after = Column(Numeric(15, 2))              # баланс счёта после списания
+
+    document = relationship("WriteoffDocument", back_populates="items")
+    account = relationship("Account")
     services_type = relationship("ServiceType")

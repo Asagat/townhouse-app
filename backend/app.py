@@ -69,7 +69,12 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, asc, text
 
 import receipt_config as rc
-from writeoffs import calculate_write_offs, rebuild_accounts_register, check_register_integrity
+from writeoffs import (
+    calculate_write_offs,
+    create_writeoff_document,
+    rebuild_accounts_register,
+    check_register_integrity,
+)
 from permissions import require_resource_access
 from field_config import FIELD_CONFIG, MODEL_MAP, coerce_field_value
 from serializers import SERIALIZERS, _user_serializer
@@ -548,10 +553,10 @@ async def create_resource_item(
 
         # Шаг 3.4: автоматически выполняем списание задолженности по счёту документа.
         # Документ «Приход/Расход» уже записал движение в cash_register; пересчитываем
-        # разнесение по услугам. Идемпотентно (списание перестраивается заново).
+        # разнесение по услугам и оформляем его документом «Списание задолженностей».
         # Ошибка здесь не откатывает создание самого документа.
         try:
-            calculate_write_offs(db, [item.account_id])
+            create_writeoff_document(db, [item.account_id], user_id=_auth.id)
             db.commit()
         except Exception:
             db.rollback()

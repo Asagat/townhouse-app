@@ -14,6 +14,7 @@ import {
     useUpdate,
     useDelete,
     useCustom,
+    useCustomMutation,
     useApiUrl,
     useGetIdentity,
 } from "@refinedev/core";
@@ -26,6 +27,7 @@ import { AccrualsCalculationModal } from "../components/accruals/AccrualsCalcula
 import { ReceiptsModal } from "../components/receipts/ReceiptsModal";
 import { ReceiptViewModal } from "../components/receipts/ReceiptViewModal";
 import { WriteOffsModal } from "../components/writeoffs/WriteOffsModal";
+import { WriteoffViewModal } from "../components/writeoffs/WriteoffViewModal";
 import type { SortOrder } from "antd/es/table/interface";
 import { BRAND } from "../config/colors";
 import { canCreate, canEdit, canDelete } from "../auth/can";
@@ -177,6 +179,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const [receiptsModalOpen, setReceiptsModalOpen] = useState(false);
     const [receiptViewId, setReceiptViewId] = useState<number | undefined>(undefined);
     const [writeOffsModalOpen, setWriteOffsModalOpen] = useState(false);
+    const [writeoffViewId, setWriteoffViewId] = useState<number | undefined>(undefined);
 
     const isAccrualsRegister = resourceName === "accruals_register";
     const isAccrualDocuments = resourceName === "accrual_documents";
@@ -184,6 +187,28 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const isMeterReadings = resourceName === "meter_readings";
     const isReadOnly = resourceName === "accounts_register" || resourceName === "cash_register";
     const isReceiptDocuments = resourceName === "receipt_documents";
+    const isWriteoffDocuments = resourceName === "writeoff_documents";
+    const { mutate: cancelWriteoff } = useCustomMutation();
+    const apiUrlForCancel = useApiUrl();
+    const cancelWriteoffDoc = (documentId: number) => {
+        cancelWriteoff(
+            {
+                url: `${apiUrlForCancel}/writeoff_documents/${documentId}/cancel`,
+                method: "post",
+                values: {},
+            },
+            {
+                onSuccess: () => {
+                    message.success("Документ списания отменён");
+                    tableQuery.refetch();
+                },
+                onError: (err: any) =>
+                    message.error(
+                        err?.response?.data?.detail ?? "Не удалось отменить списание",
+                    ),
+            },
+        );
+    };
     // Регистры формируются документами и не поддерживают прямое редактирование/удаление
     const isRegister = isAccrualsRegister || isMeterReadings || isReadOnly;
     // Роль «Житель»: только просмотр — кнопки скрываются через canCreate/canEdit/canDelete.
@@ -299,6 +324,31 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                       width: 200,
                       fixed: 'right' as const,
                       render: (_: unknown, record: any) => {
+                          if (isWriteoffDocuments) {
+                              return (
+                                  <Space>
+                                      <Button
+                                          size="small"
+                                          onClick={() => setWriteoffViewId(record.id)}
+                                      >
+                                          Просмотр
+                                      </Button>
+                                      {roleCanEdit && record.status === "new" && (
+                                          <Popconfirm
+                                              title="Отменить документ списания? Записи регистра будут удалены, балансы пересчитаны."
+                                              okText="Отменить"
+                                              cancelText="Закрыть"
+                                              onConfirm={() => cancelWriteoffDoc(record.id)}
+                                          >
+                                              <Button size="small" danger>
+                                                  Отменить
+                                              </Button>
+                                          </Popconfirm>
+                                      )}
+                                  </Space>
+                              );
+                          }
+
                           if (isReceiptDocuments) {
                               return (
                                   <Space>
@@ -537,7 +587,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         </Button>
                     )}
 
-                    {resourceName === "payments" && (role === "admin" || role === "operator") && (
+                    {isWriteoffDocuments && (role === "admin" || role === "operator") && (
                         <Button
                             type="primary"
                             onClick={() => setWriteOffsModalOpen(true)}
@@ -546,7 +596,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         </Button>
                     )}
 
-                    {roleCanCreate && !isReadOnly && !isAccrualsRegister && !isAccrualDocuments && !isMeterReadingDocuments && !isMeterReadings && !isReceiptDocuments && (
+                    {roleCanCreate && !isReadOnly && !isAccrualsRegister && !isAccrualDocuments && !isMeterReadingDocuments && !isMeterReadings && !isReceiptDocuments && !isWriteoffDocuments && (
                         <Button
                             type="primary"
                             disabled={metaLoading}
@@ -633,7 +683,15 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 />
             )}
 
-            {resourceName === "payments" && (
+            {isWriteoffDocuments && (
+                <WriteoffViewModal
+                    open={writeoffViewId !== undefined}
+                    documentId={writeoffViewId}
+                    onClose={() => setWriteoffViewId(undefined)}
+                />
+            )}
+
+            {isWriteoffDocuments && (
                 <WriteOffsModal
                     open={writeOffsModalOpen}
                     onClose={() => setWriteOffsModalOpen(false)}
