@@ -16,11 +16,15 @@
 # ============================================================
 set -euo pipefail
 
-# Гарантируем UTF-8 для Python-скриптов (alembic/init_data/create_user) независимо
-# от локали сервера (LANG/LC_ALL могут быть ASCII, иначе кириллица вызовет
-# UnicodeEncodeError в stdout). PYTHONUTF8 включает UTF-8 mode при старте Python.
+# Гарантируем UTF-8 для всех Python/системных утилит независимо от локали сервера.
+# Если LANG/LC_ALL отсутствуют или равны C (ascii), то: 1) python-print кириллицы даст
+# UnicodeEncodeError; 2) alembic не прочитает alembic.ini с кириллицей (configparser
+# использует locale-кодировку). C.UTF-8 есть на Ubuntu/Debian по умолчанию и решает обе
+# проблемы за счёт locale.getpreferredencoding()==utf-8.
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+# PYTHONUTF8 / PYTHONIOENCODING дополнительно принуждают UTF-8-mode Python.
 export PYTHONUTF8=1
-# PYTHONUTF8 задаёт utf-8; PYTHONIOENCODING страхует для явно перенаправленных потоков.
 export PYTHONIOENCODING=utf-8
 
 # --- Настройки (при необходимости измените) -------------------------
@@ -97,14 +101,16 @@ except Exception as e:
 PY
 
 # 6) Схема, справочники, админ
+# -X utf8 принудительно включает UTF-8 mode Python на случай не-C.UTF-8 локалей,
+# чтобы кириллица в логах/выводе никогда не падала с UnicodeEncodeError.
 cd backend
 alembic upgrade head
-python init_data.py
+python -X utf8 init_data.py
 if [ -z "${ADMIN_PASSWORD:-}" ]; then
   echo "▶ create_user.py (пароль из ADMIN_PASSWORD или случайный)..."
-  python create_user.py
+  python -X utf8 create_user.py
 else
-  ADMIN_PASSWORD="$ADMIN_PASSWORD" python create_user.py
+  ADMIN_PASSWORD="$ADMIN_PASSWORD" python -X utf8 create_user.py
 fi
 cd ..
 
