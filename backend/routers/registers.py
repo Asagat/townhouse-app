@@ -33,6 +33,7 @@ from services import (
 from writeoffs import (
     cancel_writeoff_document,
     create_writeoff_document,
+    auto_recalculate_writeoffs,
     rebuild_accounts_register,
     check_register_integrity,
 )
@@ -132,6 +133,11 @@ async def generate_accruals(
             status_code=409,
             detail=f"Не удалось создать записи в регистре взаиморасчётов: {str(exc)}",
         ) from exc
+
+    # Начисления влияют на регистр взаиморасчётов -> пересчитываем распределение,
+    # чтобы доступные средства перераспределились и на новые начисления.
+    account_ids = sorted({int(i.account_id) for i in items})
+    auto_recalculate_writeoffs(db, account_ids)
 
     db.refresh(document)
 

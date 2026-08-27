@@ -72,6 +72,7 @@ import receipt_config as rc
 from writeoffs import (
     calculate_write_offs,
     create_writeoff_document,
+    auto_recalculate_writeoffs,
     rebuild_accounts_register,
     check_register_integrity,
 )
@@ -551,16 +552,9 @@ async def create_resource_item(
         db.commit()
         db.refresh(item)
 
-        # Шаг 3.4: автоматически выполняем списание задолженности по счёту документа.
-        # Документ «Приход/Расход» уже записал движение в cash_register; пересчитываем
-        # разнесение по услугам и оформляем его документом «Списание задолженностей».
-        # Ошибка здесь не откатывает создание самого документа.
-        try:
-            create_writeoff_document(db, [item.account_id], user_id=_auth.id)
-            db.commit()
-        except Exception:
-            db.rollback()
-            logger.exception("Ошибка авт. списания при создании документа Приход/Расход")
+        # Автозапуск пересчёта распределения по счёту документа (влияет на регистр
+        # взаиморасчётов). Ошибка здесь не откатывает создание самого документа.
+        auto_recalculate_writeoffs(db, [item.account_id])
 
     serializer = SERIALIZERS.get(model)
     row = serializer(item) if serializer else {"id": item.id}
@@ -620,6 +614,8 @@ async def update_resource_item(
         set_transaction_title(db, item)
         db.commit()
         db.refresh(item)
+        # Изменение прихода/расхода меняет денежный регистр -> пересчитываем распределение.
+        auto_recalculate_writeoffs(db, [item.account_id])
 
     serializer = SERIALIZERS.get(model)
     row = serializer(item) if serializer else {"id": item.id}
@@ -648,6 +644,10 @@ async def delete_resource_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
+    # Для «Приход/Расход» запоминаем счёт до удаления, чтобы после удаления
+    # пересчитать распределение (изменение денежного регистра влияет на взаиморасчёты).
+    deleted_account_id = item.account_id if resource in ["transactions", "payments"] else None
+
     db.delete(item)
     try:
         db.commit()
@@ -657,6 +657,9 @@ async def delete_resource_item(
             status_code=409,
             detail="Не удалось удалить: запись используется в других таблицах",
         ) from exc
+
+    if deleted_account_id is not None:
+        auto_recalculate_writeoffs(db, [deleted_account_id])
 
     return Response(status_code=204)
 

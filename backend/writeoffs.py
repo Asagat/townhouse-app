@@ -195,6 +195,28 @@ def create_writeoff_document(
     return {"document": document, "processed": processed, "items": items}
 
 
+def auto_recalculate_writeoffs(
+    db: Session, account_ids: list[int] | None, user_id: int | None = None
+) -> None:
+    """Безопасный автозапуск пересчёта распределения для счетов.
+
+    Вызывается после операции, повлиявшей на регистр взаиморасчётов
+    (Приход/Расход, начисления и т.п.). Пересчитывает разнесение через ядро
+    `calculate_write_offs` БЕЗ создания документа «Списание задолженностей» —
+    в журнал списаний попадает только то, что запущено вручную. Прежние активные
+    документные списания затронутых счетов помечаются «cancelled» (их установку
+    автопересчёт переопределяет). При ошибке откатывает и НЕ кидает исключение.
+    """
+    if not account_ids:
+        return
+    try:
+        _cancel_active_documents_for_accounts(db, account_ids)
+        calculate_write_offs(db, account_ids)  # перестраивает строки списания без документа
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 def cancel_writeoff_document(db: Session, document_id: int) -> WriteoffDocument | None:
     """Отменяет документ списания: статус 'cancelled', строки `accounts_register` с
     `writeoff_id` удаляются, балансы затронутых счетов пересчитываются."""

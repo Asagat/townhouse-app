@@ -33,6 +33,7 @@ from serializers import (
     meter_reading_serializer,
 )
 from services import build_accrual_register_items, create_accounts_register_entries_for_accruals
+from writeoffs import auto_recalculate_writeoffs
 
 
 router = APIRouter(prefix="/api")
@@ -135,6 +136,10 @@ def delete_accrual_document(
     for account_id in affected_accounts:
         recalculate_account_balance(db, account_id)
     db.commit()
+
+    # Удаление начислений влияет на регистр взаиморасчётов -> пересчитываем распределение.
+    if affected_accounts:
+        auto_recalculate_writeoffs(db, list(affected_accounts))
 
     return Response(status_code=204)
 
@@ -450,6 +455,10 @@ async def update_accrual_document_full(
             status_code=409,
             detail=f"Не удалось обновить записи в регистре взаиморасчётов: {str(exc)}",
         ) from exc
+
+    # Пересоздание начислений влияет на регистр взаиморасчётов -> пересчитываем распределение.
+    if affected_accounts:
+        auto_recalculate_writeoffs(db, list(affected_accounts))
 
     db.refresh(document)
 
