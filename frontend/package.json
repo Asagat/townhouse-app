@@ -4,6 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "ensure-env": "node -e \"const fs=require('fs');if(!fs.existsSync('.env')&&fs.existsSync('.env.example')){fs.copyFileSync('.env.example','.env');console.log('created frontend/.env from .env.example')}else{console.log('frontend/.env already present')}\"",
+    "predev": "npm run ensure-env",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview"

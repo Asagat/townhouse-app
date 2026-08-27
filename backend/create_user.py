@@ -12,8 +12,12 @@
     3. Если и того, и другого нет — генерируется случайный пароль и выводится в консоль
        (безопасно для неинтерактивного развёртывания).
 
-Пароль НЕ должен попадать в git/историю. При интерактивном создании лучше задавать
-его через env:  ADMIN_PASSWORD='...' python create_user.py
+# Пароль НЕ должен попадать в git/историю. При интерактивном создании лучше задавать
+# его через env:  ADMIN_PASSWORD='...' python create_user.py
+#
+# Скрипт ИДЕМПОТЕНТЕН: если пользователь с таким username уже есть — его пароль по
+# умолчанию (без --password) ОБНОВЛЯЕТСЯ на актуальный (из --password / ADMIN_PASSWORD /
+# сгенерированный), чтобы можно было безопасно повторно запускать при развёртывании.
 """
 
 import argparse
@@ -73,8 +77,21 @@ def main() -> None:
 
     db = SessionLocal()
     try:
-        if db.query(User).filter(User.username == args.username).first():
-            sys.exit(f"Пользователь '{args.username}' уже существует")
+        existing = db.query(User).filter(User.username == args.username).first()
+        if existing:
+            # Пользователь уже есть — обновляем пароль (идемпотентность), а также
+            # роль и имя, если переданы. Повторный запуск не считается ошибкой.
+            existing.password_hash = hash_password(password)
+            existing.role = role
+            if args.full_name:
+                existing.full_name = args.full_name
+            db.commit()
+            print(f"Пользователь '{args.username}' существует — пароль обновлён (роль '{role.name}').")
+            if generated:
+                print(f"Сгенерирован пароль: {password}")
+                print("Сохраните его — повторно показать невозможно.")
+            return
+
         user = User(
             username=args.username,
             password_hash=hash_password(password),
