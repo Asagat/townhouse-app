@@ -4,18 +4,23 @@ services:
   # Использует обычную сеть (НЕ host), поэтому порт 5432 берётся с localhost.
   # На VPS, где Postgres внешний (host-сеть), этот сервис не нужен — оставьте
   # закомментированным.
-  # postgres:
-  #   image: postgres:16-alpine
-  #   container_name: townhouse-postgres
-  #   restart: unless-stopped
-  #   environment:
-  #     POSTGRES_USER: ${POSTGRES_USER:-postgres}
-  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-  #     POSTGRES_DB: ${POSTGRES_DB:-townhouse}
-  #   ports:
-  #     - "${POSTGRES_PORT:-5432}:5432"
-  #   volumes:
-  #     - pgdata:/var/lib/postgresql/data
+  postgres:
+    image: postgres:16-alpine
+    container_name: townhouse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-townhouse}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-townhouse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   backend:
     build:
@@ -23,6 +28,9 @@ services:
       network: host
     container_name: townhouse-backend
     network_mode: host
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - ./backend:/app:z
     env_file: .env
@@ -40,7 +48,10 @@ services:
       - ./frontend:/app:z
       - /app/node_modules
     environment:
-      - VITE_API_URL=http://townhouse.sagacloud.kz/api
+      # Локальный dev через Vite-прокси /api -> backend на :8000 (см. vite.config.ts).
+      - VITE_DEV_HOST=localhost
+      - VITE_DEV_PORT=5173
+      - VITE_PROXY_TARGET=http://localhost:8000
       - CHOKIDAR_USEPOLLING=true
     security_opt:
       - "apparmor:unconfined"

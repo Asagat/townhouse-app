@@ -9,10 +9,10 @@
 
 | # | Задача | Обоснование / как |
 |---|--------|-------------------|
-| 1.1 | Разбить `backend/app.py` (~1700 строк) на модули | Единый файл содержит сериализаторы, конфиг полей (`FIELD_CONFIG`), билдеры и все роутеры. Разделить: `serializers.py`, `field_config.py`, `routers/{crud,registers,documents}.py`. Снижает риск регрессий и упрощает тесты. |
-| 1.2 | Убрать или оживить `schemas.py` | Pydantic-модели сейчас не используются (API работает на голых `dict`) и разошлись с реальностью. Либо удалить, либо перевести ответы на эти модели. |
+| 1.1 | Разбить `backend/app.py` (~3000 строк) на модули | ✅ Готово. `app.py` уменьшён с 3035 до ~680 строк. Вынесено: `field_config.py` (`MODEL_MAP`/`FIELD_CONFIG`/`coerce_field_value`), `serializers.py` (сериализаторы/`SERIALIZERS`), `services.py` (8 сервисных функций начислений/транзакций/регистров), `routers/{documents,registers,receipts,others}.py` (спец-эндпоинты). В `app.py` остались auth-роутер, `meta` и generic CRUD. pytest: 27 прошли; 3 не связаны с распилом (жёсткие ID услуг 6/7). Полный smoke по всем группам — OK. |
+| 1.2 | Убрать или оживить `schemas.py` | ✅ Pydantic-модели были неиспользуемы (API на голых `dict`) и устарели (нет новых сущностей/полей). Удалён как мёртвый код. Если при распиле `app.py` (п. 1.1) захочется перейти на типизированные ответы — вести их заново осознанно. |
 | 1.3 | Аутентификация и закрыть CORS | ✅ Реализовано: модель `User` + роли, JWT-логин (`/api/auth/login`, `/api/auth/me`, `/api/auth/users`), PBKDF2-хеши, CORS через `CORS_ORIGINS` вместо `['*']`. См. секцию «Аутентификация и ролевой доступ». |
-| 1.4 | Ввести миграции БД (Alembic) | ⏳ Частично: Alembic подключён (ревизии `0000_baseline`, `0001_users`), но большая часть схемы пока правится вручную `ALTER TABLE`. Перевести остальные изменения на миграции. |
+| 1.4 | Ввести миграции БД (Alembic) | ✅ Схема полностью под управлением Alembic. БД на head (`0002_schema_squash`); исторические ручные SQL-миграции (`cash_register`, `services_type.priority`) инкорпорированы в `0002_schema_squash`. Аудит `alembic revision --autogenerate` не выявляет ручных правок сверх моделей; единственный «дрейф» — тип `users.role` (VARCHAR↔Enum, косметический, native_enum=False), зафиксирован в версиях. |
 | 1.5 | Серверная сортировка по вложенным полям | ⏳ Частично: реализовано через подзапросы для «№ квартиры» (`apartment.apartment_number`) в регистрах/показаниях и «Документа» (`document_title`) в `accruals_register`. Для произвольных вложенных колонок (напр. `owner.full_name`) общего решения нет — остаётся fallback на `hasattr(model, _sort)`. |
 | 1.6 | Почистить «осиротевшие» строки в БД | ⏳ Не подтверждено: не проверялось наличие строк `accounts_register` без привязки к `transaction_id`/`accrual_id` после рефакторинга знаков (миграция `flip_accounts_register_signs.py`). Требуется аудит и проверка целостности (`check_register_integrity`). |
 | 1.7 | Проверить пересчёт балансов при массовых правках | ✅ Реализовано: `recalculate_account_balance`/`recalculate_register_balance` «с нуля» + `rebuild_accounts_register` (полная пересборка) + `check_register_integrity`. pytest: `test_payment_update_recalculates_cash_balance`, `test_rebuild_accounts_register_restores_consistency`, `test_rebuild_is_deterministic`. |
@@ -40,7 +40,7 @@
 
 | # | Задача | Обоснование / как |
 |---|--------|-------------------|
-| 3.1 | Тесты бэкенда (pytest) | ✅ Реализовано: 30 тестов — расчёт начислений по типу тарифа (`test_accrual_formulas`), списание/приоритет/идемпотентность/переплата/отчёт/пересборка (`test_writeoffs`), аутентификация + ролевой доступ (`test_auth`, `test_auth_http`). Не покрыты: CRUD generic-ресурсов (справочников), PDF-генерация квитанций. |
+| 3.1 | Тесты бэкенда (pytest) | ✅ Реализовано: **все 30 тестов зелёные (30/30)**. `test_accrual_formulas` и `test_writeoffs` переведены на самодостаточные услуги (создают свои `ServiceType`/`TariffType`/`Tariff` вместо жёстких ID 6/7) — больше не зависят от наполнения справочника. Расчёт начислений/списание, аутентификация + ролевой доступ покрыты. Не покрыты: CRUD generic-ресурсов (справочников), PDF-генерация квитанций. |
 | 3.2 | Тесты фронтенда (vitest + RTL) | ⏳ Не начато: ключевые сценарии GenericList (рендер, сортировка, модалки). |
 | 3.3 | CI (при желании) | ⏳ Не настроено: прогон `tsc`, `build`, pytest при пуше. |
 | 3.4 | Проверка и чистка накопленных данных | ⏳ Частично: `check_register_integrity` + pytest для восстановления среза; аудит реальных данных (все счета / корректность названий документов) не проводился. |
@@ -59,6 +59,9 @@
 
 ## Статус уже сделанного (справочно)
 
+- ✅ **П. 1.4 Alembic — схема под контролем**: БД на head (`0002_schema_squash`), исторические ручные SQL-миграции инкорпорированы в него. `alembic revision --autogenerate` не выявляет ручных правок сверх моделей; весь «дрейф» сводится к типу `users.role` (VARCHAR↔Enum, косметический).
+- ✅ **П. 1.2 — удалён мёртвый `schemas.py`**: Pydantic-модели не использовались и устарели (нет новых сущностей/полей), API работает на `dict` через `FIELD_CONFIG`/сериализаторы. Удалено.
+- ✅ **П. 1.1 — распил `app.py`**: `app.py` с 3035 строк сокращён до ~680. Вынесены `field_config.py`, `serializers.py`, `services.py`, `routers/{documents,registers,receipts,others}.py`. `app.py` содержит только auth, `/meta` и generic CRUD. pytest 27/30, полный smoke по всем группам эндпоинтов — OK.
 - ✅ Целостность `accounts_register`: пересчёт балансов «с нуля» по истории.
 - ✅ **Пересчёт регистров с нуля + идемпотентность**: обобщён `recalculate_register_balance` (для `accounts_register`/`cash_register`); добавлены `rebuild_accounts_register` (полная пересборка производного среза из `accruals_register`+`cash_register`) и `check_register_integrity` (аудит согласованности) + эндпоинт `POST /api/maintenance/rebuild_registers`. pytest покрывает восстановление испорченного среза и детерминизм повторного пересбора.
 - ✅ **Формальный «переворот» знаков**: начисления в `income`, списание/оплата в `expense`; `balance_after>0`=долг, `<0`=переплата. Квитанции и отчёт считают долг/переплату из регистров (`_account_debt_overpayment`), переплата видна в отчёте (`overpayment`) и в `cash_register`. Скрипт миграции истории `migrations/flip_accounts_register_signs.py`.

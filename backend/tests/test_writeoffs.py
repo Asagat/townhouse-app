@@ -16,6 +16,7 @@ from models import (
     AccrualDocument,
     AccrualsRegister,
     CashRegister,
+    ServiceType,
     Transaction,
     TransactionTypeEnum,
 )
@@ -24,6 +25,17 @@ from datetime import date
 
 from writeoffs import calculate_write_offs, rebuild_accounts_register, check_register_integrity
 from app import build_account_statement, create_accounts_register_entries_for_accruals
+
+
+# --- Хелперы ---
+
+
+def _svc(db, name: str, priority: int) -> ServiceType:
+    """Создаёт вид услуги с нужным приоритетом списания (иначе тесты завязаны на ID существующих)."""
+    svc = ServiceType(services_type=name, priority=priority)
+    db.add(svc)
+    db.flush()
+    return svc
 
 
 def _count(db, table: str, account_id: int) -> int:
@@ -128,11 +140,14 @@ def test_payment_delete_cascades_cash_register(db, account_factory):
 
 def test_write_offs_respects_priority(db, account_factory):
     rec = account_factory("p0")
-    # Начисления: Электричество(1, prio1)=1000, Холодная вода(3, prio2)=500, Фонд развития(7, prio0)=200
-    # Всего долг 1700; доступно денег 1200.
-    _accrual(db, rec["account_id"], 1, 1000)
-    _accrual(db, rec["account_id"], 3, 500)
-    _accrual(db, rec["account_id"], 7, 200)
+    # Свои услуги с нужным приоритетом (не зависят от ID услуг в справочнике).
+    s_el = _svc(db, "W prio1", 1)     # как «Электричество» (списывается первым)
+    s_water = _svc(db, "W prio2", 2)   # как «Холодная вода» (второй)
+    s_fund = _svc(db, "W prio0", 0)    # как «Фонд развития» (списывается в последнюю очередь)
+    # Начисления: prio1=1000, prio2=500, prio0=200. Всего долг 1700; доступно денег 1200.
+    _accrual(db, rec["account_id"], s_el.id, 1000)
+    _accrual(db, rec["account_id"], s_water.id, 500)
+    _accrual(db, rec["account_id"], s_fund.id, 200)
     db.commit()
     _payment(db, rec["account_id"], rec["cash_point_id"], 1200)
 
@@ -140,11 +155,11 @@ def test_write_offs_respects_priority(db, account_factory):
     db.commit()
 
     assert result["processed"][0]["written_off"] == 1200.0
-    for svc_id, expected in ((1, 1000.0), (3, 200.0)):
+    for svc_id, expected in ((s_el.id, 1000.0), (s_water.id, 200.0)):
         assert any(a["services_type_id"] == svc_id and a["allocated"] == expected
                    for a in result["processed"][0]["allocations"])
-    # Фонд развития (приоритет 0) — НЕ должен получить ничего, т.к. деньги кончились.
-    assert not any(a["services_type_id"] == 7 for a in result["processed"][0]["allocations"])
+    # Приоритет 0 (последний) — НЕ должен получить ничего, т.к. деньги кончились.
+    assert not any(a["services_type_id"] == s_fund.id for a in result["processed"][0]["allocations"])
 
 
 def test_write_offs_idempotent(db, account_factory):
