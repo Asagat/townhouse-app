@@ -45,8 +45,15 @@ router = APIRouter(prefix="/api")
 
 # --- ЭНДПОИНТЫ ДЛЯ КВИТАНЦИЙ ---
 
-FUND_SERVICE_TYPE_ID = 7  # «Фонд развития»: сюда садим общий долг/переплату счёта
 
+def _fund_service_id(db) -> int | None:
+    """ID услуги «Фонд развития» (сюда «садится» общий долг/переплата счёта в квитанции).
+
+    Определяется динамически по имени из справочника, а не по жёсткому ID
+    (раньше был захардкожен 7, что ломало генерацию, если «Фонд развития» имеет другой id).
+    """
+    svc = db.query(ServiceType).filter(ServiceType.services_type == FUND_SERVICE_FALLBACK).first()
+    return svc.id if svc else None
 
 def _account_debt_overpayment(db: Session, account_id: int) -> tuple[float, float]:
     """Возвращает (долг, переплата) по счёту на основе регистров.
@@ -136,16 +143,17 @@ def generate_receipt_document(db: Session, account: Account, year: int, month: i
         db.add(item)
         created_items.append(item)
 
-    # Долг/переплату садим на строку «Фонд развития» (services_type_id == FUND_SERVICE_TYPE_ID).
+    # Долг/переплату садим на строку «Фонд развития» (id услуги из справочника).
     # Ищем среди уже созданных строк фонда из начислений; если таковой нет — создаём отдельную.
+    fund_service_id = _fund_service_id(db)
     fund_row = next(
-        (x for x in created_items if x.services_type_id == FUND_SERVICE_TYPE_ID),
+        (x for x in created_items if x.services_type_id == fund_service_id),
         None,
     )
     if fund_row is None:
         fund_row = ReceiptItem(
             receipt_id=receipt.id,
-            services_type_id=FUND_SERVICE_TYPE_ID,
+            services_type_id=fund_service_id,
             service_name=FUND_SERVICE_FALLBACK,
             reading_prev=None,
             reading_curr=None,

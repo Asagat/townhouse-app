@@ -223,12 +223,54 @@ export const ReceiptViewModal = ({
                 },
             ],
         },
-        { title: "Кол-во", dataIndex: "quantity", key: "quantity", width: 70, align: "right" },
-        { title: "Тариф", dataIndex: "tariff", key: "tariff", width: 70, align: "right" },
-        { title: "Сумма", dataIndex: "amount", key: "amount", width: 96, align: "right" },
-        { title: "Долг", dataIndex: "debt", key: "debt", width: 70, align: "right" },
-        { title: "Переплата", dataIndex: "overpayment", key: "overpayment", width: 80, align: "right" },
-        { title: "К оплате", dataIndex: "payable", key: "payable", width: 92, align: "right" },
+        {
+            title: "Кол-во",
+            dataIndex: "quantity",
+            key: "quantity",
+            width: 76,
+            align: "right",
+            onCell: () => ({ style: { whiteSpace: "nowrap" } }),
+        },
+        {
+            title: "Тариф",
+            dataIndex: "tariff",
+            key: "tariff",
+            width: 80,
+            align: "right",
+            onCell: () => ({ style: { whiteSpace: "nowrap" } }),
+        },
+        {
+            title: "Сумма",
+            dataIndex: "amount",
+            key: "amount",
+            width: 96,
+            align: "right",
+            onCell: () => ({ style: { whiteSpace: "nowrap" } }),
+        },
+        {
+            title: "Долг",
+            dataIndex: "debt",
+            key: "debt",
+            width: 96,
+            align: "right",
+            onCell: () => ({ style: { whiteSpace: "nowrap" } }),
+        },
+        {
+            title: "Переплата",
+            dataIndex: "overpayment",
+            key: "overpayment",
+            width: 100,
+            align: "right",
+            onCell: () => ({ style: { whiteSpace: "nowrap" } }),
+        },
+        {
+            title: "К оплате",
+            dataIndex: "payable",
+            key: "payable",
+            width: 96,
+            align: "right",
+            onCell: () => ({ style: { whiteSpace: "nowrap" } }),
+        },
     ];
 
     const rowClassName = (r: TableRow): string => {
@@ -243,7 +285,8 @@ export const ReceiptViewModal = ({
             title={`Квитанция № ${doc?.id ?? (receiptId ?? "")}`}
             open={open}
             onCancel={onClose}
-            width={1000}
+            width={1200}
+            style={{ maxWidth: "calc(100vw - 48px)" }}
             destroyOnClose
             footer={[
                 <Button key="close" onClick={onClose}>
@@ -277,7 +320,7 @@ export const ReceiptViewModal = ({
                     style={{
                         background: "#ffffff",
                         width: "100%",
-                        maxWidth: 800,
+                        maxWidth: 1000,
                         padding: "34px 30px",
                         borderRadius: 4,
                         boxShadow: "0 2px 12px rgba(0,0,0,0.15)",
