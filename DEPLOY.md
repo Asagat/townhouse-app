@@ -22,9 +22,9 @@ cp .env.example .env
 ## 2. Требования / предусловия
 
 - **Python 3.11+** и доступ к **PostgreSQL**.
-- **PostgreSQL должен быть запущен** и доступен по `DATABASE_URL` из `.env` (хост, порт, пользователь, пароль, имя БД). Проверка подключения:
+- **PostgreSQL должен быть запущен** и доступен по `DATABASE_URL` из `.env` (хост, порт, пользователь, пароль, имя БД). Проверка подключения — через SQLAlchemy (корректно при любом префиксе драйвера):
   ```bash
-  python -c "import os;from dotenv import load_dotenv;load_dotenv();import psycopg2;psycopg2.connect(os.getenv('DATABASE_URL'));print('DB ok')"
+  python -c "import os;from dotenv import load_dotenv;load_dotenv();from sqlalchemy import create_engine;create_engine(os.getenv('DATABASE_URL')).connect().close();print('DB ok')"
   ```
   Если СУБД не запущена — запустите Postgres (или контейнер `docker run -d -e POSTGRES_PASSWORD=... postgres`) и создайте базу.
 - **Node 18+/npm** для фронтенда.
@@ -38,27 +38,30 @@ cp .env.example .env
 воспроизводится ревизиями Alembic (включая масштабирующую ревизию `0002_schema_squash`).
 
 ```bash
-# 1) Python- зависимости в виртуальном окружении
+# 1) Python-зависимости в виртуальном окружении
 python -m venv .venv
 . .venv/bin/activate
 pip install -r backend/requirements.txt
 
-# 2) СХЕМА БД — только Alembic (создаёт все таблицы + users + alembic_version)
-#    Выполняется ИЗ КАТАЛОГА backend (alembic.env.py добавляет backend в sys.path).
+# 2) Перейти в каталог backend — ВСЕ команды ниже выполняются из него
 cd backend
+
+# 3) СХЕМА БД — только Alembic (создаёт все таблицы + users + alembic_version)
 alembic upgrade head
-cd ..
 
-# 3) Системные справочники (типы тарифов, услуги, тарифы по умолчанию) — идемпотентно
-python backend/init_data.py
+# 4) Системные справочники (типы тарифов, услуги, тарифы по умолчанию) — идемпотентно
+python init_data.py
 
-# 4) Создать администратора (пароль из ADMIN_PASSWORD или будет сгенерирован)
-python backend/create_user.py
+# 5) Создать администратора (пароль из ADMIN_PASSWORD или будет сгенерирован)
+python create_user.py
 
-# 5) Запуск API (из backend/)
-cd backend && uvicorn app:app --host 0.0.0.0 --port 8000
+# 6) Запуск API (локальная разработка — с авто-перезагрузкой)
+uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+> Скрипты бэкенда (`init_data.py`, `create_user.py`, `alembic`) выполняются строго из
+> каталога `backend/` — так модули (`database`, `models`, `auth`) корректно попадают в
+> `sys.path`. Отдельная передача `PYTHONPATH=backend` не требуется.
 > `init_data.py` идемпотентен — создаёт только недостающие справочники.
 > `create_user.py` выводит сгенерированный пароль один раз в консоль.
 
