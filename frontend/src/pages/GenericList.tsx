@@ -256,6 +256,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     onSuccess: () => {
                         message.success("Запись добавлена");
                         setModalState(null);
+                        tableQuery.refetch();
                     },
                     onError: (err: any) =>
                         message.error(
@@ -270,6 +271,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     onSuccess: () => {
                         message.success("Запись обновлена");
                         setModalState(null);
+                        tableQuery.refetch();
                     },
                     onError: (err: any) =>
                         message.error(
