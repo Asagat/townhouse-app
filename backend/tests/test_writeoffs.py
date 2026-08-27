@@ -141,9 +141,9 @@ def test_payment_delete_cascades_cash_register(db, account_factory):
 def test_write_offs_respects_priority(db, account_factory):
     rec = account_factory("p0")
     # Свои услуги с нужным приоритетом (не зависят от ID услуг в справочнике).
-    s_el = _svc(db, "W prio1", 1)     # как «Электричество» (списывается первым)
-    s_water = _svc(db, "W prio2", 2)   # как «Холодная вода» (второй)
-    s_fund = _svc(db, "W prio0", 0)    # как «Фонд развития» (списывается в последнюю очередь)
+    s_el = _svc(db, "__test_W prio1", 1)     # как «Электричество» (списывается первым)
+    s_water = _svc(db, "__test_W prio2", 2)   # как «Холодная вода» (второй)
+    s_fund = _svc(db, "__test_W prio0", 0)    # как «Фонд развития» (списывается в последнюю очередь)
     # Начисления: prio1=1000, prio2=500, prio0=200. Всего долг 1700; доступно денег 1200.
     _accrual(db, rec["account_id"], s_el.id, 1000)
     _accrual(db, rec["account_id"], s_water.id, 500)

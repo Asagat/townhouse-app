@@ -45,7 +45,7 @@ def _make_service_with_tariff(db, name: str, tariff_type_name: str, price):
 
 def test_fixed_tariff(db, account_factory):
     rec = account_factory("fix")
-    svc, _ = _make_service_with_tariff(db, "тест Фикс", "Фиксированный", 2000)
+    svc, _ = _make_service_with_tariff(db, "__test_Фикс", "Фиксированный", 2000)
     db.commit()
     acc = db.get(Account, rec["account_id"])
     result = A.calculate_accrual_for_account_service(db, acc, db.get(ServiceType, svc.id), date(2099, 12, 31))
@@ -57,7 +57,7 @@ def test_square_tariff(db, account_factory):
     rec = account_factory("sq")
     db.execute(text("UPDATE apartments SET square=300 WHERE id=:id"), {"id": rec["apartment_id"]})
     db.commit()
-    svc, _ = _make_service_with_tariff(db, "тест Площадь", "По площади", 10)
+    svc, _ = _make_service_with_tariff(db, "__test_Площадь", "По площади", 10)
     db.commit()
     acc = db.get(Account, rec["account_id"])
     result = A.calculate_accrual_for_account_service(db, acc, db.get(ServiceType, svc.id), date(2099, 12, 31))
@@ -68,7 +68,7 @@ def test_square_tariff(db, account_factory):
 def test_meter_tariff_uses_consumption(db, account_factory):
     rec = account_factory("met")
     apt = db.get(Apartment, rec["apartment_id"])
-    svc, _ = _make_service_with_tariff(db, "тест Счётчик", "По счетчику", 10)
+    svc, _ = _make_service_with_tariff(db, "__test_Счётчик", "По счетчику", 10)
     db.commit()
     meter = Meter(services_type_id=svc.id, apartment_id=apt.id,
                   serial_number=f"TM-{svc.id}-{rec['account_id']}")

@@ -38,6 +38,40 @@ from sqlalchemy import text  # noqa: E402
 from auth import hash_password  # noqa: E402
 
 
+# Префикс имён для видов услуг, которые создают тесты (см. test_accrual_formulas,
+# test_writeoffs). Такие услуги после каждого теста автоматически удаляются
+# фикстурой `_cleanup_test_services`, чтобы не засорять справочник.
+TEST_SERVICE_PREFIX = "__test_"
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_test_services():
+    """После каждого теста удаляет тестовые виды услуг (по префиксу) и их
+    зависимости (тарифы, счётчики, показания), чтобы не засорять справочник."""
+    yield
+    session = SessionLocal()
+    try:
+        prefix = TEST_SERVICE_PREFIX + "%"
+        svc_ids = [r[0] for r in session.execute(
+            text("SELECT id FROM services_type WHERE services_type LIKE :p"), {"p": prefix}
+        ).fetchall()]
+        for sid in svc_ids:
+            session.execute(text("DELETE FROM tariffs WHERE services_type_id = :s"), {"s": sid})
+            meter_ids = [r[0] for r in session.execute(
+                text("SELECT id FROM meters WHERE services_type_id = :s"), {"s": sid}
+            ).fetchall()]
+            for mid in meter_ids:
+                session.execute(text("DELETE FROM meter_readings WHERE meter_id = :x"), {"x": mid})
+            session.execute(text("DELETE FROM meters WHERE services_type_id = :s"), {"s": sid})
+        session.execute(text("DELETE FROM services_type WHERE services_type LIKE :p"), {"p": prefix})
+        session.commit()
+    except Exception:
+        # Не даём ошибке очистки замаскировать результат самого теста.
+        session.rollback()
+    finally:
+        session.close()
+
+
 @pytest.fixture()
 def db():
     """Сессия БД. Каждый тест получает свежую сессию."""
