@@ -128,6 +128,16 @@ export const categories: Category[] = [
             },
         ],
     },
+    {
+        title: "Отчеты",
+        items: [
+            {
+              key: "cash_report",
+              label: "По кассе",
+              icon: "fa-solid fa-cash-register",
+            },
+        ],
+    },
 ];
 
 export const allResources = categories.flatMap((c) => c.items);

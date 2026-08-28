@@ -47,6 +47,9 @@ export const resourceRoles: Record<string, string[]> = {
 
     // Личный кабинет (только житель)
     cabinet: ["resident"],
+
+    // Отчёты (бухгалтерские роли)
+    cash_report: ["admin", "operator", "cashier"],
 };
 
 export const hasResourceAccess = (role: string, key: string): boolean => {

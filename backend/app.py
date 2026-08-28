@@ -684,6 +684,7 @@ from routers.documents import router as documents_router
 from routers.registers import router as registers_router
 from routers.receipts import router as receipts_router
 from routers.others import router as others_router
+from routers.reports import router as reports_router
 # Реэкспорт для обратной совместимости: тесты импортируют `build_account_statement` из `app`.
 from routers.others import build_account_statement
 
@@ -695,4 +696,5 @@ app.include_router(documents_router)
 app.include_router(registers_router)
 app.include_router(receipts_router)
 app.include_router(others_router)
+app.include_router(reports_router)
 app.include_router(api_router)
