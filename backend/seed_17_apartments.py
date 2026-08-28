@@ -8,6 +8,8 @@
   - кассы «Касса» и «Счёт в Каспи»;
   - счётчики на каждую квартиру для услуг со счётчиком из справочника;
   - показания счётчиков за ТЕКУЩИЙ месяц для всех услуг со счётчиком;
+  - ~20 демо-документов «Приход/Расход» по разным аналитикам и типам операций
+    (с записями в Регистре денежных средств);
   - пользователей на все роли (пароль fth123).
 
 Услуги, типы тарифов и тарифы ожидаются заранее созданными скриптом
@@ -23,9 +25,11 @@ username пользователя). Дампа БД нет, поэтому да�
     python seed_17_apartments.py
 """
 
+import calendar
 import os
 import sys
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -37,6 +41,7 @@ from auth import hash_password  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 from models import (  # noqa: E402
     Account,
+    AnalyticArticle,
     Apartment,
     CashPoint,
     Meter,
@@ -44,9 +49,13 @@ from models import (  # noqa: E402
     MeterReadingDocument,
     Owner,
     ServiceType,
+    Transaction,
+    TransactionTypeEnum,
     User,
     UserRole,
 )
+from services import set_transaction_title  # noqa: E402
+from writeoffs import auto_recalculate_writeoffs  # noqa: E402
 
 # Количество квартир для наполнения.
 NUM_APARTMENTS = 17
@@ -349,6 +358,112 @@ def _ensure_users(db, resident_account_id: int | None = None) -> None:
             print(f"  + пользователь '{username}' (роль '{role.value}')")
 
 
+# Префикс в notes демо-документов «Приход/Расход» — маркер идемпотентности
+# (у транзакций нет естественного уникального ключа, поэтому сверяемся по нему).
+SEED_NOTES_PREFIX = "seed17"
+
+# Демо-документы «Приход/Расход»: (тип операции, статья аналитики, индекс квартиры
+# или None — общая операция без привязки к л/с, сумма, день месяца, смещение месяца
+# (0 — текущий, 1 — прошлый), описание в notes). Статья соответствует типу операции,
+# как при создании документа в приложении (приход — статья «Доход», расход — «Расход»).
+DEMO_TRANSACTIONS: list[tuple[str, str, int | None, str, int, int, str]] = [
+    # --- Приходы ---
+    ("in_cash", "Поступления от жителей", 0, "85000.00", 5, 0, "Оплата по кв.1 за текущий месяц"),
+    ("in_cash", "Поступления от жителей", 1, "62000.00", 7, 0, "Оплата по кв.2 за текущий месяц"),
+    ("in_bank", "Поступления от жителей", 2, "91000.00", 12, 0, "Оплата по кв.3 (перевод)"),
+    ("in_cash", "Поступления от жителей", 3, "74000.00", 20, 0, "Оплата по кв.4 за текущий месяц"),
+    ("in_bank", "Поступления от жителей", 4, "110000.00", 25, 1, "Оплата по кв.5 за прошлый месяц"),
+    ("in_cash", "Поступления от жителей", 5, "83000.00", 28, 1, "Оплата по кв.6 за прошлый месяц"),
+    ("in_bank", "Субсидии и дотации", None, "250000.00", 10, 0, "Субсидия за текущий месяц"),
+    ("in_bank", "Субсидии и дотации", None, "250000.00", 15, 1, "Субсидия за прошлый месяц"),
+    ("in_bank", "Прочие доходы", None, "30000.00", 18, 0, "Аренда общего имущества"),
+    ("in_cash", "Прочие доходы", None, "5000.00", 22, 0, "Разовые услуги (въезд)"),
+    # --- Расходы ---
+    ("out_cash", "Электроэнергия", None, "180000.00", 25, 0, "Оплата за электроэнергию"),
+    ("out_cash", "Холодная вода", None, "45000.00", 25, 0, "Оплата за водоснабжение"),
+    ("out_bank", "Охрана", None, "120000.00", 26, 0, "Услуги охраны"),
+    ("out_bank", "Обслуживание ТП", None, "60000.00", 26, 0, "Обслуживание трансформаторной подстанции"),
+    ("out_bank", "Заработная плата персонала", None, "350000.00", 28, 0, "ЗП персонала за текущий месяц"),
+    ("out_bank", "Налоги на ФОТ", None, "105000.00", 28, 0, "Отчисления с ФОТ"),
+    ("out_bank", "Банковские услуги и комиссии", None, "4500.00", 29, 0, "Комиссия банка"),
+    ("out_cash", "Офисные и хозяйственные расходы", None, "18000.00", 30, 0, "Канцтовары и хознужды"),
+    ("out_bank", "Связь и интернет", None, "12000.00", 30, 0, "Интернет и связь"),
+    ("out_cash", "Материалы и запчасти", None, "27500.00", 21, 0, "Запчасти для ремонта"),
+]
+
+
+def _demo_date(day: int, month_back: int) -> datetime:
+    """Дата операции: день в текущем или предыдущем месяце (детерминированно)."""
+    today = date.today()
+    year, month = today.year, today.month
+    for _ in range(month_back):
+        month -= 1
+        if month == 0:
+            month = 12
+            year -= 1
+    last_day = calendar.monthrange(year, month)[1]
+    return datetime(year, month, min(day, last_day), 12, 0)
+
+
+def _ensure_demo_transactions(db, accounts_by_apt: dict[int, Account]) -> None:
+    """Создаёт ~20 демо-документов «Приход/Расход» по разным аналитикам и типам операций.
+
+    Каждый документ автоматически (SQLAlchemy-событие after_insert) пишет строку
+    в Регистр денежных средств (cash_register) и пересчитывает его баланс. В конце,
+    как и приложение после создания документа, пересчитываем распределение по
+    затронутым счетам (accounts_register) — при наличии начислений деньги разнесутся
+    по услугам.
+
+    Идемпотентно: документ пропускается, если уже есть с таким же notes-маркером.
+    """
+    print("Демо-документы «Приход/Расход»:")
+    article_names = {spec[1] for spec in DEMO_TRANSACTIONS}
+    articles = db.query(AnalyticArticle).filter(AnalyticArticle.name.in_(article_names)).all()
+    articles_by_name = {a.name: a for a in articles}
+    missing = article_names - set(articles_by_name)
+    if missing:
+        missing_str = ", ".join(sorted(missing))
+        print(f"⚠️  Статьи аналитики не найдены: {missing_str}. Сначала запустите: python init_data.py")
+        db.close()
+        sys.exit(1)
+
+    cash_points = {cp.name: cp for cp in db.query(CashPoint).all()}
+    admin_user = db.query(User).filter(User.username == "admin").first()
+
+    affected_account_ids: list[int] = []
+    for tx_type_name, article_name, apt_idx, amount_str, day, month_back, label in DEMO_TRANSACTIONS:
+        notes = f"{SEED_NOTES_PREFIX} | {label}"
+        existing = db.query(Transaction).filter(Transaction.notes == notes).first()
+        if existing:
+            print(f"  ~ Приход/Расход уже есть: {existing.title}")
+            continue
+
+        tx_type = TransactionTypeEnum[tx_type_name]
+        account = accounts_by_apt.get(apt_idx) if apt_idx is not None else None
+        cp_name = "Счёт в Каспи" if "bank" in tx_type_name else "Касса"
+        tx = Transaction(
+            transaction_date=_demo_date(day, month_back),
+            account_id=account.id if account else None,
+            cash_point_id=cash_points[cp_name].id,
+            article_id=articles_by_name[article_name].id,
+            transaction_type=tx_type,
+            amount=Decimal(amount_str),
+            notes=notes,
+            created_by=admin_user.id if admin_user else None,
+        )
+        db.add(tx)
+        db.flush()  # after_insert: запись в cash_register + пересчёт баланса
+        set_transaction_title(db, tx)  # название по формуле (нужен id)
+        if tx.account_id:
+            affected_account_ids.append(tx.account_id)
+        print(f"  + Приход/Расход: {tx.title} — «{article_name}» ({amount_str} ₸)")
+
+    if affected_account_ids:
+        # Как приложение после создания документа: пересчёт распределения по счетам
+        # (влияет на регистр взаиморасчётов; коммитит сам).
+        auto_recalculate_writeoffs(db, affected_account_ids)
+
+
 def _reset_test_data(db) -> None:
     """Полная очистка тестовых таблиц и сброс автоинкремента ID на 1.
 
@@ -358,8 +473,10 @@ def _reset_test_data(db) -> None:
     тарифов и пользователи не трогаются.
     """
     print("Сброс тестовых данных (--reset):")
-    # Порядок важен: дети удаляются раньше родителей (FK RESTRICT).
+    # Порядок важен: дети удаляются раньше родителей (FK RESTRICT). Транзакции —
+    # первыми: с ними каскадно удаляются записи cash_register и accounts_register.
     order = [
+        (Transaction.__tablename__, "документы «Приход/Расход»"),
         (MeterReading.__tablename__, "показания"),
         (MeterReadingDocument.__tablename__, "документы показаний"),
         (Meter.__tablename__, "счётчики"),
@@ -405,10 +522,12 @@ def main() -> None:
 
         print(f"Наполнение тестовыми данными на {NUM_APARTMENTS} квартир:")
         _ensure_cash_points(db)
+        accounts_by_apt: dict[int, Account] = {}
         for idx in range(NUM_APARTMENTS):
             owner = _create_owner(db, idx)
             apartment = _create_apartment(db, idx, owner)
-            _create_account(db, idx, apartment)
+            account = _create_account(db, idx, apartment)
+            accounts_by_apt[idx] = account
             _ensure_meters(db, apartment, services)
 
         _cleanup_orphan_owners(db)
@@ -416,9 +535,12 @@ def main() -> None:
         # Привязываем resident к лицевому счёту первой квартиры (для ЛК).
         first_account = db.query(Account).filter(Account.account_number == f"FTH-{FIRST_APT_NUM:03d}").first()
         _ensure_users(db, resident_account_id=first_account.id if first_account else None)
+        db.flush()  # чтобы аудит-поле created_by транзакций получило id админа из _ensure_users
+
+        _ensure_demo_transactions(db, accounts_by_apt)
 
         db.commit()
-        print("Готово. Справочники, показания и пользователи наполнены.")
+        print("Готово. Справочники, показания, пользователи и демо-приходы/расходы наполнены.")
     except Exception as e:  # noqa: BLE001
         db.rollback()
         print(f"Ошибка: {e}")
