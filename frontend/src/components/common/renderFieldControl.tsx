@@ -25,10 +25,12 @@ const AnalyticArticleSelect = ({
     form,
     value,
     onChange,
+    optional,
 }: {
     form: FormInstance | undefined;
     value?: number;
     onChange?: (value: number | undefined) => void;
+    optional?: boolean;
 }) => {
     const transactionType: string | undefined = Form.useWatch("transaction_type", form);
 
@@ -65,6 +67,7 @@ const AnalyticArticleSelect = ({
             filterFn={filterFn}
             value={value}
             onChange={onChange}
+            optional={optional}
         />
     );
 };
@@ -94,9 +97,19 @@ export const renderFieldControl = (field: FieldMeta, form?: FormInstance) => {
         case "reference":
             // Статья аналитики зависит от выбранного типа операции (приход/расход).
             if (field.reference === "analytic_articles") {
-                return <AnalyticArticleSelect form={form} />;
+                return (
+                    <AnalyticArticleSelect
+                        form={form}
+                        optional={!field.required}
+                    />
+                );
             }
-            return <ReferenceSelect resource={field.reference!} />;
+            return (
+                <ReferenceSelect
+                    resource={field.reference!}
+                    optional={!field.required}
+                />
+            );
         default:
             return <Input />;
     }

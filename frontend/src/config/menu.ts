@@ -98,7 +98,7 @@ export const categories: Category[] = [
             },
             {
               key: "analytic_articles",
-              label: "Аналитика",
+              label: "Аналитики",
               icon: "fa-solid fa-tags",
             },
             {
