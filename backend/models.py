@@ -135,13 +135,16 @@ class CashPoint(Base):
 class AnalyticArticle(Base):
     """Аналитика: статьи доходов/расходов для документов «Приход/Расход».
 
-    Единый справочник (п. 2.11 доработка): статьи типа `kind` (доход/расход)
-    используются в отчётах и при разнесении приходов/расходов, в т.ч. по операциям
-    без привязки к квартире/л/с (account_id = NULL).
+    Единый справочник: статьи типа `kind` (доход/расход) используются в отчётах и
+    при разнесении приходов/расходов, в т.ч. по операциям без привязки к
+    квартире/л/с (account_id = NULL). Уникальность — по (name, kind); отдельных
+    кодов нет (они не нужны для отчётов и только усложняли ввод).
     """
     __tablename__ = "analytic_articles"
+    __table_args__ = (
+        Index("uq_analytic_articles_name_kind", "name", "kind", unique=True),
+    )
     id = Column(Integer, primary_key=True, autoincrement=True)
-    code = Column(String(50), nullable=False, unique=True)
     name = Column(String(255), nullable=False)
     kind = Column(Enum(AnalyticKind, native_enum=False), nullable=False)
     is_active = Column(Boolean, default=True)

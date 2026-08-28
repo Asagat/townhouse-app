@@ -174,7 +174,7 @@ def transaction_serializer(item: Transaction) -> dict:
 
     article = item.article
     result["article"] = (
-        {"id": article.id, "code": article.code, "name": article.name, "kind": article.kind.value if hasattr(article.kind, "value") else str(article.kind)}
+        {"id": article.id, "name": article.name, "kind": article.kind.value if hasattr(article.kind, "value") else str(article.kind)}
         if article
         else None
     )
@@ -551,7 +551,6 @@ def analytic_article_serializer(item: AnalyticArticle) -> dict:
     """Сериализатор статьи аналитики: kind как строка-метка (Доход/Расход)."""
     return {
         "id": item.id,
-        "code": item.code,
         "name": item.name,
         "kind": item.kind.value if hasattr(item.kind, "value") else str(item.kind),
         "is_active": item.is_active,

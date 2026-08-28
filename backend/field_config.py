@@ -104,7 +104,6 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         {"name": "is_active", "label": "Активна", "type": "boolean"},
     ],
     "analytic_articles": [
-        {"name": "code", "label": "Код", "type": "string", "required": True},
         {"name": "name", "label": "Наименование", "type": "string", "required": True},
         {
             "name": "kind",

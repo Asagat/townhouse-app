@@ -38,7 +38,6 @@ export const columnsConfig: Record<string, Column[]> = {
     ],
 
     analytic_articles: [
-        { key: 'code', label: 'Код' },
         { key: 'name', label: 'Наименование' },
         { key: 'kind', label: 'Тип' },
         { key: 'is_active', label: 'Активна', format: formatBool },

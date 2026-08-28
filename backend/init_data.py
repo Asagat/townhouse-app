@@ -62,21 +62,21 @@ _DEFAULT_TARIFFS = [
 
 # Дефолтные статьи аналитики (доходы/расходы ТСН/КСК на коммунальный дом).
 _ANALYTIC_ARTICLES = [
-    ("income_services", "Поступления от жителей", AnalyticKind.income),
-    ("income_subsidy", "Субсидии и дотации", AnalyticKind.income),
-    ("income_other", "Прочие доходы", AnalyticKind.income),
-    ("expense_utilities_el", "Электроэнергия", AnalyticKind.expense),
-    ("expense_utilities_water", "Холодная вода", AnalyticKind.expense),
-    ("expense_security", "Охрана", AnalyticKind.expense),
-    ("expense_tp", "Обслуживание ТП", AnalyticKind.expense),
-    ("expense_repairs", "Текущий ремонт и обслуживание", AnalyticKind.expense),
-    ("expense_salary", "Заработная плата персонала", AnalyticKind.expense),
-    ("expense_payroll_tax", "Налоги на ФОТ", AnalyticKind.expense),
-    ("expense_banking", "Банковские услуги и комиссии", AnalyticKind.expense),
-    ("expense_office", "Офисные и хозяйственные расходы", AnalyticKind.expense),
-    ("expense_communication", "Связь и интернет", AnalyticKind.expense),
-    ("expense_materials", "Материалы и запчасти", AnalyticKind.expense),
-    ("expense_other", "Прочие расходы", AnalyticKind.expense),
+    ("Поступления от жителей", AnalyticKind.income),
+    ("Субсидии и дотации", AnalyticKind.income),
+    ("Прочие доходы", AnalyticKind.income),
+    ("Электроэнергия", AnalyticKind.expense),
+    ("Холодная вода", AnalyticKind.expense),
+    ("Охрана", AnalyticKind.expense),
+    ("Обслуживание ТП", AnalyticKind.expense),
+    ("Текущий ремонт и обслуживание", AnalyticKind.expense),
+    ("Заработная плата персонала", AnalyticKind.expense),
+    ("Налоги на ФОТ", AnalyticKind.expense),
+    ("Банковские услуги и комиссии", AnalyticKind.expense),
+    ("Офисные и хозяйственные расходы", AnalyticKind.expense),
+    ("Связь и интернет", AnalyticKind.expense),
+    ("Материалы и запчасти", AnalyticKind.expense),
+    ("Прочие расходы", AnalyticKind.expense),
 ]
 
 
@@ -128,12 +128,16 @@ def _ensure_tariffs(db, services: dict[str, ServiceType], tariff_types: dict[str
 
 
 def _ensure_analytic_articles(db) -> None:
-    """Создаёт недостающие статьи аналитики (идемпотентно, по коду)."""
-    for code, name, kind in _ANALYTIC_ARTICLES:
-        existing = db.query(AnalyticArticle).filter(AnalyticArticle.code == code).first()
+    """Создаёт недостающие статьи аналитики (идемпотентно, по (name, kind))."""
+    for name, kind in _ANALYTIC_ARTICLES:
+        existing = (
+            db.query(AnalyticArticle)
+            .filter(AnalyticArticle.name == name, AnalyticArticle.kind == kind)
+            .first()
+        )
         if existing:
             continue
-        db.add(AnalyticArticle(code=code, name=name, kind=kind, is_active=True))
+        db.add(AnalyticArticle(name=name, kind=kind, is_active=True))
         db.flush()
         print(f"  + статья аналитики: {name} ({kind.value})")
 

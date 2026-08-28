@@ -98,7 +98,7 @@ def build_cash_register_report(
                 SELECT cr.id, cr.operation_date, cr.income, cr.expense,
                        t.title, t.id AS transaction_id,
                        a.account_number, a.account_name,
-                       aa.code AS article_code, aa.name AS article_name
+                       aa.name AS article_name
                 FROM cash_register cr
                 JOIN transactions t ON t.id = cr.transaction_id
                 LEFT JOIN accounts a ON a.id = cr.account_id
@@ -123,8 +123,7 @@ def build_cash_register_report(
                     "transaction_id": r[5],
                     "account_number": r[6],
                     "account_name": r[7],
-                    "article_code": r[8],
-                    "article_name": r[9],
+                    "article_name": r[8],
                     "income": income,
                     "expense": expense,
                     "amount": income if income else -expense,
