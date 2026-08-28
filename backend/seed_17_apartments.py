@@ -318,8 +318,12 @@ def _ensure_meter_readings(db, services: list[ServiceType]) -> None:
             print(f"  + показание: кв.{apt_num} {svc.services_type} = {value} (за {month_label})")
 
 
-def _ensure_users(db) -> None:
-    """Создаёт/обновляет пользователей на все роли с паролем fth123 (идемпотентно)."""
+def _ensure_users(db, resident_account_id: int | None = None) -> None:
+    """Создаёт/обновляет пользователей на все роли с паролем fth123 (идемпотентно).
+
+    Роль resident дополнительно привязывается к лицевому счёту (`account_id`) —
+    нужен для Личного кабинета (ЛК) жителя.
+    """
     for username, role in USERS_BY_ROLE:
         user = db.query(User).filter(User.username == username).first()
         password_hash = hash_password(TEST_USER_PASSWORD)
@@ -330,6 +334,8 @@ def _ensure_users(db) -> None:
             user.is_active = True
             if not user.full_name:
                 user.full_name = f"Тестовый {role.value}"
+            if role == UserRole.resident and resident_account_id is not None:
+                user.account_id = resident_account_id
             print(f"  ~ пользователь '{username}' обновлён (роль '{role.value}')")
         else:
             db.add(User(
@@ -338,6 +344,7 @@ def _ensure_users(db) -> None:
                 full_name=f"Тестовый {role.value}",
                 role=role,
                 is_active=True,
+                account_id=resident_account_id if role == UserRole.resident else None,
             ))
             print(f"  + пользователь '{username}' (роль '{role.value}')")
 
@@ -406,7 +413,9 @@ def main() -> None:
 
         _cleanup_orphan_owners(db)
         _ensure_meter_readings(db, services)
-        _ensure_users(db)
+        # Привязываем resident к лицевому счёту первой квартиры (для ЛК).
+        first_account = db.query(Account).filter(Account.account_number == f"FTH-{FIRST_APT_NUM:03d}").first()
+        _ensure_users(db, resident_account_id=first_account.id if first_account else None)
 
         db.commit()
         print("Готово. Справочники, показания и пользователи наполнены.")
