@@ -6,6 +6,8 @@ import {
     Button,
     Space,
     Popconfirm,
+    Popover,
+    Checkbox,
     message,
 } from "antd";
 import {
@@ -31,6 +33,7 @@ import { WriteoffViewModal } from "../components/writeoffs/WriteoffViewModal";
 import type { SortOrder } from "antd/es/table/interface";
 import { BRAND } from "../config/colors";
 import { canCreate, canEdit, canDelete } from "../auth/can";
+import { useVisibleColumns, filterVisibleColumns } from "../hooks/useVisibleColumns";
 
 interface GenericListProps {
     resourceName: string;
@@ -223,6 +226,10 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const columns = getColumnsForResource(resourceName);
     const meta = allResources.find((r) => r.key === resourceName);
 
+    // Вариант A (п. 2.10): настройка видимых колонок списка, сохранение в localStorage.
+    const { visibleKeys, toggle } = useVisibleColumns(resourceName, role);
+    const displayColumns = filterVisibleColumns(columns, visibleKeys);
+
     const getColumnSortOrder = (dataIndex: string): SortOrder | undefined => {
         if (!isSortableField(dataIndex)) return undefined;
         const sortField = getSortField(dataIndex);
@@ -292,7 +299,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             sortOrder: getColumnSortOrder('id'),
             defaultSortOrder: 'descend' as const,
         },
-        ...columns.map((col) => {
+        ...displayColumns.map((col) => {
             const sortable = isSortableField(col.key);
             const isNested = col.key.includes('.');
             return {
@@ -556,6 +563,43 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     {meta?.label ?? resourceName}
                 </h1>
                 <Space>
+                    {columns.length > 0 && (
+                        <Popover
+                            trigger="click"
+                            placement="bottomRight"
+                            content={
+                                <div style={{ maxWidth: 280, maxHeight: 360, overflow: "auto" }}>
+                                    <div
+                                        style={{
+                                            fontSize: 13,
+                                            fontWeight: 600,
+                                            marginBottom: 8,
+                                            color: "#666",
+                                        }}
+                                    >
+                                        Отображаемые колонки
+                                    </div>
+                                    {columns.map((col) => {
+                                        const checked =
+                                            !visibleKeys || visibleKeys.size === 0 || visibleKeys.has(col.key);
+                                        return (
+                                            <div key={col.key} style={{ marginBottom: 4 }}>
+                                                <Checkbox
+                                                    checked={checked}
+                                                    onChange={(e) => toggle(col.key, e.target.checked)}
+                                                >
+                                                    {col.label}
+                                                </Checkbox>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            }
+                        >
+                            <Button>Колонки</Button>
+                        </Popover>
+                    )}
+
                     {isMeterReadingDocuments && roleCanCreate && (
                         <Button
                             type="primary"
