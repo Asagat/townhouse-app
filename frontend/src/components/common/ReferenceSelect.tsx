@@ -78,7 +78,8 @@ export const ReferenceSelect = ({
             allowClear={allowClear}
             loading={isLoading}
             value={value}
-            onChange={onChange}
+            onChange={(v) => onChange?.(v as number | undefined)}
+            onClear={() => onChange?.(undefined)}
             placeholder={placeholder || resourcePlaceholders[resource] || `Выберите ${resource}`}
             filterOption={(input, option) =>
                 (option?.label ?? "")
