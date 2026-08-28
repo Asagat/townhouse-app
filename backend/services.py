@@ -121,7 +121,8 @@ def resolve_transaction_values(
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    "Статья аналитики не соответствует типу операции: "
+                    f"Статья аналитики «{article.name}» не соответствует типу операции "
+                    f"(получен тип «{getattr(tx_kind, 'name', tx_kind)}»): "
                     "для прихода укажите статью «Доход», для расхода — «Расход»"
                 ),
             )

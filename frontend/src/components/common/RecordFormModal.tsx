@@ -117,6 +117,11 @@ export const RecordFormModal = ({
                             name={field.name}
                             label={field.label}
                             valuePropName={field.type === "boolean" ? "checked" : "value"}
+                            dependencies={
+                                field.type === "reference" && field.reference === "analytic_articles"
+                                    ? ["transaction_type"]
+                                    : undefined
+                            }
                             rules={
                                 !readonly && field.required
                                     ? [{ required: true, message: `Поле «${field.label}» обязательно` }]

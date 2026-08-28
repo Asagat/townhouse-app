@@ -1,27 +1,53 @@
 // src/components/common/renderFieldControl.tsx
 
+import { useEffect, useRef } from "react";
 import { Input, InputNumber, DatePicker, Select, Switch, Form } from "antd";
 import type { FormInstance } from "antd";
 import type { FieldMeta } from "../../types";
 import { ReferenceSelect } from "./ReferenceSelect";
 import { DATE_FORMAT } from "../../config/formatters";
 
-// Типы операций «Приход/Расход» — значения enum TransactionTypeEnum (в форме хранятся
-// как метки: value+label совпадают).
-const INCOME_TYPES = ["Приход в кассу", "Приход в банк"];
-const EXPENSE_TYPES = ["Расход из кассы", "Расход из банка"];
+// Типы операций «Приход/Расход» — и по метке (value из /meta), и по имени члена enum.
+// Надёжно определяем приход/расход независимо от того, в каком виде пришло значение.
+const INCOME_KEYS = ["Приход в кассу", "Приход в банк", "in_cash", "in_bank"];
+const EXPENSE_KEYS = ["Расход из кассы", "Расход из банка", "out_cash", "out_bank"];
+
+const isIncomeType = (t?: string) => !!t && INCOME_KEYS.includes(t);
+const isExpenseType = (t?: string) => !!t && EXPENSE_KEYS.includes(t);
 
 /**
- * Выбор статьи аналитики, фильтруемой по типу операции документа «Приход/Расход»:
- * приход (в кассу/в банк) — только статьи Доход; расход (из кассы/из банка) — только Расход.
+ * Выбор статьи аналитики для документа «Приход/Расход».
+ * - Показывает статьи только соответствующего типа (приход → Доход, расход → Расход).
+ * - При смене типа операции очищает статью, если она больше не подходит (страховка от
+ *   несоответствия при сохранении).
  */
 const AnalyticArticleSelect = ({ form }: { form: FormInstance | undefined }) => {
     const transactionType: string | undefined = Form.useWatch("transaction_type", form);
 
+    // При смене типа операции (приход↔расход) очищаем ранее выбранную статью, чтобы
+    // исключить несоответствие при сохранении.
+    const prevTypeRef = useRef<string | undefined>(undefined);
+    useEffect(() => {
+        const prev = prevTypeRef.current;
+        prevTypeRef.current = transactionType;
+        if (!form || !transactionType || form.isFieldTouched === undefined) return;
+        // Только когда тип реально сменил знак (не первая установка при открытии).
+        const prevIncome = isIncomeType(prev);
+        const curIncome = isIncomeType(transactionType);
+        const prevExpense = isExpenseType(prev);
+        const curExpense = isExpenseType(transactionType);
+        const signChanged =
+            (prevIncome && curExpense) || (prevExpense && curIncome);
+        if (signChanged) {
+            form.setFieldValue("article_id", undefined);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [transactionType, form]);
+
     let filterFn: ((item: any) => boolean) | undefined;
-    if (INCOME_TYPES.includes(transactionType as string)) {
+    if (isIncomeType(transactionType)) {
         filterFn = (item: any) => item.kind === "Доход";
-    } else if (EXPENSE_TYPES.includes(transactionType as string)) {
+    } else if (isExpenseType(transactionType)) {
         filterFn = (item: any) => item.kind === "Расход";
     }
 
