@@ -125,7 +125,9 @@ bash scripts/setup_vps.sh
 
 ```bash
 systemctl status townhouse-backend
-curl -s http://127.0.0.1:8000/health   # или любой эндпоинт — ожидается ответ API
+curl -s http://127.0.0.1:8000/openapi.json | head -c 200   # схема API (HTTP 200) — сервис поднялся
+
+> Примечание: эндпоинта `/health` в коде нет — 404 на нём не является признаком проблемы.
 ```
 
 Если сервис не встал — смотрите логи:
