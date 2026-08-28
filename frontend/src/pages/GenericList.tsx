@@ -227,7 +227,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const meta = allResources.find((r) => r.key === resourceName);
 
     // Вариант A (п. 2.10): настройка видимых колонок списка, сохранение в localStorage.
-    const { visibleKeys, toggle } = useVisibleColumns(resourceName, role);
+    const { visibleKeys, toggle } = useVisibleColumns(resourceName, role, columns.map((c) => c.key));
     const displayColumns = filterVisibleColumns(columns, visibleKeys);
 
     const getColumnSortOrder = (dataIndex: string): SortOrder | undefined => {
@@ -580,8 +580,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                         Отображаемые колонки
                                     </div>
                                     {columns.map((col) => {
-                                        const checked =
-                                            !visibleKeys || visibleKeys.size === 0 || visibleKeys.has(col.key);
+                                        const checked = !visibleKeys ? true : visibleKeys.has(col.key);
                                         return (
                                             <div key={col.key} style={{ marginBottom: 4 }}>
                                                 <Checkbox

@@ -29,30 +29,25 @@ const load = (key: string): Set<string> | null => {
 
 /**
  * Возвращает настройки видимости колонок для (resource, role).
- * - `visibleKeys` — множество ключей видимых колонок.
- * - `setVisibleKeys` — обновление (с сохранением в localStorage).
+ * - `allKeys` — все доступные ключи колонок (для корректной инициализации).
+ * - `visibleKeys` — множество ключей видимых колонок; `null` = настройка не задана (все видны).
+ * - `toggle` — показать/скрыть колонку с сохранением в localStorage.
  */
-export const useVisibleColumns = (resource: string, role: string) => {
+export const useVisibleColumns = (resource: string, role: string, allKeys: string[]) => {
     const key = storageKey(resource, role);
-    const [visibleKeys, setVisibleKeys] = useState<Set<string>>(() => load(key) ?? null);
+    const [visibleKeys, setVisibleKeys] = useState<Set<string> | null>(() => load(key));
 
     useEffect(() => {
         // При смене ресурса/роли перечитываем сохранённое значение.
-        setVisibleKeys(load(key) ?? null);
+        setVisibleKeys(load(key));
     }, [key]);
-
-    const save = useCallback(
-        (next: Set<string>) => {
-            setVisibleKeys(next);
-            localStorage.setItem(key, JSON.stringify([...next]));
-        },
-        [key],
-    );
 
     const toggle = useCallback(
         (columnKey: string, checked: boolean) => {
             setVisibleKeys((prev) => {
-                const next = new Set(prev ?? []);
+                // Если настройки ещё нет (null = все видны) — строим базис из всех колонок,
+                // чтобы снятие одной колонки оставило остальные видимыми.
+                const next = new Set(prev && prev.size > 0 ? prev : allKeys);
                 if (checked) {
                     next.add(columnKey);
                 } else {
@@ -62,17 +57,18 @@ export const useVisibleColumns = (resource: string, role: string) => {
                 return next;
             });
         },
-        [key],
+        [key, allKeys],
     );
 
-    return { visibleKeys, setVisibleKeys: save, toggle };
+    return { visibleKeys, toggle };
 };
 
-/** Отбирает колонки, которые должны показываться (по сохранённой настройке). */
+/** Отбирает колонки, которые должны показываться (по сохранённой настройке).
+ * `null` (настройка не задана) — показать все; пустое множество — скрыть все. */
 export const filterVisibleColumns = <T extends ColumnMeta>(
     allColumns: T[],
     visibleKeys: Set<string> | null,
 ): T[] => {
-    if (!visibleKeys || visibleKeys.size === 0) return allColumns;
+    if (!visibleKeys) return allColumns;
     return allColumns.filter((col) => visibleKeys.has(col.key));
 };
