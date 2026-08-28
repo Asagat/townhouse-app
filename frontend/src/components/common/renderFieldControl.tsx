@@ -1,11 +1,34 @@
 // src/components/common/renderFieldControl.tsx
 
-import { Input, InputNumber, DatePicker, Select, Switch } from "antd";
+import { Input, InputNumber, DatePicker, Select, Switch, Form } from "antd";
+import type { FormInstance } from "antd";
 import type { FieldMeta } from "../../types";
 import { ReferenceSelect } from "./ReferenceSelect";
 import { DATE_FORMAT } from "../../config/formatters";
 
-export const renderFieldControl = (field: FieldMeta) => {
+// Типы операций «Приход/Расход» — значения enum TransactionTypeEnum (в форме хранятся
+// как метки: value+label совпадают).
+const INCOME_TYPES = ["Приход в кассу", "Приход в банк"];
+const EXPENSE_TYPES = ["Расход из кассы", "Расход из банка"];
+
+/**
+ * Выбор статьи аналитики, фильтруемой по типу операции документа «Приход/Расход»:
+ * приход (в кассу/в банк) — только статьи Доход; расход (из кассы/из банка) — только Расход.
+ */
+const AnalyticArticleSelect = ({ form }: { form: FormInstance | undefined }) => {
+    const transactionType: string | undefined = Form.useWatch("transaction_type", form);
+
+    let filterFn: ((item: any) => boolean) | undefined;
+    if (INCOME_TYPES.includes(transactionType as string)) {
+        filterFn = (item: any) => item.kind === "Доход";
+    } else if (EXPENSE_TYPES.includes(transactionType as string)) {
+        filterFn = (item: any) => item.kind === "Расход";
+    }
+
+    return <ReferenceSelect resource="analytic_articles" filterFn={filterFn} />;
+};
+
+export const renderFieldControl = (field: FieldMeta, form?: FormInstance) => {
     switch (field.type) {
         case "text":
             return <Input.TextArea rows={3} />;
@@ -28,7 +51,10 @@ export const renderFieldControl = (field: FieldMeta) => {
                 />
             );
         case "reference":
-            // Передаём resource, а плейсхолдер будет взят из словаря внутри ReferenceSelect
+            // Статья аналитики зависит от выбранного типа операции (приход/расход).
+            if (field.reference === "analytic_articles") {
+                return <AnalyticArticleSelect form={form} />;
+            }
             return <ReferenceSelect resource={field.reference!} />;
         default:
             return <Input />;

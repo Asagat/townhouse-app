@@ -20,6 +20,8 @@ from models import (
     Account,
     AccrualsRegister,
     AccrualDocument,
+    AnalyticArticle,
+    AnalyticKind,
     Meter,
     MeterReading,
     ServiceType,
@@ -106,6 +108,23 @@ def resolve_transaction_values(
         "amount": coerce_field_value(amount, {"type": "decimal", "label": "Сумма"}),
         "notes": notes,
     }
+
+    # Аналитика: статья должна соответствовать типу операции (доход↔приход, расход↔расход).
+    if values.get("article_id") is not None:
+        article = db.get(AnalyticArticle, values["article_id"])
+        if article is None:
+            raise HTTPException(status_code=422, detail="Статья аналитики не найдена")
+        tx_kind = values["transaction_type"]
+        is_income = tx_kind in (TransactionTypeEnum.in_cash, TransactionTypeEnum.in_bank)
+        expected = AnalyticKind.income if is_income else AnalyticKind.expense
+        if article.kind != expected:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Статья аналитики не соответствует типу операции: "
+                    "для прихода укажите статью «Доход», для расхода — «Расход»"
+                ),
+            )
 
     # Дата операции: если передана — устанавливаем; иначе БД поставит сейчас().
     if transaction_date not in (None, ""):

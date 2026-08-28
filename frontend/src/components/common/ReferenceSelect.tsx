@@ -50,19 +50,23 @@ export const ReferenceSelect = ({
     onChange,
     placeholder,
     allowClear = true,
+    filterFn,
 }: {
     resource: string;
     value?: number;
     onChange?: (value: number | undefined) => void;
     placeholder?: string;
     allowClear?: boolean;
+    filterFn?: (item: any) => boolean;
 }) => {
     const { data, isLoading } = useList({
         resource,
         pagination: { mode: "off" },
     });
 
-    const items = data?.data ?? [];
+    const items = (data?.data ?? []).filter((item: any) =>
+        filterFn ? filterFn(item) : true,
+    );
 
     const formatter =
         referenceLabelFormatters[resource] ??
