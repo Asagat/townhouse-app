@@ -72,13 +72,24 @@ export const ReferenceSelect = ({
         referenceLabelFormatters[resource] ??
         ((item: any) => item.full_name ?? item.name ?? item.label ?? `#${item.id}`);
 
+    // Antd Select: чтобы компонент всегда был «управляемым» (переключение в uncontrolled
+    // при value===undefined ломает allowClear — очистка «залипала»), используем пустой
+    // sentinel "" для отсутствия значения.
+    const controlledValue = typeof value === "undefined" || value === null ? "" : String(value);
+
     return (
         <Select
             showSearch
             allowClear={allowClear}
             loading={isLoading}
-            value={value}
-            onChange={(v) => onChange?.(v as number | undefined)}
+            value={controlledValue}
+            onChange={(v: any) => {
+                if (v === undefined || v === null || v === "") {
+                    onChange?.(undefined);
+                } else {
+                    onChange?.(Number(v));
+                }
+            }}
             onClear={() => onChange?.(undefined)}
             placeholder={placeholder || resourcePlaceholders[resource] || `Выберите ${resource}`}
             filterOption={(input, option) =>
@@ -88,7 +99,7 @@ export const ReferenceSelect = ({
                     .includes(input.toLowerCase())
             }
             options={items.map((item: any) => ({
-                value: item.id,
+                value: String(item.id),
                 label: formatter(item),
             }))}
         />
