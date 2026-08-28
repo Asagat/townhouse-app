@@ -21,7 +21,15 @@ const isExpenseType = (t?: string) => !!t && EXPENSE_KEYS.includes(t);
  * - При смене типа операции очищает статью, если она больше не подходит (страховка от
  *   несоответствия при сохранении).
  */
-const AnalyticArticleSelect = ({ form }: { form: FormInstance | undefined }) => {
+const AnalyticArticleSelect = ({
+    form,
+    value,
+    onChange,
+}: {
+    form: FormInstance | undefined;
+    value?: number;
+    onChange?: (value: number | undefined) => void;
+}) => {
     const transactionType: string | undefined = Form.useWatch("transaction_type", form);
 
     // При смене типа операции (приход↔расход) очищаем ранее выбранную статью, чтобы
@@ -51,7 +59,14 @@ const AnalyticArticleSelect = ({ form }: { form: FormInstance | undefined }) => 
         filterFn = (item: any) => item.kind === "Расход";
     }
 
-    return <ReferenceSelect resource="analytic_articles" filterFn={filterFn} />;
+    return (
+        <ReferenceSelect
+            resource="analytic_articles"
+            filterFn={filterFn}
+            value={value}
+            onChange={onChange}
+        />
+    );
 };
 
 export const renderFieldControl = (field: FieldMeta, form?: FormInstance) => {
