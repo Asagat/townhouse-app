@@ -38,8 +38,12 @@ from services import (
     audit_document_create,
     audit_document_update,
     build_accrual_register_items,
+    build_meter_reading_document_title,
     create_accounts_register_entries_for_accruals,
+    default_accrual_document_title,
+    validate_date_not_future,
     validate_reading_not_decreased,
+    _service_name,
 )
 from writeoffs import auto_recalculate_writeoffs
 
@@ -47,17 +51,6 @@ from writeoffs import auto_recalculate_writeoffs
 router = APIRouter(prefix="/api")
 
 
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ СЕРИАЛИЗАЦИИ ---
-
-MONTH_NAMES_RU = [
-    "январь", "февраль", "март", "апрель", "май", "июнь",
-    "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
-]
-
-
-def default_accrual_document_title(accrual_date: date) -> str:
-    """Авто-генерирует название документа начислений по его дате."""
-    return f"Начисление за {MONTH_NAMES_RU[accrual_date.month - 1]} {accrual_date.year}"
 
 
 # --- ЭНДПОИНТЫ ДЛЯ ДОКУМЕНТОВ НАЧИСЛЕНИЙ ---
@@ -73,7 +66,12 @@ def create_accrual_document(
         raise HTTPException(status_code=422, detail="Укажите дату начисления")
 
     parsed_date = datetime.strptime(accrual_date, "%Y-%m-%d").date()
-    title = payload.get("title") or default_accrual_document_title(parsed_date)
+    # Период начисления не может быть в будущем (1.10 роадмапа).
+    now = date.today()
+    if (parsed_date.year, parsed_date.month) > (now.year, now.month):
+        raise HTTPException(status_code=422, detail="Нельзя начислить за будущий период")
+    # Название генерируется автоматически (1.9 роадмапа) — ввод пользователя игнорируется.
+    title = default_accrual_document_title(parsed_date)
 
     document = AccrualDocument(
         accrual_date=parsed_date,
@@ -111,14 +109,14 @@ def update_accrual_document(
 
     if "accrual_date" in payload:
         document.accrual_date = datetime.strptime(payload["accrual_date"], "%Y-%m-%d").date()
+        # Период начисления не может быть в будущем (1.10 роадмапа).
+        now = date.today()
+        if (document.accrual_date.year, document.accrual_date.month) > (now.year, now.month):
+            raise HTTPException(status_code=422, detail="Нельзя начислить за будущий период")
 
-    if "title" in payload:
-        title = payload["title"]
-        document.title = (
-            title
-            if title not in (None, "")
-            else default_accrual_document_title(document.accrual_date)
-        )
+    # Название документа всегда генерируется автоматически (1.9 роадмапа) —
+    # ввод пользователя игнорируется.
+    document.title = default_accrual_document_title(document.accrual_date)
 
     audit_document_update(document, user.id)
     db.commit()
@@ -165,13 +163,12 @@ def bulk_create_readings(
     user: User = Depends(get_current_user),
 ):
     """Массовое создание показаний с документом-шапкой"""
-    title = payload.get("title")
     reading_date = payload.get("reading_date")
     services_type_id = payload.get("services_type_id")
     readings_data = payload.get("readings") or payload.get("entries") or []
 
-    if not title or not reading_date or not services_type_id:
-        raise HTTPException(status_code=422, detail="Заполните название, дату и вид услуги")
+    if not reading_date or not services_type_id:
+        raise HTTPException(status_code=422, detail="Заполните дату и вид услуги")
     if not readings_data:
         raise HTTPException(status_code=422, detail="Добавьте хотя бы одно показание")
 
@@ -180,9 +177,14 @@ def bulk_create_readings(
         if isinstance(reading_date, str)
         else reading_date
     )
+    # Дата показаний не может быть в будущем (1.10 роадмапа).
+    validate_date_not_future(parsed_date, "Дата показаний")
 
+    # Название генерируется автоматически (1.9 роадмапа) — ввод пользователя игнорируется.
     document = MeterReadingDocument(
-        title=title,
+        title=build_meter_reading_document_title(
+            parsed_date, _service_name(db, int(services_type_id))
+        ),
         reading_date=parsed_date,
         services_type_id=int(services_type_id),
     )
@@ -290,13 +292,12 @@ def update_meter_reading_document_full(
     if not document:
         raise HTTPException(status_code=404, detail="Документ не найден")
 
-    title = payload.get("title")
     reading_date = payload.get("reading_date")
     services_type_id = payload.get("services_type_id")
     readings_data = payload.get("readings") or []
 
-    if not title or not reading_date or not services_type_id:
-        raise HTTPException(status_code=422, detail="Заполните название, дату и вид услуги")
+    if not reading_date or not services_type_id:
+        raise HTTPException(status_code=422, detail="Заполните дату и вид услуги")
     if not readings_data:
         raise HTTPException(status_code=422, detail="Добавьте хотя бы одно показание")
 
@@ -305,9 +306,13 @@ def update_meter_reading_document_full(
         if isinstance(reading_date, str)
         else reading_date
     )
-    services_type_id = int(services_type_id)
 
-    document.title = title
+    # Дата показаний не может быть в будущем (1.10 роадмапа).
+    validate_date_not_future(parsed_date, "Дата показаний")
+
+    document.title = build_meter_reading_document_title(
+        parsed_date, _service_name(db, int(services_type_id))
+    )
     document.reading_date = parsed_date
     document.services_type_id = services_type_id
     audit_document_update(document, user.id, "Изменение документа показаний")
@@ -449,6 +454,10 @@ async def update_accrual_document_full(
         if accrual_date_raw
         else document.accrual_date
     )
+    # Период начисления не может быть в будущем (1.10 роадмапа).
+    now = date.today()
+    if (accrual_date.year, accrual_date.month) > (now.year, now.month):
+        raise HTTPException(status_code=422, detail="Нельзя начислить за будущий период")
     period_end = date(accrual_date.year, accrual_date.month, calendar.monthrange(accrual_date.year, accrual_date.month)[1])
 
     # Удаляем старые строки регистра вместе со связанными записями взаиморасчётов
@@ -463,15 +472,9 @@ async def update_accrual_document_full(
 
     document.accrual_date = accrual_date
 
-    if "title" in payload:
-        title_value = payload["title"]
-        document.title = (
-            title_value
-            if title_value not in (None, "")
-            else default_accrual_document_title(accrual_date)
-        )
-    elif document.title in (None, ""):
-        document.title = default_accrual_document_title(accrual_date)
+    # Название документа всегда генерируется автоматически (1.9 роадмапа) —
+    # ввод пользователя игнорируется.
+    document.title = default_accrual_document_title(accrual_date)
 
     new_items = build_accrual_register_items(db, document, period_end, accrual_date, requested_pairs)
     if not new_items:

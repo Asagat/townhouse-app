@@ -129,11 +129,16 @@ def resolve_transaction_values(
                 ),
             )
 
-    # Дата операции: если передана — устанавливаем; иначе БД поставит сейчас().
+    # Дата операции не может быть в будущем (1.10 роадмапа).
     if transaction_date not in (None, ""):
-        values["transaction_date"] = coerce_field_value(
+        coerced_dt = coerce_field_value(
             transaction_date, {"type": "datetime", "label": "Дата операции"}
         )
+        validate_date_not_future(
+            coerced_dt.date() if hasattr(coerced_dt, "date") else coerced_dt,
+            "Дата операции",
+        )
+        values["transaction_date"] = coerced_dt
 
     return values
 
@@ -206,6 +211,59 @@ def validate_reading_not_decreased(
         )
 
 
+# --- АВТО-НАЗВАНИЯ ДОКУМЕНТОВ И ПРОВЕРКИ ДАТ (роадмап 1.9 / 1.10) ---
+
+MONTH_NAMES_RU = [
+    "январь", "февраль", "март", "апрель", "май", "июнь",
+    "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+]
+
+
+def default_accrual_document_title(accrual_date: date) -> str:
+    """Авто-название документа начислений: «Начисление за август 2026»."""
+    return f"Начисление за {MONTH_NAMES_RU[accrual_date.month - 1]} {accrual_date.year}"
+
+
+def build_meter_reading_document_title(reading_date: date, services_type_name: str | None) -> str:
+    """Авто-название документа показаний: «Показания за август 2026 — Электричество»."""
+    month_label = MONTH_NAMES_RU[reading_date.month - 1]
+    suffix = f" — {services_type_name}" if services_type_name else ""
+    return f"Показания за {month_label} {reading_date.year}{suffix}"
+
+
+def validate_date_not_future(value: date, label: str) -> None:
+    """Проверка «дата не в будущем» (1.10 роадмапа)."""
+    if value > date.today():
+        raise HTTPException(status_code=422, detail=f"{label} не может быть в будущем")
+
+
+def resolve_meter_reading_document_values(
+    db: Session, payload: dict[str, Any], exclude_id: int | None = None
+) -> dict[str, Any]:
+    """Создание документа показаний через generic API.
+
+    Название генерируется автоматически (1.9 роадмапа) — введённое пользователем
+    значение игнорируется; дата не может быть в будущем (1.10).
+    """
+    reading_date = payload.get("reading_date") or date.today().isoformat()
+    services_type_id = payload.get("services_type_id")
+    if services_type_id in (None, ""):
+        raise HTTPException(status_code=422, detail="Укажите вид услуги")
+    coerced_date = coerce_field_value(
+        reading_date, {"type": "date", "label": "Дата показаний"}
+    )
+    validate_date_not_future(coerced_date, "Дата показаний")
+    svc = db.get(ServiceType, int(services_type_id))
+    title = build_meter_reading_document_title(
+        coerced_date, svc.services_type if svc else None
+    )
+    return {
+        "title": title,
+        "reading_date": coerced_date,
+        "services_type_id": int(services_type_id),
+    }
+
+
 def resolve_meter_reading_values(
     db: Session, payload: dict[str, Any], exclude_id: int | None = None
 ) -> dict[str, Any]:
@@ -246,6 +304,9 @@ def resolve_meter_reading_values(
         reading_date or date.today().isoformat(),
         {"type": "date", "label": "Дата показания"},
     )
+
+    # Дата показания не может быть в будущем (1.10 роадмапа).
+    validate_date_not_future(coerced_date, "Дата показания")
 
     # Показания счётчиков нарастающие: текущее не может быть меньше предыдущего.
     validate_reading_not_decreased(db, meter.id, coerced_reading, coerced_date, exclude_id=exclude_id)
