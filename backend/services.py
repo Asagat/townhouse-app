@@ -163,6 +163,49 @@ def set_transaction_title(db: Session, transaction: Transaction) -> None:
         db.flush()
 
 
+def validate_reading_not_decreased(
+    db: Session,
+    meter_id: int | None,
+    reading,
+    reading_date: date,
+    exclude_id: int | None = None,
+) -> None:
+    """Проверяет, что показание счётчика не меньше предыдущего (счётчики нарастающие).
+
+    Сравнивается с последним показанием того же счётчика с датой <= новой даты
+    (при редактировании текущая запись исключается через exclude_id). При
+    уменьшении бросает HTTPException(422) с понятным сообщением.
+    """
+    if meter_id in (None, ""):
+        return
+    query = db.query(MeterReading).filter(
+        MeterReading.meter_id == int(meter_id),
+        MeterReading.reading_date <= reading_date,
+    )
+    if exclude_id is not None:
+        query = query.filter(MeterReading.id != int(exclude_id))
+    prev = query.order_by(MeterReading.reading_date.desc(), MeterReading.id.desc()).first()
+    if prev is None:
+        return
+    cur = Decimal(str(reading))
+    prev_val = Decimal(str(prev.reading))
+    if cur < prev_val:
+        # Явно указываем квартиру, чтобы в массовом вводе было видно, по какой
+        # строке ошибка (даже если фронтенд не подсветит её отдельно).
+        apt_label = ""
+        meter = db.get(Meter, int(meter_id))
+        apt = meter.apartment if meter else None
+        if apt is not None:
+            apt_label = f"Квартира №{apt.apartment_number}: "
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{apt_label}текущее показание ({cur}) меньше предыдущего ({prev_val}) "
+                f"от {prev.reading_date.strftime('%d.%m.%Y')}"
+            ),
+        )
+
+
 def resolve_meter_reading_values(
     db: Session, payload: dict[str, Any], exclude_id: int | None = None
 ) -> dict[str, Any]:
@@ -203,6 +246,9 @@ def resolve_meter_reading_values(
         reading_date or date.today().isoformat(),
         {"type": "date", "label": "Дата показания"},
     )
+
+    # Показания счётчиков нарастающие: текущее не может быть меньше предыдущего.
+    validate_reading_not_decreased(db, meter.id, coerced_reading, coerced_date, exclude_id=exclude_id)
 
     return {
         "apartment_id": int(apartment_id),

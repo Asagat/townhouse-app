@@ -39,6 +39,7 @@ from services import (
     audit_document_update,
     build_accrual_register_items,
     create_accounts_register_entries_for_accruals,
+    validate_reading_not_decreased,
 )
 from writeoffs import auto_recalculate_writeoffs
 
@@ -216,6 +217,13 @@ def bulk_create_readings(
             )
             meter_id = meter.id if meter else None
 
+        # Показания нарастающие: строку с уменьшением не сохраняем, а помечаем ошибкой.
+        try:
+            validate_reading_not_decreased(db, meter_id, reading_value, parsed_date)
+        except HTTPException as exc:
+            row_errors.append({"apartment_id": apartment_id, "detail": exc.detail})
+            continue
+
         meter_reading = MeterReading(
             document_id=document.id,
             apartment_id=int(apartment_id),
@@ -229,7 +237,16 @@ def bulk_create_readings(
 
     if not created_readings:
         db.rollback()
-        raise HTTPException(status_code=422, detail="Нет корректных строк для сохранения")
+        if not row_errors:
+            raise HTTPException(status_code=422, detail="Нет корректных строк для сохранения")
+        # Все строки отклонены с конкретными ошибками (например, показание меньше
+        # предыдущего) — возвращаем их, чтобы фронтенд показал ошибки по строкам,
+        # а не общий текст «Нет корректных строк для сохранения».
+        return {
+            "document": None,
+            "created": [],
+            "errors": row_errors,
+        }
 
     db.commit()
     db.refresh(document)
@@ -326,6 +343,13 @@ def update_meter_reading_document_full(
             )
             meter_id = meter.id if meter else None
 
+        # Показания нарастающие: строку с уменьшением не сохраняем, а помечаем ошибкой.
+        try:
+            validate_reading_not_decreased(db, meter_id, reading_value, parsed_date)
+        except HTTPException as exc:
+            row_errors.append({"apartment_id": apartment_id, "detail": exc.detail})
+            continue
+
         meter_reading = MeterReading(
             document_id=document.id,
             apartment_id=int(apartment_id),
@@ -339,7 +363,15 @@ def update_meter_reading_document_full(
 
     if not created_readings:
         db.rollback()
-        raise HTTPException(status_code=422, detail="Нет корректных строк для сохранения")
+        if not row_errors:
+            raise HTTPException(status_code=422, detail="Нет корректных строк для сохранения")
+        # Все строки отклонены с конкретными ошибками — возвращаем их, чтобы
+        # фронтенд показал ошибки по строкам (откат вернул прежние показания).
+        return {
+            "document": meter_reading_document_serializer(document),
+            "updated": [],
+            "errors": row_errors,
+        }
 
     db.commit()
     db.refresh(document)
