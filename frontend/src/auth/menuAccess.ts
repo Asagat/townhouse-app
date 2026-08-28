@@ -45,6 +45,8 @@ export const resourceRoles: Record<string, string[]> = {
 
     // Администрирование
     users: ["admin"],
+    // Просмотр личного кабинета жителя (только админ)
+    cabinet_admin: ["admin"],
 
     // Личный кабинет (только житель)
     cabinet: ["resident"],
