@@ -135,7 +135,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "label": "Аналитика",
             "type": "reference",
             "reference": "analytic_articles",
-            "required": False,
+            "required": True,
         },
         {
             "name": "transaction_type",
@@ -169,7 +169,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "label": "Аналитика",
             "type": "reference",
             "reference": "analytic_articles",
-            "required": False,
+            "required": True,
         },
         {
             "name": "transaction_type",

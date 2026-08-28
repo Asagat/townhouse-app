@@ -72,6 +72,8 @@ def resolve_transaction_values(
         raise HTTPException(status_code=422, detail="Поле 'Тип операции' обязательно")
     if amount in (None, ""):
         raise HTTPException(status_code=422, detail="Поле 'Сумма' обязательно")
+    if article_id in (None, ""):
+        raise HTTPException(status_code=422, detail="Поле 'Аналитика' обязательно")
 
     # Квартира/л/с НЕ обязательны: если не указаны — операция идёт в общий денежный
     # регистр без привязки к лицевому счёту (account_id = NULL), но с аналитикой.
