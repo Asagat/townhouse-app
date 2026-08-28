@@ -97,6 +97,11 @@ export const categories: Category[] = [
               icon: "fa-solid fa-list-check",
             },
             {
+              key: "analytic_articles",
+              label: "Аналитика",
+              icon: "fa-solid fa-tags",
+            },
+            {
               key: 'writeoff_documents',
               label: 'Списания',
               icon: 'fa-solid fa-arrow-right-arrow-left',

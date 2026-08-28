@@ -35,7 +35,7 @@ except Exception:  # noqa: BLE001
     pass
 
 from database import SessionLocal  # noqa: E402
-from models import ServiceType, Tariff, TariffType  # noqa: E402
+from models import AnalyticArticle, AnalyticKind, ServiceType, Tariff, TariffType  # noqa: E402
 
 
 # Типы тарифов (системные, имена зашиты в логику расчёта — не менять).
@@ -58,6 +58,25 @@ _DEFAULT_TARIFFS = [
     ("Охрана", "Фиксированный", 2000.00),
     ("Фонд развития", "Фиксированный", 5000.00),
     ("Обслуживание ТП", "По площади", 10.00),
+]
+
+# Дефолтные статьи аналитики (доходы/расходы ТСН/КСК на коммунальный дом).
+_ANALYTIC_ARTICLES = [
+    ("income_services", "Поступления от жителей", AnalyticKind.income),
+    ("income_subsidy", "Субсидии и дотации", AnalyticKind.income),
+    ("income_other", "Прочие доходы", AnalyticKind.income),
+    ("expense_utilities_el", "Электроэнергия", AnalyticKind.expense),
+    ("expense_utilities_water", "Холодная вода", AnalyticKind.expense),
+    ("expense_security", "Охрана", AnalyticKind.expense),
+    ("expense_tp", "Обслуживание ТП", AnalyticKind.expense),
+    ("expense_repairs", "Текущий ремонт и обслуживание", AnalyticKind.expense),
+    ("expense_salary", "Заработная плата персонала", AnalyticKind.expense),
+    ("expense_payroll_tax", "Налоги на ФОТ", AnalyticKind.expense),
+    ("expense_banking", "Банковские услуги и комиссии", AnalyticKind.expense),
+    ("expense_office", "Офисные и хозяйственные расходы", AnalyticKind.expense),
+    ("expense_communication", "Связь и интернет", AnalyticKind.expense),
+    ("expense_materials", "Материалы и запчасти", AnalyticKind.expense),
+    ("expense_other", "Прочие расходы", AnalyticKind.expense),
 ]
 
 
@@ -108,6 +127,17 @@ def _ensure_tariffs(db, services: dict[str, ServiceType], tariff_types: dict[str
         print(f"  + тариф: {sname} ({ttype_name}) = {price}")
 
 
+def _ensure_analytic_articles(db) -> None:
+    """Создаёт недостающие статьи аналитики (идемпотентно, по коду)."""
+    for code, name, kind in _ANALYTIC_ARTICLES:
+        existing = db.query(AnalyticArticle).filter(AnalyticArticle.code == code).first()
+        if existing:
+            continue
+        db.add(AnalyticArticle(code=code, name=name, kind=kind, is_active=True))
+        db.flush()
+        print(f"  + статья аналитики: {name} ({kind.value})")
+
+
 def main() -> None:
     db = SessionLocal()
     try:
@@ -115,6 +145,7 @@ def main() -> None:
         tariff_types = _ensure_tariff_types(db)
         services = _ensure_services(db)
         _ensure_tariffs(db, services, tariff_types)
+        _ensure_analytic_articles(db)
         db.commit()
         print("Готово.")
     except Exception as e:  # noqa: BLE001

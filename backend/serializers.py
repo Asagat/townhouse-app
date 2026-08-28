@@ -14,6 +14,7 @@ from models import (
     AccountsRegister,
     AccrualsRegister,
     AccrualDocument,
+    AnalyticArticle,
     Apartment,
     CashPoint,
     CashRegister,
@@ -118,6 +119,7 @@ def transaction_serializer(item: Transaction) -> dict:
         "transaction_date": item.transaction_date.isoformat() if item.transaction_date else None,
         "account_id": item.account_id,
         "cash_point_id": item.cash_point_id,
+        "article_id": item.article_id,
         "transaction_type": item.transaction_type.value if hasattr(item.transaction_type, "value") else item.transaction_type,
         "amount": float(item.amount) if item.amount is not None else 0.0,
         "notes": item.notes,
@@ -169,6 +171,14 @@ def transaction_serializer(item: Transaction) -> dict:
         }
     else:
         result["cash_point"] = None
+
+    article = item.article
+    result["article"] = (
+        {"id": article.id, "code": article.code, "name": article.name, "kind": article.kind.value if hasattr(article.kind, "value") else str(article.kind)}
+        if article
+        else None
+    )
+    result["article_name"] = article.name if article else None
 
     return result
 
@@ -416,10 +426,12 @@ def cash_register_serializer(item: CashRegister) -> dict:
         "operation_date": item.operation_date.isoformat() if item.operation_date else None,
         "account_id": item.account_id,
         "transaction_id": item.transaction_id,
+        "article_id": item.transaction.article_id if item.transaction else None,
         "income": float(item.income) if item.income is not None else 0.0,
         "expense": float(item.expense) if item.expense is not None else 0.0,
         "balance_after": float(item.balance_after) if item.balance_after is not None else 0.0,
         "document_title": item.transaction.title if item.transaction else None,
+        "article_name": (item.transaction.article.name if item.transaction and item.transaction.article else None),
     }
 
     if item.account:
@@ -535,6 +547,17 @@ def writeoff_item_serializer(item: WriteoffItem) -> dict:
     }
 
 
+def analytic_article_serializer(item: AnalyticArticle) -> dict:
+    """Сериализатор статьи аналитики: kind как строка-метка (Доход/Расход)."""
+    return {
+        "id": item.id,
+        "code": item.code,
+        "name": item.name,
+        "kind": item.kind.value if hasattr(item.kind, "value") else str(item.kind),
+        "is_active": item.is_active,
+    }
+
+
 SERIALIZERS = {
     Owner: make_serializer([
         "full_name", "first_name", "last_name", "middle_name",
@@ -543,6 +566,7 @@ SERIALIZERS = {
     Apartment: apartment_serializer,
     Account: account_serializer,
     CashPoint: cash_point_serializer,
+    AnalyticArticle: analytic_article_serializer,
     Transaction: transaction_serializer,
     ServiceType: make_serializer(["services_type", "priority"]),
     TariffType: make_serializer(["name"]),

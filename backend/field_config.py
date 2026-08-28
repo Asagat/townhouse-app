@@ -17,6 +17,8 @@ from models import (
     AccountsRegister,
     AccrualsRegister,
     AccrualDocument,
+    AnalyticArticle,
+    AnalyticKind,
     Apartment,
     CashPoint,
     CashRegister,
@@ -41,6 +43,7 @@ MODEL_MAP = {
     "apartments": Apartment,
     "accounts": Account,
     "cash_points": CashPoint,
+    "analytic_articles": AnalyticArticle,
     "transactions": Transaction,
     "payments": Transaction,
     "services_type": ServiceType,
@@ -100,6 +103,18 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         {"name": "name", "label": "Наименование", "type": "string", "required": True},
         {"name": "is_active", "label": "Активна", "type": "boolean"},
     ],
+    "analytic_articles": [
+        {"name": "code", "label": "Код", "type": "string", "required": True},
+        {"name": "name", "label": "Наименование", "type": "string", "required": True},
+        {
+            "name": "kind",
+            "label": "Тип",
+            "type": "enum",
+            "enum_class": AnalyticKind,
+            "required": True,
+        },
+        {"name": "is_active", "label": "Активна", "type": "boolean"},
+    ],
     "transactions": [
         {"name": "title", "label": "Название", "type": "string", "required": False},
         {
@@ -107,7 +122,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "label": "Квартира",
             "type": "reference",
             "reference": "apartments",
-            "required": True,
+            "required": False,
         },
         {
             "name": "cash_point_id",
@@ -115,6 +130,13 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "type": "reference",
             "reference": "cash_points",
             "required": True,
+        },
+        {
+            "name": "article_id",
+            "label": "Аналитика",
+            "type": "reference",
+            "reference": "analytic_articles",
+            "required": False,
         },
         {
             "name": "transaction_type",
@@ -134,7 +156,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "label": "Квартира",
             "type": "reference",
             "reference": "apartments",
-            "required": True,
+            "required": False,
         },
         {
             "name": "cash_point_id",
@@ -142,6 +164,13 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "type": "reference",
             "reference": "cash_points",
             "required": True,
+        },
+        {
+            "name": "article_id",
+            "label": "Аналитика",
+            "type": "reference",
+            "reference": "analytic_articles",
+            "required": False,
         },
         {
             "name": "transaction_type",

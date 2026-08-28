@@ -28,6 +28,11 @@ class TransactionTypeEnum(enum.Enum):
     out_bank = "Расход из банка"
 
 
+class AnalyticKind(enum.Enum):
+    income = "Доход"
+    expense = "Расход"
+
+
 class UserRole(enum.Enum):
     admin = "Администратор"
     operator = "Оператор"
@@ -125,6 +130,23 @@ class CashPoint(Base):
     is_active = Column(Boolean, default=True)
 
     transactions = relationship("Transaction", back_populates="cash_point", passive_deletes=True)
+
+
+class AnalyticArticle(Base):
+    """Аналитика: статьи доходов/расходов для документов «Приход/Расход».
+
+    Единый справочник (п. 2.11 доработка): статьи типа `kind` (доход/расход)
+    используются в отчётах и при разнесении приходов/расходов, в т.ч. по операциям
+    без привязки к квартире/л/с (account_id = NULL).
+    """
+    __tablename__ = "analytic_articles"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(50), nullable=False, unique=True)
+    name = Column(String(255), nullable=False)
+    kind = Column(Enum(AnalyticKind, native_enum=False), nullable=False)
+    is_active = Column(Boolean, default=True)
+
+    transactions = relationship("Transaction", back_populates="article", passive_deletes=True)
 
 
 class ServiceType(Base):
@@ -243,6 +265,9 @@ class Transaction(Base):
     transaction_date = Column(TIMESTAMP, server_default=func.now())
     account_id = Column(Integer, ForeignKey("accounts.id", ondelete="RESTRICT"))
     cash_point_id = Column(Integer, ForeignKey("cash_points.id", ondelete="RESTRICT"))
+    article_id = Column(
+        Integer, ForeignKey("analytic_articles.id", ondelete="SET NULL"), nullable=True
+    )
     transaction_type = Column(Enum(TransactionTypeEnum), nullable=False)
     amount = Column(Numeric(15, 2), nullable=False)
     notes = Column(String(255))
@@ -258,6 +283,7 @@ class Transaction(Base):
 
     account = relationship("Account", back_populates="transactions")
     cash_point = relationship("CashPoint", back_populates="transactions")
+    article = relationship("AnalyticArticle", back_populates="transactions")
     accounts_register = relationship("AccountsRegister", back_populates="transaction", passive_deletes=True)
     cash_register = relationship("CashRegister", back_populates="transaction", passive_deletes=True)
     creator = relationship("User", foreign_keys=[created_by], lazy="joined")
@@ -414,8 +440,10 @@ class CashRegister(Base):
     )
     id = Column(Integer, primary_key=True, autoincrement=True)
     operation_date = Column(TIMESTAMP, server_default=func.now())
+    # account_id может быть NULL — операции «Приход/Расход» без привязки к квартире/л/с
+    # попадают в общий денежный регистр (видны в отчёте по кассе и аналитике).
     account_id = Column(
-        Integer, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
+        Integer, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=True
     )
     transaction_id = Column(
         Integer, ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False

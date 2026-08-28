@@ -24,8 +24,9 @@ interface MovementRow {
     operation_date: string | null;
     document_title: string;
     transaction_id: number;
-    account_number: string;
-    account_name: string;
+    account_number: string | null;
+    account_name: string | null;
+    article_name: string | null;
     income: number;
     expense: number;
     amount: number;
@@ -100,7 +101,8 @@ export const CashReport = () => {
         { title: "Дата", dataIndex: "operation_date", key: "operation_date", render: (v: string | null) => v ? dayjs(v).format("DD.MM.YYYY") : "—" },
         { title: "Документ", dataIndex: "document_title", key: "document_title" },
         { title: "Касса", dataIndex: "cash_point_name", key: "cash_point_name" },
-        { title: "Лицевой счёт", dataIndex: "account_number", key: "account_number" },
+        { title: "Лицевой счёт", dataIndex: "account_number", key: "account_number", render: (v: string | null) => v ?? "—" },
+        { title: "Аналитика", dataIndex: "article_name", key: "article_name", render: (v: string | null) => v ?? "—" },
         { title: "Приход", dataIndex: "income", key: "income", align: "right" as const, render: (v: number) => fmt(v) },
         { title: "Расход", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => fmt(v) },
     ];

@@ -20,6 +20,7 @@ const referenceLabelFormatters: Record<string, (item: any) => string> = {
     tariff_types: (item) => item.name,
     tariffs: (item) => `${item.price} ₸${item.unit ? " / " + item.unit : ""}`,
     meters: (item) => item.serial_number,
+    analytic_articles: (item) => `${item.name} (${item.kind === "Доход" ? "доход" : "расход"})`,
 };
 
 /**
@@ -37,6 +38,7 @@ const resourcePlaceholders: Record<string, string> = {
     meters: 'Выберите счётчик',
     meter_readings: 'Выберите показание',
     meter_reading_documents: 'Выберите документ показаний',
+    analytic_articles: 'Выберите статью',
 };
 
 /**

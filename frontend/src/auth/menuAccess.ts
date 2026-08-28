@@ -40,6 +40,7 @@ export const resourceRoles: Record<string, string[]> = {
     // Настройки
     tariff_types: ["admin", "operator"],
     services_type: ["admin", "operator"],
+    analytic_articles: ["admin", "operator"],
     meters: ["admin", "operator", "controller"],
 
     // Администрирование

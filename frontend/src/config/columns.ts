@@ -37,12 +37,20 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'is_active', label: 'Активен', format: formatBool },
     ],
 
+    analytic_articles: [
+        { key: 'code', label: 'Код' },
+        { key: 'name', label: 'Наименование' },
+        { key: 'kind', label: 'Тип' },
+        { key: 'is_active', label: 'Активна', format: formatBool },
+    ],
+
     payments: [
         { key: 'title', label: 'Название' },
         { key: 'transaction_date', label: 'Дата', format: formatDateTime },
         { key: 'cash_point.name', label: 'Касса/Счёт' },
         { key: 'apartment.apartment_number', label: '№ квартиры' },
         { key: 'account.account_number', label: 'Лицевой счёт' },
+        { key: 'article.name', label: 'Аналитика' },
         { key: 'owner.full_name', label: 'Собственник' },
         { key: 'transaction_type', label: 'Тип операции' },
         { key: 'amount', label: 'Сумма', format: formatNumber },
@@ -56,6 +64,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'cash_point.name', label: 'Касса/Счёт' },
         { key: 'apartment.apartment_number', label: '№ квартиры' },
         { key: 'account.account_number', label: 'Лицевой счёт' },
+        { key: 'article.name', label: 'Аналитика' },
         { key: 'owner.full_name', label: 'Собственник' },
         { key: 'transaction_type', label: 'Тип операции' },
         { key: 'amount', label: 'Сумма', format: formatNumber },

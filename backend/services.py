@@ -62,9 +62,8 @@ def resolve_transaction_values(
     amount = payload.get("amount")
     notes = payload.get("notes")
     transaction_date = payload.get("transaction_date")
+    article_id = payload.get("article_id")
 
-    if apartment_id in (None, ""):
-        raise HTTPException(status_code=422, detail="Укажите квартиру")
     if cash_point_id in (None, ""):
         raise HTTPException(status_code=422, detail="Поле 'Касса/Счёт' обязательно")
     if transaction_type in (None, ""):
@@ -72,24 +71,30 @@ def resolve_transaction_values(
     if amount in (None, ""):
         raise HTTPException(status_code=422, detail="Поле 'Сумма' обязательно")
 
-    account = (
-        db.query(Account)
-        .filter(Account.apartment_id == int(apartment_id))
-        .order_by(Account.created_at.desc(), Account.id.desc())
-        .first()
-    )
-    if not account:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Не найден лицевой счёт для указанной квартиры. "
-                "Сначала зарегистрируйте лицевой счёт в разделе «Лицевые счета»."
-            ),
+    # Квартира/л/с НЕ обязательны: если не указаны — операция идёт в общий денежный
+    # регистр без привязки к лицевому счёту (account_id = NULL), но с аналитикой.
+    account_id = None
+    if apartment_id not in (None, ""):
+        account = (
+            db.query(Account)
+            .filter(Account.apartment_id == int(apartment_id))
+            .order_by(Account.created_at.desc(), Account.id.desc())
+            .first()
         )
+        if not account:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Не найден лицевой счёт для указанной квартиры. "
+                    "Сначала зарегистрируйте лицевой счёт в разделе «Лицевые счета»."
+                ),
+            )
+        account_id = account.id
 
     values = {
-        "account_id": account.id,
+        "account_id": account_id,
         "cash_point_id": int(cash_point_id),
+        "article_id": int(article_id) if article_id not in (None, "") else None,
         "transaction_type": coerce_field_value(
             transaction_type,
             {
