@@ -32,15 +32,36 @@ def _has_column(table: str, column: str) -> bool:
     return column in [c["name"] for c in inspect(bind).get_columns(table)]
 
 
+def _has_unique_object(table: str, name: str) -> bool:
+    """True, если в таблице уже есть unique-constraint или unique-индекс с именем name.
+
+    PostgreSQL: unique-индекс (создаваемый `create_all` по актуальным моделям
+    в 0002_schema_squash) и unique-constraint занимают одно пространство имён,
+    поэтому проверяем оба — иначе на свежей БД `ADD CONSTRAINT ... UNIQUE`
+    падает с DuplicateTable.
+    """
+    bind = op.get_bind()
+    insp = inspect(bind)
+    for uc in insp.get_unique_constraints(table):
+        if uc.get("name") == name:
+            return True
+    for ix in insp.get_indexes(table):
+        if ix.get("name") == name:
+            return True
+    return False
+
+
 def upgrade() -> None:
     """Drop analytic_articles.code, ensure unique (name, kind)."""
     if _has_column("analytic_articles", "code"):
         op.drop_column("analytic_articles", "code")
-    # PostgreSQL: добавляем unique-constraint (name, kind), если его ещё нет.
-    op.execute(f"""
-        ALTER TABLE analytic_articles
-        ADD CONSTRAINT {_UNIQUE_NAME} UNIQUE (name, kind);
-    """)
+    # PostgreSQL: добавляем unique-constraint (name, kind), если его ещё нет
+    # (на свежей БД его место уже занимает unique-индекс из 0002_schema_squash).
+    if not _has_unique_object("analytic_articles", _UNIQUE_NAME):
+        op.execute(f"""
+            ALTER TABLE analytic_articles
+            ADD CONSTRAINT {_UNIQUE_NAME} UNIQUE (name, kind);
+        """)
 
 
 def downgrade() -> None:
