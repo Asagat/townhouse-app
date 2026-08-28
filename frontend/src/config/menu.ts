@@ -121,6 +121,11 @@ export const categories: Category[] = [
               label: "Пользователи и права",
               icon: "fa-solid fa-user-shield",
             },
+            {
+              key: "cabinet_admin",
+              label: "Личный кабинет жителя",
+              icon: "fa-solid fa-user-tie",
+            },
         ],
     },
     {

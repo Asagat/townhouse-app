@@ -21,6 +21,7 @@ import { GenericList } from "./pages/GenericList";
 import { Login } from "./pages/Login";
 import { Users } from "./pages/Users";
 import { ResidentCabinet } from "./pages/ResidentCabinet";
+import { AdminCabinet } from "./pages/AdminCabinet";
 import { CashReport } from "./pages/CashReport";
 import { authProvider } from "./auth/authProvider";
 import { apiUrl, http } from "./auth/http";
@@ -30,6 +31,7 @@ import { getIdentity } from "./auth/token";
 const resourceForRoute = (key: string) => {
     if (key === "users") return <Users />;
     if (key === "cabinet") return <ResidentCabinet />;
+    if (key === "cabinet_admin") return <AdminCabinet />;
     if (key === "cash_report") return <CashReport />;
     return <GenericList resourceName={key} />;
 };
