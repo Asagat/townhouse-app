@@ -256,7 +256,6 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
     ],
     "meter_reading_documents": [
         {"name": "id", "label": "ID документа", "type": "integer", "required": False},
-        {"name": "title", "label": "Название", "type": "string", "required": True},
         {
             "name": "reading_date",
             "label": "Дата показаний",

@@ -264,9 +264,10 @@ def _ensure_meter_readings(db, services: list[ServiceType]) -> None:
     today = date.today()
     reading_date = date(today.year, today.month, 1)
     month_label = MONTH_NAMES_RU[today.month - 1]
-    title = f"Показания за {month_label} {today.year}"
 
     for svc in services:
+        # Название документа — авто (1.9 роадмапа): «Показания за август 2026 — Электричество».
+        doc_title = f"Показания за {month_label} {today.year} — {svc.services_type}"
         # Документ показаний по услуге на текущий месяц.
         existing_doc = (
             db.query(MeterReadingDocument)
@@ -281,7 +282,7 @@ def _ensure_meter_readings(db, services: list[ServiceType]) -> None:
             print(f"  ~ документ показаний уже есть: {existing_doc.title} ({svc.services_type})")
         else:
             document = MeterReadingDocument(
-                title=title,
+                title=doc_title,
                 reading_date=reading_date,
                 services_type_id=svc.id,
             )

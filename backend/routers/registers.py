@@ -18,7 +18,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models import AccrualDocument, AccrualsRegister, User, WriteoffDocument
-from routers.documents import default_accrual_document_title
 from serializers import (
     SERIALIZERS,
     accrual_document_serializer,
@@ -26,6 +25,7 @@ from serializers import (
     writeoff_item_serializer,
 )
 from services import (
+    default_accrual_document_title,
     build_accrual_register_items,
     calculate_accruals_preview,
     create_accounts_register_entries_for_accruals,
@@ -88,6 +88,12 @@ async def generate_accruals(
     if month < 1 or month > 12:
         raise HTTPException(status_code=422, detail="Некорректный месяц")
 
+    # Период начисления не может быть в будущем (1.10 роадмапа); текущий месяц — можно
+    # (дата документа = последний день месяца, т.е. формально может быть позже сегодня).
+    now = date.today()
+    if (year, month) > (now.year, now.month):
+        raise HTTPException(status_code=422, detail="Нельзя начислить за будущий период")
+
     period_end = date(year, month, calendar.monthrange(year, month)[1])
 
     # Собираем уникальные пары (account_id, services_type_id) из выбора клиента
@@ -104,8 +110,9 @@ async def generate_accruals(
 
     accrual_date = date(year, month, calendar.monthrange(year, month)[1])
 
-    # Создаём документ начислений в той же транзакции, чтобы исключить документы-сирот
-    title = payload.get("title") or default_accrual_document_title(accrual_date)
+    # Создаём документ начислений в той же транзакции, чтобы исключить документы-сирот.
+    # Название генерируется автоматически (1.9 роадмапа) — ввод пользователя игнорируется.
+    title = default_accrual_document_title(accrual_date)
     document = AccrualDocument(accrual_date=accrual_date, title=title)
     audit_document_create(document, _auth.id)
     db.add(document)

@@ -29,15 +29,17 @@ const MONTH_NAMES_NOMINATIVE = [
     "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
 ];
 
-const getDefaultTitle = (date: Dayjs): string =>
-    `Снятие показаний за ${MONTH_NAMES_NOMINATIVE[date.month()]} ${date.year()}`;
+const getDefaultTitle = (date: Dayjs, serviceName?: string): string => {
+    const base = `Показания за ${MONTH_NAMES_NOMINATIVE[date.month()]} ${date.year()}`;
+    return serviceName ? `${base} — ${serviceName}` : base;
+};
 
 const DEFAULT_SERVICE_TYPE_LABEL = "Электричество";
 
 /**
  * Модальное окно для массового ввода показаний счетчиков.
- * Без documentId — режим создания: оператор задаёт название документа, вид услуги и дату,
- * затем вводит показания для каждой квартиры, создаётся новый документ.
+ * Без documentId — режим создания: название документа генерируется автоматически,
+ * оператор выбирает вид услуги и дату, затем вводит показания для каждой квартиры.
  * С documentId — режим редактирования: подгружаются данные существующего документа
  * и его показания, при сохранении документ и его показания полностью пересоздаются.
  */
@@ -62,11 +64,14 @@ export const BulkReadingsModal = ({
     const apartments = apartmentsData?.data ?? [];
     const serviceTypes = serviceTypesData?.data ?? [];
 
-    const [title, setTitle] = useState<string>("");
     const [serviceTypeId, setServiceTypeId] = useState<number | undefined>();
     const [readingDate, setReadingDate] = useState<Dayjs>(dayjs());
     const [readings, setReadings] = useState<Record<number, string>>({});
     const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
+
+    // Название документа генерируется автоматически (1.9 роадмапа) — только превью.
+    const selectedServiceName = serviceTypes.find((s: any) => Number(s.id) === serviceTypeId)?.services_type;
+    const documentTitle = getDefaultTitle(readingDate, selectedServiceName);
 
     const { mutate: bulkCreate, isLoading: saving } = useCustomMutation();
 
@@ -80,7 +85,6 @@ export const BulkReadingsModal = ({
             enabled: false,
             onSuccess: (response) => {
                 const { document, readings: existingReadings } = response.data;
-                setTitle(document.title ?? "");
                 setReadingDate(document.reading_date ? dayjs(document.reading_date) : dayjs());
                 setServiceTypeId(document.services_type_id ?? undefined);
 
@@ -107,7 +111,6 @@ export const BulkReadingsModal = ({
             fetchDocument();
         } else {
             const now = dayjs();
-            setTitle(getDefaultTitle(now));
             setServiceTypeId(undefined);
             setReadingDate(now);
             setReadings({});
@@ -130,10 +133,6 @@ export const BulkReadingsModal = ({
     }, [open, isEditMode, serviceTypes]);
 
     const handleSave = () => {
-        if (!title.trim()) {
-            message.error("Введите название документа");
-            return;
-        }
         if (!serviceTypeId) {
             message.error("Выберите вид услуги");
             return;
@@ -160,7 +159,6 @@ export const BulkReadingsModal = ({
                 url,
                 method: isEditMode ? "put" : "post",
                 values: {
-                    title,
                     services_type_id: serviceTypeId,
                     reading_date: readingDate.format("YYYY-MM-DD"),
                     readings: readingsPayload,
@@ -269,9 +267,8 @@ export const BulkReadingsModal = ({
                     <div style={{ marginBottom: 4 }}>Название документа</div>
                     <Input
                         style={{ width: 260 }}
-                        placeholder="Показания за август 2026 г."
-                        value={title}
-                        onChange={(e) => setTitle(e.target.value)}
+                        value={documentTitle}
+                        readOnly
                     />
                 </div>
                 <div>

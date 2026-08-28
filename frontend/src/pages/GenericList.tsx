@@ -105,6 +105,21 @@ const sortMapping: Record<string, string> = {
     'debt': 'debt',
     'overpayment': 'overpayment',
     'payable_amount': 'payable_amount',
+
+    // Дополнение (2.11 «Сортировка»): аналитика, автор, справочные/вложенные поля,
+    // статусы и количества записей.
+    'article.name': 'article.name',
+    'created_by_name': 'created_by_name',
+    'kind': 'kind',
+    'reading': 'reading',
+    'priority': 'priority',
+    'services_type': 'services_type',
+    'writeoff_date': 'writeoff_date',
+    'status': 'status',
+    'items_count': 'items_count',
+    'total_allocated': 'total_allocated',
+    'owner.phone': 'owner.phone',
+    'apartment.owner.full_name': 'apartment.owner.full_name',
 };
 
 const isSortableField = (dataIndex: string): boolean => {

@@ -55,7 +55,6 @@ export const AccrualsCalculationModal = ({
     const now = dayjs();
     const [year, setYear] = useState<number>(now.year());
     const [month, setMonth] = useState<number>(now.month() + 1);
-    const [title, setTitle] = useState<string>(() => getDefaultTitle(now.year(), now.month() + 1));
     const [rows, setRows] = useState<AccrualPreviewRow[]>([]);
     const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
     const [isSaving, setIsSaving] = useState(false);
@@ -107,11 +106,10 @@ export const AccrualsCalculationModal = ({
         queryOptions: {
             enabled: false,
             onSuccess: (response) => {
-                const { year: docYear, month: docMonth, selections, document } = response.data;
+                const { year: docYear, month: docMonth, selections } = response.data;
                 setPendingSelection(selections ?? []);
                 setYear(docYear);
                 setMonth(docMonth);
-                setTitle(document?.title || getDefaultTitle(docYear, docMonth));
             },
             onError: (err: any) =>
                 message.error(
@@ -133,7 +131,6 @@ export const AccrualsCalculationModal = ({
             const n = dayjs();
             setYear(n.year());
             setMonth(n.month() + 1);
-            setTitle(getDefaultTitle(n.year(), n.month() + 1));
             setRows([]);
             setSelectedKeys([]);
             setPendingSelection(null);
@@ -159,8 +156,7 @@ export const AccrualsCalculationModal = ({
 
         setIsSaving(true);
 
-        const effectiveTitle = title.trim() || getDefaultTitle(year, month);
-
+        // Название документа генерируется на сервере автоматически (1.9 роадмапа).
         const selections = selectedRows.map((row) => ({
             account_id: row.account_id,
             services_type_id: row.services_type_id,
@@ -175,7 +171,6 @@ export const AccrualsCalculationModal = ({
                     method: "put",
                     values: {
                         accrual_date: `${year}-${String(month).padStart(2, "0")}-01`,
-                        title: effectiveTitle,
                         selections,
                     },
                 },
@@ -201,7 +196,7 @@ export const AccrualsCalculationModal = ({
                 {
                     url: `${apiUrl}/accruals_register/generate`,
                     method: "post",
-                    values: { year, month, title: effectiveTitle, selections },
+                    values: { year, month, selections },
                 },
                 {
                     onSuccess: (response) => {
@@ -330,9 +325,8 @@ export const AccrualsCalculationModal = ({
                     <div style={{ marginBottom: 4 }}>Название документа</div>
                     <Input
                         style={{ width: 280 }}
-                        placeholder="Начисление за август 2026"
-                        value={title}
-                        onChange={(e) => setTitle(e.target.value)}
+                        value={getDefaultTitle(year, month)}
+                        readOnly
                     />
                 </div>
                 <div>
