@@ -75,7 +75,8 @@ export const RecordFormModal = ({
 
         form.resetFields();
         form.setFieldsValue(prepared);
-    }, [open, initialValues, sortedFields, form]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
 
     const handleOk = () => {
         form.validateFields().then((values) => {
