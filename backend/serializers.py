@@ -41,6 +41,7 @@ def _user_serializer(user: User) -> dict:
         "role": user.role.name if hasattr(user.role, "name") else str(user.role),
         "role_name": user.role.value if hasattr(user.role, "value") else str(user.role),
         "is_active": user.is_active,
+        "account_id": user.account_id,
     }
 
 

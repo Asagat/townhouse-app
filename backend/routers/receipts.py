@@ -219,14 +219,47 @@ def generate_receipts(
     return {"year": year, "month": month, "created": rows}
 
 
+def _raise_for_resident_other(user: User | None, own_account_id: int, receipt: ReceiptDocument) -> None:
+    """resident может видеть только свои квитанции (по привязке users.account_id)."""
+    if (
+        user is not None
+        and getattr(user, "role", None) is not None
+        and user.role.name == "resident"
+    ):
+        own = getattr(user, "account_id", None)
+        if not own or int(own) != int(receipt.account_id):
+            raise HTTPException(status_code=403, detail="Нет доступа к этой квитанции")
+
+
+@router.get("/me/receipts")
+def get_my_receipts(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Список квитанций текущего пользователя (ЛК жителя), по его счёту."""
+    account_id = getattr(user, "account_id", None)
+    if not account_id:
+        raise HTTPException(status_code=404, detail="Лицевой счёт не привязан к пользователю")
+    receipts = (
+        db.query(ReceiptDocument)
+        .filter(ReceiptDocument.account_id == int(account_id))
+        .order_by(ReceiptDocument.period_year.desc(), ReceiptDocument.period_month.desc(), ReceiptDocument.id.desc())
+        .all()
+    )
+    serializer = SERIALIZERS.get(ReceiptDocument)
+    return [serializer(r) for r in receipts] if serializer else []
+
+
 @router.get("/receipt_documents/{document_id}/items")
 def get_receipt_items(
     document_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     receipt = db.get(ReceiptDocument, document_id)
     if not receipt:
         raise HTTPException(status_code=404, detail="Квитанция не найдена")
+    _raise_for_resident_other(user, None, receipt)
     items = db.query(ReceiptItem).filter(ReceiptItem.receipt_id == document_id).all()
     serializer = SERIALIZERS.get(ReceiptItem)
     return {
@@ -239,6 +272,7 @@ def get_receipt_items(
 def get_receipt_pdf(
     document_id: int,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
     inline: bool = Query(False, description="inline=true — показать в браузере, иначе скачивание"),
 ):
     """Генерирует PDF квитанции на лету. inline=true открывает в просмотрщике, иначе скачивает."""
@@ -249,6 +283,7 @@ def get_receipt_pdf(
     )
     if not receipt:
         raise HTTPException(status_code=404, detail="Квитанция не найдена")
+    _raise_for_resident_other(user, None, receipt)
 
     pdf_bytes = build_receipt_pdf(receipt)
     filename = f"receipt_{receipt.id}_{receipt.period_month:02d}_{receipt.period_year}.pdf"

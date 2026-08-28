@@ -49,9 +49,15 @@ class User(Base):
     full_name = Column(String(255))
     # Роль хранится строкой (имя члена UserRole, напр. 'admin'), без нативного PG-enum.
     role = Column(Enum(UserRole, native_enum=False), nullable=False, default=UserRole.cashier)
+    # Привязка жителя к лицевому счёту (для роли resident / ЛК).
+    account_id = Column(
+        Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
+    )
     is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    account = relationship("Account", back_populates="users")
 
 
 # --- СПРАВОЧНИКИ ---
@@ -109,6 +115,7 @@ class Account(Base):
     accounts_register = relationship("AccountsRegister", back_populates="account", passive_deletes=True)
     cash_register = relationship("CashRegister", back_populates="account", passive_deletes=True)
     receipts = relationship("ReceiptDocument", back_populates="account", passive_deletes=True)
+    users = relationship("User", back_populates="account", passive_deletes=True)
 
 
 class CashPoint(Base):

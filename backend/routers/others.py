@@ -6,15 +6,13 @@
 Логика сохранена без изменений.
 """
 
-from typing import Any
-
 from auth import get_current_user
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from models import Account
+from models import Account, User
 from services import _service_name
 
 
@@ -146,13 +144,51 @@ def build_account_statement(db: Session, account_id: int) -> dict:
 def get_account_statement(
     account_id: int,
     db: Session = Depends(get_db),
-    _auth: Any = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     """Отчёт по лицевому счёту: начислено / оплачено / долг по услугам, внесено / переплата.
 
-    Доступен любой аутентифицированной роли. Для роли resident в будущем (ЛК)
-    будет ограничение только своим счётом.
+    Админ/оператор/кассир/контролёр — любой счёт. Для роли resident доступен
+    только собственный счёт (привязка users.account_id).
     """
+    _ensure_can_view_account(db, user, account_id)
+    try:
+        return build_account_statement(db, account_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Лицевой счёт не найден")
+
+
+def _ensure_can_view_account(db: Session, user: User, account_id: int) -> None:
+    """resident видит только свой счёт; прочие роли не ограничиваются."""
+    if user is not None and getattr(user, "role", None) is not None and user.role.name == "resident":
+        own = getattr(user, "account_id", None)
+        if not own or int(own) != int(account_id):
+            raise HTTPException(status_code=403, detail="Нет доступа к этому лицевому счёту")
+
+
+def _get_user_account(db: Session, user: User) -> int:
+    """Возвращает account_id текущего пользователя (для ЛК).
+
+    Если у пользователя не задан account_id — 404 (нет привязки к счёту)."""
+    account_id = getattr(user, "account_id", None)
+    if not account_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Лицевой счёт не привязан к пользователю",
+        )
+    return int(account_id)
+
+
+@router.get("/me/statement")
+def get_my_statement(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Сводка по собственному лицевому счёту текущего пользователя (ЛК жителя).
+
+    Счёт берётся из привязки users.account_id — жителю не нужно знать свой id.
+    """
+    account_id = _get_user_account(db, user)
     try:
         return build_account_statement(db, account_id)
     except KeyError:

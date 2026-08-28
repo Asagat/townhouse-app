@@ -162,6 +162,7 @@ def create_user(
         full_name=full_name,
         role=role,
         is_active=True,
+        account_id=payload.get("account_id") or None,
     )
     db.add(user)
     try:
@@ -212,6 +213,11 @@ def update_user(
         if not new_active and admin.id == target.id:
             raise HTTPException(status_code=403, detail="Нельзя отключить собственный аккаунт")
         target.is_active = new_active
+
+    # Привязка к лицевому счёту (для роли resident / ЛК).
+    if "account_id" in payload:
+        val = payload["account_id"]
+        target.account_id = int(val) if val not in (None, "") else None
 
     if payload.get("password"):
         if len(payload["password"]) < 6:

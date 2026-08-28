@@ -20,13 +20,17 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { GenericList } from "./pages/GenericList";
 import { Login } from "./pages/Login";
 import { Users } from "./pages/Users";
+import { ResidentCabinet } from "./pages/ResidentCabinet";
 import { authProvider } from "./auth/authProvider";
 import { apiUrl, http } from "./auth/http";
 import { filterCategoriesByRole } from "./auth/menuAccess";
 import { getIdentity } from "./auth/token";
 
-const resourceForRoute = (key: string) =>
-    key === "users" ? <Users /> : <GenericList resourceName={key} />;
+const resourceForRoute = (key: string) => {
+    if (key === "users") return <Users />;
+    if (key === "cabinet") return <ResidentCabinet />;
+    return <GenericList resourceName={key} />;
+};
 
 // Обёртка защищённых страниц: если нет авторизации — на /login.
 const ProtectedLayout = () => {

@@ -118,6 +118,16 @@ export const categories: Category[] = [
             },
         ],
     },
+    {
+        title: "Личный кабинет",
+        items: [
+            {
+              key: "cabinet",
+              label: "Мой кабинет",
+              icon: "fa-solid fa-user",
+            },
+        ],
+    },
 ];
 
 export const allResources = categories.flatMap((c) => c.items);

@@ -70,6 +70,11 @@ def main() -> None:
         help="Роль: admin/operator/cashier/controller/resident (по умолчанию admin)",
     )
     parser.add_argument("--full-name", default="", help="Отображаемое имя")
+    parser.add_argument(
+        "--account",
+        default="",
+        help="ID лицевого счёта для привязки пользователя (особенно для роли resident/ЛК)",
+    )
     args = parser.parse_args()
 
     try:
@@ -96,6 +101,8 @@ def main() -> None:
             existing.role = role
             if args.full_name:
                 existing.full_name = args.full_name
+            if args.account:
+                existing.account_id = int(args.account)
             db.commit()
             print(f"Пользователь '{args.username}' существует — пароль обновлён (роль '{role.name}').")
             if generated:
@@ -109,6 +116,7 @@ def main() -> None:
             full_name=args.full_name,
             role=role,
             is_active=True,
+            account_id=int(args.account) if args.account else None,
         )
         db.add(user)
         db.commit()
