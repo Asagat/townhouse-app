@@ -126,7 +126,6 @@ export const ReferenceSelect = ({
                     onChange?.(Number(v));
                 }
             }}
-            onClear={() => onChange?.(undefined)}
             placeholder={placeholder || resourcePlaceholders[resource] || `Выберите ${resource}`}
             filterOption={(input, option) =>
                 (option?.label ?? "").toString().toLowerCase().includes(input.toLowerCase())
