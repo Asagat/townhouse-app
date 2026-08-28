@@ -39,6 +39,7 @@ from auth import get_current_user
 from models import Account, AccrualsRegister, ReceiptDocument, ReceiptItem, ServiceType, User
 from serializers import SERIALIZERS, receipt_document_serializer
 from services import FUND_SERVICE_FALLBACK, _service_name, audit_document_create
+from routers.others import _ensure_can_view_account
 
 
 router = APIRouter(prefix="/api")
@@ -56,24 +57,38 @@ def _fund_service_id(db) -> int | None:
     svc = db.query(ServiceType).filter(ServiceType.services_type == FUND_SERVICE_FALLBACK).first()
     return svc.id if svc else None
 
-def _account_debt_overpayment(db: Session, account_id: int) -> tuple[float, float]:
+def _account_debt_overpayment(db: Session, account_id: int, since: date | None = None) -> tuple[float, float]:
     """Возвращает (долг, переплата) по счёту на основе регистров.
 
     - долг = начислено - списано (>=0);
     - переплата = внесено на счёт - списано (>=0) — аванс сверх распределённых услуг.
     Согласовано с метриками отчёта build_account_statement (баланс/квитанции сходятся).
+
+    since — если задан, учитываются только записи ДО этой даты (operation_date < since).
+    Для квитанции так берётся задолженность на НАЧАЛО периода: начисления текущего
+    месяца (их строки в accounts_register имеют operation_date в текущем месяце)
+    исключаются, и «К оплате» = сумма за месяц + долг − переплата не дублирует
+    начисления текущего месяца.
     """
+    period_filter = " AND operation_date < :since" if since is not None else ""
+    params: dict[str, object] = {"a": account_id}
+    if since is not None:
+        params["since"] = since
+
     accrued_total = db.execute(
-        text("SELECT COALESCE(SUM(income),0) FROM accounts_register WHERE account_id=:a AND services_type_id IS NOT NULL"),
-        {"a": account_id},
+        text("SELECT COALESCE(SUM(income),0) FROM accounts_register "
+             f"WHERE account_id=:a AND services_type_id IS NOT NULL{period_filter}"),
+        params,
     ).scalar()
     paid_total = db.execute(
-        text("SELECT COALESCE(SUM(expense),0) FROM accounts_register WHERE account_id=:a AND services_type_id IS NOT NULL"),
-        {"a": account_id},
+        text("SELECT COALESCE(SUM(expense),0) FROM accounts_register "
+             f"WHERE account_id=:a AND services_type_id IS NOT NULL{period_filter}"),
+        params,
     ).scalar()
     available = db.execute(
-        text("SELECT COALESCE(SUM(income - expense),0) FROM cash_register WHERE account_id=:a"),
-        {"a": account_id},
+        text("SELECT COALESCE(SUM(income - expense),0) FROM cash_register "
+             f"WHERE account_id=:a{period_filter}"),
+        params,
     ).scalar()
     accrued_total = float(accrued_total or 0.0)
     paid_total = float(paid_total or 0.0)
@@ -121,9 +136,10 @@ def generate_receipt_document(
     db.add(receipt)
     db.flush()
 
-    # Долг и переплата счёта на основе регистров (см. «КОНВЕНЦИЯ ЗНАКОВ»):
-    # долг = начислено - списано, переплата = внесено - списано (аванс).
-    debt, overpayment = _account_debt_overpayment(db, account.id)
+    # Долг и переплата счёта НА НАЧАЛО периода (since=start): начисления текущего
+    # месяца уже попали в accounts_register, поэтому без фильтра «К оплате»
+    # (= сумма за месяц + долг − переплата) дублировал бы текущий месяц.
+    debt, overpayment = _account_debt_overpayment(db, account.id, since=start)
 
     total_amount = 0.0
     created_items: list[ReceiptItem] = []
@@ -243,6 +259,28 @@ def get_my_receipts(
     receipts = (
         db.query(ReceiptDocument)
         .filter(ReceiptDocument.account_id == int(account_id))
+        .order_by(ReceiptDocument.period_year.desc(), ReceiptDocument.period_month.desc(), ReceiptDocument.id.desc())
+        .all()
+    )
+    serializer = SERIALIZERS.get(ReceiptDocument)
+    return [serializer(r) for r in receipts] if serializer else []
+
+
+@router.get("/accounts/{account_id}/receipts")
+def get_account_receipts(
+    account_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Квитанции по лицевому счёту (просмотр ЛК администратором).
+
+    Админ/оператор/кассир/контролёр — любой счёт; житель — только свой
+    (та же проверка, что в отчёте по счёту `accounts/{id}/statement`).
+    """
+    _ensure_can_view_account(db, user, account_id)
+    receipts = (
+        db.query(ReceiptDocument)
+        .filter(ReceiptDocument.account_id == account_id)
         .order_by(ReceiptDocument.period_year.desc(), ReceiptDocument.period_month.desc(), ReceiptDocument.id.desc())
         .all()
     )
