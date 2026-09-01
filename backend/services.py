@@ -231,6 +231,12 @@ def build_meter_reading_document_title(reading_date: date, services_type_name: s
     return f"Показания за {month_label} {reading_date.year}{suffix}"
 
 
+def build_writeoff_document_title(writeoff_id: int, writeoff_date: date | None = None) -> str:
+    """Авто-название документа списания (роадмап 1.9): «Списание задолженностей №5 от 27.08.2026»."""
+    date_label = writeoff_date.strftime("%d.%m.%Y") if writeoff_date else ""
+    return f"Списание задолженностей №{writeoff_id}{(' от ' + date_label) if date_label else ''}".strip()
+
+
 def validate_date_not_future(value: date, label: str) -> None:
     """Проверка «дата не в будущем» (1.10 роадмапа)."""
     if value > date.today():
