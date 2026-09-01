@@ -66,7 +66,7 @@ from models import (
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc, asc, text
+from sqlalchemy import desc, asc
 
 import receipt_config as rc
 from writeoffs import (
@@ -78,6 +78,7 @@ from writeoffs import (
 )
 from permissions import require_resource_access
 from field_config import FIELD_CONFIG, MODEL_MAP, coerce_field_value
+from sorting import build_order_clause
 from serializers import SERIALIZERS, _user_serializer
 from services import (build_accrual_register_items, build_transaction_title, calculate_accrual_for_account_service, calculate_accruals_preview, create_accounts_register_entries_for_accruals, resolve_meter_reading_values, resolve_meter_reading_document_values, resolve_transaction_values, set_transaction_title, audit_document_create, audit_document_update)
 
@@ -260,104 +261,9 @@ CUSTOM_VALUE_BUILDERS: dict[str, Any] = {
     "payments": resolve_transaction_values,
 }
 
-# Сортировка по вложенным/вычисляемым полям (2.11 роадмапа): (ресурс, ключ) -> SQL-подзапрос.
-# Прямые атрибуты моделей сортируются ниже через hasattr(model, _sort); сюда попадают
-# справочные связи (аналитика, касса, услуга, квартира, собственник, счётчик, документ),
-# автор (created_by -> users) и количества записей. Имена таблиц — программные константы.
-_SORT_EXPRESSIONS: dict[tuple[str, str], str] = {
-    # --- Приход/Расход (таблица transactions; ресурсы payments и transactions) ---
-    ("transactions", "article.name"):
-        "(SELECT name FROM analytic_articles WHERE id = transactions.article_id)",
-    ("transactions", "cash_point.name"):
-        "(SELECT name FROM cash_points WHERE id = transactions.cash_point_id)",
-    ("transactions", "account.account_number"):
-        "(SELECT account_number FROM accounts WHERE id = transactions.account_id)",
-    ("transactions", "owner.full_name"):
-        "(SELECT o.full_name FROM owners o WHERE o.id = (SELECT a.owner_id FROM apartments a"
-        " WHERE a.id = (SELECT acc.apartment_id FROM accounts acc WHERE acc.id = transactions.account_id)))",
-    ("transactions", "apartment.apartment_number"):
-        "(SELECT a.apartment_number FROM apartments a"
-        " WHERE a.id = (SELECT acc.apartment_id FROM accounts acc WHERE acc.id = transactions.account_id))",
-    ("transactions", "created_by_name"):
-        "(SELECT COALESCE(full_name, username, '') FROM users WHERE id = transactions.created_by)",
-
-    # --- Квартиры ---
-    ("apartments", "owner.full_name"):
-        "(SELECT full_name FROM owners WHERE id = apartments.owner_id)",
-    ("apartments", "owner.phone"):
-        "(SELECT phone FROM owners WHERE id = apartments.owner_id)",
-
-    # --- Лицевые счета ---
-    ("accounts", "apartment.owner.full_name"):
-        "(SELECT o.full_name FROM owners o WHERE o.id = (SELECT a.owner_id FROM apartments a"
-        " WHERE a.id = accounts.apartment_id))",
-    ("accounts", "apartment.apartment_number"):
-        "(SELECT apartment_number FROM apartments WHERE id = accounts.apartment_id)",
-
-    # --- Регистр начислений ---
-    ("accruals_register", "account.account_number"):
-        "(SELECT account_number FROM accounts WHERE id = accruals_register.account_id)",
-    ("accruals_register", "services_type.services_type"):
-        "(SELECT services_type FROM services_type WHERE id = accruals_register.services_type_id)",
-
-    # --- Регистр взаиморасчётов ---
-    ("accounts_register", "account.account_number"):
-        "(SELECT account_number FROM accounts WHERE id = accounts_register.account_id)",
-    ("accounts_register", "services_type.services_type"):
-        "(SELECT services_type FROM services_type WHERE id = accounts_register.services_type_id)",
-
-    # --- Регистр денежных средств ---
-    ("cash_register", "account.account_number"):
-        "(SELECT account_number FROM accounts WHERE id = cash_register.account_id)",
-
-    # --- Показания (регистр) ---
-    ("meter_readings", "services_type.services_type"):
-        "(SELECT services_type FROM services_type WHERE id = meter_readings.services_type_id)",
-    ("meter_readings", "meter.serial_number"):
-        "(SELECT serial_number FROM meters WHERE id = meter_readings.meter_id)",
-    ("meter_readings", "document.title"):
-        "(SELECT title FROM meter_reading_documents WHERE id = meter_readings.document_id)",
-
-    # --- Показания (документы) ---
-    ("meter_reading_documents", "services_type.services_type"):
-        "(SELECT services_type FROM services_type WHERE id = meter_reading_documents.services_type_id)",
-    ("meter_reading_documents", "readings_count"):
-        "(SELECT COUNT(*) FROM meter_readings WHERE document_id = meter_reading_documents.id)",
-    ("meter_reading_documents", "created_by_name"):
-        "(SELECT COALESCE(full_name, username, '') FROM users WHERE id = meter_reading_documents.created_by)",
-
-    # --- Начисления (документы) ---
-    ("accrual_documents", "accruals_count"):
-        "(SELECT COUNT(*) FROM accruals_register WHERE accrual_document_id = accrual_documents.id)",
-    ("accrual_documents", "total_amount"):
-        "(SELECT COALESCE(SUM(amount), 0) FROM accruals_register WHERE accrual_document_id = accrual_documents.id)",
-    ("accrual_documents", "created_by_name"):
-        "(SELECT COALESCE(full_name, username, '') FROM users WHERE id = accrual_documents.created_by)",
-
-    # --- Квитанции ---
-    ("receipt_documents", "created_by_name"):
-        "(SELECT COALESCE(full_name, username, '') FROM users WHERE id = receipt_documents.created_by)",
-
-    # --- Списания ---
-    ("writeoff_documents", "created_by_name"):
-        "(SELECT COALESCE(full_name, username, '') FROM users WHERE id = writeoff_documents.created_by)",
-    ("writeoff_documents", "items_count"):
-        "(SELECT COUNT(*) FROM writeoff_items WHERE document_id = writeoff_documents.id)",
-    ("writeoff_documents", "total_allocated"):
-        "(SELECT COALESCE(SUM(allocated), 0) FROM writeoff_items WHERE document_id = writeoff_documents.id)",
-
-    # --- Тарифы ---
-    ("tariffs", "services_type.services_type"):
-        "(SELECT services_type FROM services_type WHERE id = tariffs.services_type_id)",
-    ("tariffs", "tariff_type.name"):
-        "(SELECT name FROM tariff_types WHERE id = tariffs.tariff_type_id)",
-
-    # --- Счётчики ---
-    ("meters", "apartment.apartment_number"):
-        "(SELECT apartment_number FROM apartments WHERE id = meters.apartment_id)",
-    ("meters", "services_type.services_type"):
-        "(SELECT services_type FROM services_type WHERE id = meters.services_type_id)",
-}
+# Сортировка по вложенным/вычисляемым полям (роадмап 1.5) вынесена в sorting.py: там
+# декларативно описаны пути по relationship, а коррелированные SQL-подзапросы строятся
+# автоматически (build_order_clause). Прямые атрибуты моделей сортируются через hasattr.
 
 
 # --- ЭНДПОИНТ МЕТАДАННЫХ РЕСУРСОВ ---
@@ -458,68 +364,19 @@ def get_list(
             joinedload(ReceiptDocument.items),
         )
 
-    if _sort: 
+    if _sort:
         order_func = desc if (_order or "").lower() == "desc" else asc
         # payments и transactions — одна и та же таблица; ресурс нормализуем для словаря.
         norm_resource = "transactions" if resource in ("transactions", "payments") else resource
 
-        if _sort == "document_title":
-            # document_title — расчётное поле сериализатора; сортируем по названию
-            # документа-источника через подзапросы.
-            if resource == "accruals_register":
-                query = query.order_by(
-                    order_func(
-                        text("""(SELECT ad.title FROM accrual_documents ad
-                                  WHERE ad.id = accruals_register.accrual_document_id)""")
-                    )
-                )
-            elif resource == "accounts_register":
-                query = query.order_by(
-                    order_func(
-                        text("""(
-                            COALESCE(
-                                (SELECT ad.title FROM accrual_documents ad
-                                 WHERE ad.id = (SELECT arx.accrual_document_id FROM accruals_register arx
-                                                WHERE arx.id = accounts_register.accrual_id)),
-                                (SELECT t.title FROM transactions t
-                                 WHERE t.id = accounts_register.transaction_id)
-                            )
-                        )""")
-                    )
-                )
-        else:
-            _expr = _SORT_EXPRESSIONS.get((norm_resource, _sort))
-            if _expr is not None:
-                # Вложенные/вычисляемые поля (аналитика, автор, справочники, количества) — 2.11.
-                query = query.order_by(order_func(text(_expr)))
-            elif _sort == "apartment.apartment_number":
-                # Сортировка по № квартиры. Для регистров (начислений, взаиморасчётов,
-                # денежных средств) квартира находится через лицевой счёт, для показаний — напрямую.
-                # Для счетчиков и лицевых счетов выражение задано в _SORT_EXPRESSIONS.
-                if resource in ("accruals_register", "accounts_register", "cash_register"):
-                    table = {
-                        "accruals_register": "accruals_register",
-                        "accounts_register": "accounts_register",
-                        "cash_register": "cash_register",
-                    }[resource]
-                    query = query.order_by(
-                        order_func(
-                            text("""(SELECT a.apartment_number FROM apartments a
-                                       WHERE a.id = (SELECT acc.apartment_id FROM accounts acc
-                                                     WHERE acc.id = {0}.account_id))""".format(table))
-                        )
-                    )
-                elif resource == "meter_readings":
-                    query = query.order_by(
-                        order_func(
-                            text("""(SELECT a.apartment_number FROM apartments a
-                                       WHERE a.id = meter_readings.apartment_id)""")
-                        )
-                    )
-            elif hasattr(model, _sort):
-                query = query.order_by(order_func(getattr(model, _sort)))
-            elif hasattr(model, "id"):
-                query = query.order_by(order_func(model.id))
+        # Общее решение сортировки (роадмап 1.5): build_order_clause разрешает и прямые
+        # столбцы модели, и вложенные поля через декларативные пути по relationship
+        # (авто-генерируемый подзапрос), и агрегаты/вычисляемые выражения.
+        expr = build_order_clause(norm_resource, model, _sort)
+        if expr is not None:
+            query = query.order_by(order_func(expr))
+        elif hasattr(model, "id"):
+            query = query.order_by(order_func(model.id))
 
     total_count = query.count()
     items = query.offset(_start).limit(_end - _start).all()
