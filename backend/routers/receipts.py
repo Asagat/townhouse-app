@@ -214,6 +214,11 @@ def generate_receipts(
     if month < 1 or month > 12:
         raise HTTPException(status_code=422, detail="Некорректный месяц")
 
+    # Период не может быть в будущем (роадмап 1.10).
+    today = date.today()
+    if (year, month) > (today.year, today.month):
+        raise HTTPException(status_code=422, detail="Нельзя сформировать квитанции за будущий период")
+
     accounts = db.query(Account).filter(Account.is_active == True).all()
     created = []
     for account in accounts:

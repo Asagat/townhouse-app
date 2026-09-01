@@ -237,6 +237,31 @@ def test_write_offs_idempotent(db, account_factory):
     assert float(balance) == 400.0  # положительный = долг, по целевой конвенции
 
 
+def test_writeoff_document_gets_autotitle(db, account_factory):
+    """Документ «Списание задолженностей» получает авто-название (роадмап 1.9):
+    «Списание задолженностей №{id} от {дата}»."""
+    from writeoffs import create_writeoff_document
+
+    rec = account_factory("wtitle")
+    _accrual(db, rec["account_id"], 1, 1000)
+    db.commit()
+    _payment(db, rec["account_id"], rec["cash_point_id"], 600)
+
+    result = create_writeoff_document(db, [rec["account_id"]], user_id=None)
+    db.commit()
+
+    doc = result["document"]
+    assert doc.title is not None
+    assert doc.title.startswith("Списание задолженностей №")
+    assert str(doc.id) in doc.title
+
+    # Убираем созданный документ списания и его строки, чтобы фикстура account_factory
+    # могла удалить счёт (FK writeoff_items.account_id).
+    db.execute(text("DELETE FROM writeoff_items WHERE document_id = :d"), {"d": doc.id})
+    db.execute(text("DELETE FROM writeoff_documents WHERE id = :d"), {"d": doc.id})
+    db.commit()
+
+
 def test_write_offs_overpayment_stays_negative_balance(db, account_factory):
     rec = account_factory("op0")
     _accrual(db, rec["account_id"], 1, 1000)

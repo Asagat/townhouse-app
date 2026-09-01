@@ -22,6 +22,7 @@ from models import (
     WriteoffItem,
     recalculate_account_balance,
 )
+from services import build_writeoff_document_title
 
 
 def _active_account_ids(db: Session) -> list[int]:
@@ -190,6 +191,10 @@ def create_writeoff_document(
     )
     db.add(document)
     db.flush()  # получаем document.id
+
+    # Название документа генерируется автоматически (роадмап 1.9) — ввод отсутствует.
+    document.title = build_writeoff_document_title(document.id, document.writeoff_date)
+    db.add(document)
 
     processed = _distribute(db, account_ids, writeoff_id=document.id)
 
