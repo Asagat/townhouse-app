@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.orm import relationship
 
@@ -189,6 +190,13 @@ class Tariff(Base):
     price = Column(Numeric(15, 2), nullable=False)
     valid_from = Column(Date, nullable=False)
     unit = Column(String(50))
+    # Примечание/комментарий к тарифу (пояснение, от чего зависит ставка и т.п.).
+    comment = Column(String(500))
+    # Признак «разового/одноразового» сбора. Регулярные (повторяемые) тарифы
+    # участвуют в ежемесячном пересчёте начислений; разовые — только хранят
+    # историю (строки начислений ссылаются на них) и в месячный пересчёт НЕ входят
+    # (см. calculate_accrual_for_account_service).
+    is_oneoff = Column(Boolean, nullable=False, default=False, server_default=text("false"))
 
     services_type = relationship("ServiceType", back_populates="tariffs")
     tariff_type = relationship("TariffType", back_populates="tariffs")
@@ -303,6 +311,13 @@ class AccrualDocument(Base):
     # существующие строки могут хранить NULL), но приложение всегда заполняет его,
     # при отсутствии — авто-генерирует по accrual_date.
     title = Column(String(255), nullable=True)
+    # Тип документа: 'monthly' (регулярное «Начисление за …») или 'oneoff'
+    # («Разовые сборы …», «Персональное доначисление …»). Месячный (пере-)расчёт
+    # работает только с monthly; one-офф хранит историю и не редактируется месяцев.
+    doc_kind = Column(String(20), nullable=False, default="monthly",
+                      server_default=text("'monthly'"))
+    # Примечание/комментарий к документу начислений (их дописывает бухгалтер).
+    comment = Column(String(500))
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     # Аудит документа (п. 2.9).

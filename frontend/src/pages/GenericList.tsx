@@ -26,6 +26,7 @@ import { allResources } from "../config/menu";
 import { RecordFormModal } from "../components/common/RecordFormModal";
 import { BulkReadingsModal } from "../components/meter-readings/BulkReadingsModal";
 import { AccrualsCalculationModal } from "../components/accruals/AccrualsCalculationModal";
+import { OneOffAccrualsEditModal } from "../components/accruals/OneOffAccrualsEditModal";
 import { ReceiptsModal } from "../components/receipts/ReceiptsModal";
 import { ReceiptViewModal } from "../components/receipts/ReceiptViewModal";
 import { WriteOffsModal } from "../components/writeoffs/WriteOffsModal";
@@ -63,6 +64,7 @@ const sortMapping: Record<string, string> = {
     'price': 'price',
     'unit': 'unit',
     'valid_from': 'valid_from',
+    'is_oneoff': 'is_oneoff',
     'serial_number': 'serial_number',
     'installed_at': 'installed_at',
     'full_name': 'full_name',
@@ -194,6 +196,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const [editingMeterReadingDocumentId, setEditingMeterReadingDocumentId] = useState<number | undefined>(undefined);
     const [accrualsModalOpen, setAccrualsModalOpen] = useState(false);
     const [editingAccrualDocumentId, setEditingAccrualDocumentId] = useState<number | undefined>(undefined);
+    const [oneOffAccrualsOpen, setOneOffAccrualsOpen] = useState(false);
     const [receiptsModalOpen, setReceiptsModalOpen] = useState(false);
     const [receiptViewId, setReceiptViewId] = useState<number | undefined>(undefined);
     const [writeOffsModalOpen, setWriteOffsModalOpen] = useState(false);
@@ -422,6 +425,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                           }
 
                           if (isAccrualDocuments) {
+                              const isOneOff = record.doc_kind === 'oneoff';
                               return (
                                   <Space>
                                       {roleCanEdit && (
@@ -429,7 +433,11 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                           size="small"
                                           onClick={() => {
                                               setEditingAccrualDocumentId(record.id);
-                                              setAccrualsModalOpen(true);
+                                              if (isOneOff) {
+                                                  setOneOffAccrualsOpen(true);
+                                              } else {
+                                                  setAccrualsModalOpen(true);
+                                              }
                                           }}
                                       >
                                           Редактировать
@@ -716,15 +724,26 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             )}
 
             {isAccrualDocuments && (
-                <AccrualsCalculationModal
-                    open={accrualsModalOpen}
-                    documentId={editingAccrualDocumentId}
-                    onClose={() => {
-                        setAccrualsModalOpen(false);
-                        setEditingAccrualDocumentId(undefined);
-                    }}
-                    onSaved={() => tableQuery.refetch()}
-                />
+                <>
+                    <AccrualsCalculationModal
+                        open={accrualsModalOpen}
+                        documentId={editingAccrualDocumentId}
+                        onClose={() => {
+                            setAccrualsModalOpen(false);
+                            setEditingAccrualDocumentId(undefined);
+                        }}
+                        onSaved={() => tableQuery.refetch()}
+                    />
+                    <OneOffAccrualsEditModal
+                        open={oneOffAccrualsOpen}
+                        documentId={editingAccrualDocumentId}
+                        onClose={() => {
+                            setOneOffAccrualsOpen(false);
+                            setEditingAccrualDocumentId(undefined);
+                        }}
+                        onSaved={() => tableQuery.refetch()}
+                    />
+                </>
             )}
 
             {isReceiptDocuments && (

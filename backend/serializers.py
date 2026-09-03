@@ -193,6 +193,8 @@ def tariff_serializer(item: Tariff) -> dict:
         "price": float(item.price) if item.price is not None else 0.0,
         "valid_from": item.valid_from.isoformat() if item.valid_from else None,
         "unit": item.unit,
+        "is_oneoff": item.is_oneoff,
+        "comment": item.comment,
         "services_type": {"id": st.id, "services_type": st.services_type} if st else None,
         "tariff_type": {"id": tt.id, "name": tt.name} if tt else None,
     }
@@ -358,6 +360,8 @@ def accrual_document_serializer(item: AccrualDocument) -> dict:
         "id": item.id,
         "accrual_date": item.accrual_date.isoformat() if item.accrual_date else None,
         "title": item.title,
+        "doc_kind": item.doc_kind,
+        "comment": item.comment,
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "accruals_count": len(item.accruals) if item.accruals else 0,
         "total_amount": sum(float(a.amount) for a in item.accruals) if item.accruals else 0.0,

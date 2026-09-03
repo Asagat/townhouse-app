@@ -211,6 +211,8 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         {"name": "price", "label": "Цена", "type": "decimal", "required": True},
         {"name": "unit", "label": "Ед. изм.", "type": "string"},
         {"name": "valid_from", "label": "Действует с", "type": "date", "required": True},
+        {"name": "is_oneoff", "label": "Разовый сбор (не участвует в месячном пересчёте)", "type": "boolean", "required": False},
+        {"name": "comment", "label": "Примечание", "type": "text", "required": False},
     ],
     "meters": [
         {"name": "serial_number", "label": "Серийный номер", "type": "string", "required": True},
@@ -329,6 +331,8 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         {"name": "id", "label": "ID документа", "type": "integer", "required": False},
         {"name": "accrual_date", "label": "Дата начисления", "type": "date", "required": True},
         {"name": "title", "label": "Название документа", "type": "string", "required": False},
+        {"name": "comment", "label": "Примечание", "type": "text", "required": False},
+        {"name": "doc_kind", "label": "Тип", "type": "string", "required": False},
         {"name": "created_at", "label": "Дата создания", "type": "datetime", "required": False},
         {"name": "accruals_count", "label": "Количество записей", "type": "integer", "required": False},
         {"name": "total_amount", "label": "Общая сумма", "type": "decimal", "required": False},
@@ -385,6 +389,8 @@ def coerce_field_value(raw_value: Any, field: dict[str, Any]) -> Any:
         if field_type == "decimal":
             return Decimal(str(raw_value))
         if field_type == "boolean":
+            if isinstance(raw_value, str):
+                return raw_value.strip().lower() in ("1", "true", "yes", "да", "on")
             return bool(raw_value)
         if field_type == "date":
             return (

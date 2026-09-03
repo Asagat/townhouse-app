@@ -80,6 +80,7 @@ def main() -> int:
 
         doc = AccrualDocument(accrual_date=START_DATE,
                               title="Входящие остатки (старт)",
+                              doc_kind="oneoff",
                               created_by=mig.id)
         db.add(doc)
         db.flush()
