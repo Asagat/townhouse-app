@@ -26,3 +26,34 @@ debts, invoice_items, debtors, payments, payment_allocations) намеренно
 они не дублируются. Скрипты `flip_accounts_register_signs.py` и
 `migrate_old_payments_to_cash_register.py` — данные-миграции, запускаются
 однократно при необходимости.
+
+## Синтез данных из старой БД (раздел 4 роадмапа)
+
+Перенос истории из `templates/Миграция данных FTH.xlsx` (подготовлены CSV в
+`templates/clean/`) в ЧИСТУЮ схему (после `alembic upgrade head`, до seed/демо).
+
+* **Подготовка** (локально, нужен `openpyxl`):
+  `python backend/migrations/migrate_prepare_sources.py --src templates/Миграция данных FTH.xlsx --out templates/clean`
+  → `templates/clean/{apartments,meters,readings,accruals,cash,services}.csv`.
+* CSV передаю контейнеру: `docker cp templates/clean <backend>:/app/_migration_src`.
+
+Синтез — в backend-контейнере (`./backend` смонтирован в `/app`), в указанном
+порядке (не идемпотентно; выполняется на чистой БД):
+
+| # | Цель | Команда |
+|---|------|---------|
+| 1 | Справочники+метры | `python migrations/migrate_import.py --csv /app/_migration_src --stage ref,meters` |
+| 2 | Месячные Tariff | `python migrations/migrate_synthetic/tariffs.py --csv /app/_migration_src --commit` |
+| 3 | Документы показаний | `python migrations/migrate_synthetic/readings.py --csv /app/_migration_src` |
+| 4 | Документы начислений | `python migrations/migrate_synthetic/accruals.py --csv /app/_migration_src` |
+| 5 | Входящие остатки (старт) | `python migrations/migrate_synthetic/initial_balance.py --csv /app/_migration_src` |
+| 6 | Касса (Приход/Расход) | `python migrations/migrate_synthetic/cash.py --csv /app/_migration_src` |
+| 7 | Пересборка регистра | `python migrations/migrate_synthetic/rebuild.py` |
+
+Замечания:
+- `migrate_import.py`: этап ref+meters + миграционный пользователь/справочники;
+- шаг 4 начислений НЕ вносит `enter`; их добавляет шаг 5 как первичные строки
+  2017-10 (стартовое сальдо л/с);
+- шаг 6 кассы использует прямой SQL (без ORM-событий) во избежание дублей/O(n^2);
+- контрольные числа каждого шага печатаются в stdout; сверялись на этапе
+  разработки (см. итоги в роадмапе, раздел 4).
