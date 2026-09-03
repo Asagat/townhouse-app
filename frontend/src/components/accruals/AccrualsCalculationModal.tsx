@@ -61,6 +61,7 @@ export const AccrualsCalculationModal = ({
     const [pendingSelection, setPendingSelection] = useState<
         Array<{ account_id: number; services_type_id: number }> | null
     >(null);
+    const [comment, setComment] = useState<string>("");
 
     const { refetch, isFetching } = useCustom<{ rows: AccrualPreviewRow[] }>({
         url: `${apiUrl}/accruals_register/calculate`,
@@ -99,17 +100,18 @@ export const AccrualsCalculationModal = ({
         year: number;
         month: number;
         selections: Array<{ account_id: number; services_type_id: number }>;
-        document?: { id: number; title?: string | null };
+        document?: { id: number; title?: string | null; comment?: string | null };
     }>({
         url: `${apiUrl}/accrual_documents/${documentId}/details`,
         method: "get",
         queryOptions: {
             enabled: false,
             onSuccess: (response) => {
-                const { year: docYear, month: docMonth, selections } = response.data;
+                const { year: docYear, month: docMonth, selections, document } = response.data;
                 setPendingSelection(selections ?? []);
                 setYear(docYear);
                 setMonth(docMonth);
+                setComment(document?.comment ?? "");
             },
             onError: (err: any) =>
                 message.error(
@@ -126,6 +128,7 @@ export const AccrualsCalculationModal = ({
         if (isEditMode) {
             setRows([]);
             setSelectedKeys([]);
+            setComment("");
             fetchDocumentDetails();
         } else {
             const n = dayjs();
@@ -172,6 +175,7 @@ export const AccrualsCalculationModal = ({
                     values: {
                         accrual_date: `${year}-${String(month).padStart(2, "0")}-01`,
                         selections,
+                        comment: comment.trim() || null,
                     },
                 },
                 {
@@ -349,6 +353,18 @@ export const AccrualsCalculationModal = ({
                     />
                 </div>
             </Space>
+
+            {isEditMode && (
+                <div style={{ marginBottom: 12 }}>
+                    <div style={{ marginBottom: 4 }}>Примечание</div>
+                    <Input.TextArea
+                        rows={2}
+                        value={comment}
+                        onChange={(e) => setComment(e.target.value)}
+                        placeholder="Комментарий бухгалтера (необязательно)"
+                    />
+                </div>
+            )}
 
             <Table
                 rowKey="row_number"

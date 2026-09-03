@@ -110,9 +110,13 @@ def main() -> int:
         tarr_auto_created = set()  # (services_id, valid) уже созданные авто-тарифы
 
         def tariff_at(code, period: dt.date):
+            # Для обычных (reg/vary) строк — только РЕГУЛЯРНЫЕ тарифы.
+            # Разовые (is_oneoff) могут быть добавлены с той же датой и не должны
+            # перехватывать выбор «последнего действующего ≤ дате» (иначе разовая
+            # акция «протекает» в обычное начисление — см. ошибку 121000@2018-04).
             chosen = None
             for t in tarr_by_svc.get(code, []):
-                if t.valid_from <= period:
+                if t.valid_from <= period and not t.is_oneoff:
                     chosen = t
             return chosen
 
@@ -121,9 +125,10 @@ def main() -> int:
         n_row = 0
         n_auto_tariff = 0
 
-        def make_doc(title, dt_doc):
+        def make_doc(title, dt_doc, kind="monthly"):
             nonlocal n_doc
-            doc = AccrualDocument(accrual_date=dt_doc, title=title, created_by=mig.id)
+            doc = AccrualDocument(accrual_date=dt_doc, title=title,
+                                  doc_kind=kind, created_by=mig.id)
             db.add(doc)
             db.flush()
             n_doc += 1
@@ -137,16 +142,19 @@ def main() -> int:
                 return
             tariff = None
             if kind == "razov":
-                # Разовые акции: отдельный месячный тариф по цене акции (не реюз соседних).
+                # Разовые акции: отдельный месячный тариф по цене акции. Переиспользуем
+                # только уже созданный разовый (is_oneoff) тариф того же месяца/цены —
+                # обычную регулярную ставку для разовой строки не занимаем.
                 for t in tarr_by_svc.get(code, []):
-                    if t.valid_from == period and abs(t.price - amt) < decimal.Decimal("0.05"):
+                    if (t.is_oneoff and t.valid_from == period
+                            and abs(t.price - amt) < decimal.Decimal("0.05")):
                         tariff = t
                         break
                 if tariff is None:
                     if tt_fixed is None:
                         return
                     tariff = Tariff(services_type_id=svc.id, tariff_type_id=tt_fixed.id,
-                                    price=amt, valid_from=period)
+                                    price=amt, valid_from=period, is_oneoff=True)
                     db.add(tariff)
                     db.flush()
                     tarr_by_svc[code].append(tariff)
@@ -187,13 +195,13 @@ def main() -> int:
                 if mk not in docs_month:
                     docs_month[mk] = make_doc(
                         f"Разовые сборы за {MONTHS_RU[period.month - 1]} {period.year}",
-                        period)
+                        period, kind="oneoff")
                 add_row(docs_month[mk], ap_key, code, amt, period, cons, kind)
             elif kind == "manual":
                 # персональное доначисление на квартиру — отдельный документ
                 doc = make_doc(
                     f"Персональное доначисление за {MONTHS_RU[period.month - 1]} "
-                    f"{period.year} (кв {ap_key})", period)
+                    f"{period.year} (кв {ap_key})", period, kind="oneoff")
                 add_row(doc, ap_key, code, amt, period, cons, kind)
             elif kind == "enter":
                 # Входящие остатки НЕ вносим как начисление: это стартовое сальдо

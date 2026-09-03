@@ -10,13 +10,20 @@
 SQL:
   INSERT INTO transactions (...) VALUES (...) RETURNING id
   INSERT INTO cash_register (...) VALUES (...)
-для каждого прихода/расхода.
+на каждую результирующую операцию.
+
+Группировка приходов: по договорённости при миграции все жительские приходы
+(квартира/л/с) одной даты сливаются в ОДИН документ «Приход в кассу» (суммы
+складываются, комментарии-фрагменты объединяются через «; »). Сторно-проводки,
+входящее сальдо и расходы остаются отдельными документами. До группировки каждая
+строка CSV порождала отдельный документ, из-за чего на одну квартиру/дату
+создавались лишние приходы (например, 4 документа вместо 1).
 
 Идемпотентность не гарантирована (для чистой БД). При повтор половой надо
 сначала опустошить transactions/cash_register.
 
 Запуск (в контейнере backend):
-    python migrations/_import_cash.py --csv /app/_migration_src
+    python migrations/migrate_synthetic/cash.py --csv /app/_migration_src
 """
 
 from __future__ import annotations
@@ -80,8 +87,15 @@ def main() -> int:
         for acc_id, num in rows_acc:
             acc_map[str(num)] = acc_id
 
+        # ------------------------------------------------------------------
+        # Группировка приходов в один документ на квартиру/день.
+        # По соглашению при миграции: строки прихода по одной квартире (л/с) за
+        # одну дату сливаются в ОДИН документ «Приход в кассу» (суммы складыва-
+        # ются, комментарии-фрагменты объединяются). Сторно-проводки, «входящее
+        # сальдо» и расходы НЕ сливаются — они остаются отдельными документами.
+        # ------------------------------------------------------------------
         count = 0
-        n_in = n_out = n_start = 0
+        n_in = n_out = n_start = n_merged = 0
         tx_insert = text("""
             INSERT INTO transactions
               (transaction_date, account_id, cash_point_id, article_id, transaction_type,
@@ -94,26 +108,64 @@ def main() -> int:
               (operation_date, account_id, transaction_id, income, expense, balance_after)
             VALUES (:d, :acc, :txid, :income, :expense, 0)
         """)
+
+        # Каждая запись — dict-«операция»; для корректного порядка единицы групп
+        # ставятся на место первой строки группы (по аналогии со слиянием при
+        # перечислении cash_csv_rows).
+        def _acc_of(acc_raw):
+            if acc_raw and str(acc_raw).strip() not in ("", "None"):
+                key = str(acc_raw).strip().split(".")[0]
+                return acc_map.get(key) or acc_map.get(str(int(float(acc_raw))))
+            return None
+
+        records = []  # упорядоченный список операций к вставке
+        groups = {}   # (account_id, raw_date) -> индекс в records
+        n_src_rows = 0
         for r in cash_csv_rows:
+            n_src_rows += 1
             kind = r["kind"]
             amount = _dec(r["amount"])
             if amount is None:
                 continue
-            # date: преобраз входной даты (str) гггг-мм-дд
             raw_date = str(r["date"])[:10]
-            ttype = "in_cash" if kind in ("in", "start_cash") else "out_cash"
-            acc_raw = r["account"]
-            account_id = None
-            if acc_raw and str(acc_raw).strip() not in ("", "None"):
-                key = str(acc_raw).strip().split(".")[0]
-                account_id = acc_map.get(key) or acc_map.get(str(int(float(acc_raw))))
+            account_id = _acc_of(r["account"])
+            is_in = kind in ("in", "start_cash")
+            is_storno = str(r.get("is_storno") or "").strip() == "1"
+            notes = (r["comment"] or "").strip()
+            # строка resident-прихода попадает в группу (квартира + дата)
+            if kind == "in" and account_id is not None and not is_storno:
+                gkey = (account_id, raw_date)
+                if gkey not in groups:
+                    groups[gkey] = len(records)
+                    records.append({"kind": kind, "amount": amount, "raw_date": raw_date,
+                                    "account_id": account_id, "is_in": is_in, "notes": notes})
+                else:
+                    rec = records[groups[gkey]]
+                    rec["amount"] = rec["amount"] + amount
+                    n_merged += 1
+                    # объединяем разные комментарии-фрагменты (например,
+                    # разные статьи платежа за один день) через «; »
+                    if notes and notes not in rec["notes"].split("; "):
+                        if rec["notes"]:
+                            rec["notes"] += "; "
+                        rec["notes"] += notes
+                continue
+            records.append({"kind": kind, "amount": amount, "raw_date": raw_date,
+                            "account_id": account_id, "is_in": is_in, "notes": notes})
+
+        for rec in records:
+            kind = rec["kind"]
+            amount = rec["amount"]
+            raw_date = rec["raw_date"]
+            account_id = rec["account_id"]
+            is_in = rec["is_in"]
+            ttype = "in_cash" if is_in else "out_cash"
             art_id = inc_art if kind in ("in", "start_cash") else exp_art
-            notes = r["comment"] or ""
+            notes = rec["notes"]
             tid = db.execute(tx_insert, {
                 "d": raw_date, "acc": account_id, "cp": cp_id, "art": art_id,
                 "ttype": ttype, "amt": amount, "notes": notes, "mig": mig_id,
             }).scalar()
-            is_in = kind in ("in", "start_cash")
             db.execute(cr_insert, {
                 "d": raw_date, "acc": account_id, "txid": tid,
                 "income": amount if is_in else decimal.Decimal(0),
@@ -132,7 +184,8 @@ def main() -> int:
             else:
                 n_start += 1
         db.commit()
-        print(f"Касса записана (core): {count} (in={n_in}, out={n_out}, start={n_start}).")
+        print(f"Касса записана (core): {count} документов из {n_src_rows} строк CSV"
+              f" (in={n_in}, out={n_out}, start={n_start}, слито строк в общий приход={n_merged}).")
     except Exception as exc:
         db.rollback()
         print("ОШИБКА кассы:", exc)

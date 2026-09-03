@@ -343,7 +343,8 @@ def calculate_accrual_for_account_service(
 
     tariff = db.query(Tariff).filter(
         Tariff.services_type_id == service_type.id,
-        Tariff.valid_from <= period_end
+        Tariff.valid_from <= period_end,
+        Tariff.is_oneoff == False,  # noqa: E712 — в месячный пересчёт берём только регулярные
     ).order_by(Tariff.valid_from.desc()).first()
 
     if not tariff:

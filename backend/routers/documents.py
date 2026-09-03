@@ -118,6 +118,9 @@ def update_accrual_document(
     # ввод пользователя игнорируется.
     document.title = default_accrual_document_title(document.accrual_date)
 
+    if "comment" in payload:
+        document.comment = (payload.get("comment") or "").strip() or None
+
     audit_document_update(document, user.id)
     db.commit()
     db.refresh(document)
@@ -431,6 +434,13 @@ async def update_accrual_document_full(
     document = db.query(AccrualDocument).filter(AccrualDocument.id == document_id).first()
     if not document:
         raise HTTPException(status_code=404, detail="Документ не найден")
+    # Разовые/персональные документы редактируются как история — не через месячный расчёт.
+    if document.doc_kind == "oneoff":
+        raise HTTPException(
+            status_code=422,
+            detail="Это разовый/персональный документ — он недоступен для месячного пересчёта; "
+            "для правки используйте раздел разовых сборов.",
+        )
 
     accrual_date_raw = payload.get("accrual_date")
     selections = payload.get("selections") or []
@@ -454,6 +464,8 @@ async def update_accrual_document_full(
         if accrual_date_raw
         else document.accrual_date
     )
+    if "comment" in payload:
+        document.comment = (payload.get("comment") or "").strip() or None
     # Период начисления не может быть в будущем (1.10 роадмапа).
     now = date.today()
     if (accrual_date.year, accrual_date.month) > (now.year, now.month):
@@ -521,3 +533,105 @@ async def update_accrual_document_full(
         "document": accrual_document_serializer(document),
         "updated": updated_rows,
     }
+
+
+@router.put("/accrual_documents/{document_id}/amounts")
+async def update_accrual_document_amounts(
+    document_id: int,
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Правит существующие строки ДОКУМЕНТА-ОДНОРАЗОВОГО («Разовые/персональные»).
+
+    В отличие от «Начисление за месяц» (PUT .../full), здесь НЕ идёт пересчёт по
+    регулярным тарифам: разовые/персональные сборы начисляются фиксированными
+    суммами по тарифу из истории, поэтому правке доступна только СУММА строки
+    (показания/потребление не используются). Изменяемое значение переносится и в
+    реестр взаиморасчётов (accounts_register.income) с пересчётом балансов счёта.
+    """
+    document = db.query(AccrualDocument).filter(AccrualDocument.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    if document.doc_kind != "oneoff":
+        raise HTTPException(
+            status_code=422,
+            detail="Этот документ — не разовый (oneoff); для месячного начисления используйте "
+            "месячный пересчёт (PUT .../full).",
+        )
+
+    rows = payload.get("rows") or []
+    if not isinstance(rows, list) or not rows:
+        raise HTTPException(status_code=422, detail="Нет строк для изменения")
+
+    amounts: list[tuple[int, Decimal]] = []
+    for row in rows:
+        rid = row.get("id")
+        amt = row.get("amount")
+        if rid in (None, ""):
+            continue
+        try:
+            dec = Decimal(str(amt))
+        except Exception:
+            continue
+        if dec < 0:
+            raise HTTPException(status_code=422, detail="Сумма не может быть отрицательной")
+        amounts.append((int(rid), dec))
+
+    ids = [rid for rid, _ in amounts]
+    if not ids:
+        raise HTTPException(status_code=422, detail="Нет корректных строк для изменения")
+
+    items = db.query(AccrualsRegister).filter(
+        AccrualsRegister.accrual_document_id == document_id,
+        AccrualsRegister.id.in_(ids),
+    ).all()
+    if not items:
+        raise HTTPException(status_code=404, detail="Строки начислений не найдены")
+
+    amt_by_id = dict(amounts)
+    affected_accounts: set[int] = set()
+    for item in items:
+        new_amount = amt_by_id.get(item.id)
+        if new_amount is None:
+            continue
+        if item.amount == new_amount:
+            continue
+        item.amount = new_amount
+        affected_accounts.add(item.account_id)
+        # Синхронизируем реестр взаиморасчётов: у каждой строки начисления есть
+        # соответствующая income-запись (accrual_id = строке) того же amount.
+        db.execute(
+            text("UPDATE accounts_register SET income = :amt WHERE accrual_id = :rid"),
+            {"amt": new_amount, "rid": item.id},
+        )
+
+    if "comment" in payload:
+        document.comment = (payload.get("comment") or "").strip() or None
+
+    if not affected_accounts and "comment" not in payload:
+        db.rollback()
+        raise HTTPException(status_code=422, detail="Изменений нет")
+
+    audit_document_update(document, user.id)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Нарушение целостности данных: {str(exc)}")
+
+    if affected_accounts:
+        for account_id in affected_accounts:
+            recalculate_account_balance(db, account_id)
+        try:
+            auto_recalculate_writeoffs(db, list(affected_accounts))
+        except Exception:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Не удалось пересчитать списания")
+        db.commit()
+
+    db.refresh(document)
+    updated = [
+        {"id": i.id, "account_id": i.account_id, "amount": float(i.amount)} for i in items
+    ]
+    return {"document": accrual_document_serializer(document), "updated": updated}
