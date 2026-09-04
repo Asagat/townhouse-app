@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
+from permissions import require_write_access
 from models import (
     AccrualDocument,
     AccrualsRegister,
@@ -59,7 +60,7 @@ router = APIRouter(prefix="/api")
 def create_accrual_document(
     payload: dict[str, Any],
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_write_access),
 ):
     accrual_date = payload.get("accrual_date")
     if not accrual_date:
@@ -101,7 +102,7 @@ def update_accrual_document(
     document_id: int,
     payload: dict[str, Any],
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_write_access),
 ):
     document = db.query(AccrualDocument).filter(AccrualDocument.id == document_id).first()
     if not document:
@@ -130,7 +131,8 @@ def update_accrual_document(
 @router.delete("/accrual_documents/{document_id}", status_code=204)
 def delete_accrual_document(
     document_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _auth: User = Depends(require_write_access),
 ):
     document = db.query(AccrualDocument).filter(AccrualDocument.id == document_id).first()
     if not document:
@@ -163,7 +165,7 @@ def delete_accrual_document(
 def bulk_create_readings(
     payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_write_access),
 ):
     """Массовое создание показаний с документом-шапкой"""
     reading_date = payload.get("reading_date")
@@ -285,7 +287,7 @@ def update_meter_reading_document_full(
     document_id: int,
     payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_write_access),
 ):
     """
     Полностью обновляет документ показаний и пересоздаёт его строки: старые показания удаляются,
@@ -424,7 +426,7 @@ async def update_accrual_document_full(
     document_id: int,
     payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_write_access),
 ):
     """
     Полностью пересоздаёт строки регистра начислений для документа: старые строки удаляются,
@@ -540,7 +542,7 @@ async def update_accrual_document_amounts(
     document_id: int,
     payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_write_access),
 ):
     """Правит существующие строки ДОКУМЕНТА-ОДНОРАЗОВОГО («Разовые/персональные»).
 

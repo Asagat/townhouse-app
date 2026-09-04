@@ -9,6 +9,7 @@ export const ROLE_OPTIONS_LABELS: Record<string, string> = {
     cashier: "Кассир",
     controller: "Контролер",
     resident: "Житель",
+    auditor: "Аудитор",
 };
 
 // Роли, которым доступен каждый раздел меню (по ключу ресурса).
@@ -59,6 +60,9 @@ export const resourceRoles: Record<string, string[]> = {
 };
 
 export const hasResourceAccess = (role: string, key: string): boolean => {
+    // Аудитор видит все разделы (только чтение — кнопок изменений у него нет,
+    // см. can.ts), кроме «Пользователи и права» и личного кабинета жителя.
+    if (role === "auditor") return key !== "users" && key !== "cabinet";
     const allowed = resourceRoles[key];
     if (!allowed) return true; // неизвестные ресурсы показываем всем
     return allowed.includes(role);

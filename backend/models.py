@@ -41,6 +41,8 @@ class UserRole(enum.Enum):
     cashier = "Кассир"
     controller = "Контролер"
     resident = "Житель"
+    # Аудитор: просмотр всего учёта, изменения запрещены (см. permissions.py).
+    auditor = "Аудитор"
 
 
 # --- ПОЛЬЗОВАТЕЛИ ---

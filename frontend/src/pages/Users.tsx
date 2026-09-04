@@ -21,6 +21,7 @@ const ROLE_OPTIONS = [
     { value: "cashier", label: "Кассир" },
     { value: "controller", label: "Контролер" },
     { value: "resident", label: "Житель" },
+    { value: "auditor", label: "Аудитор" },
 ];
 
 const roleColor: Record<string, string> = {
@@ -29,6 +30,7 @@ const roleColor: Record<string, string> = {
     cashier: "blue",
     controller: "orange",
     resident: "default",
+    auditor: "cyan",
 };
 
 export const Users = () => {

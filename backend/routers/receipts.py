@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session, joinedload
 
 import receipt_config as rc
 from auth import get_current_user
+from permissions import require_write_access
 from models import Account, AccrualsRegister, ReceiptDocument, ReceiptItem, ServiceType, User
 from serializers import SERIALIZERS, receipt_document_serializer
 from services import FUND_SERVICE_FALLBACK, _service_name, audit_document_create
@@ -202,7 +203,7 @@ def generate_receipt_document(
 def generate_receipts(
     payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_write_access),
 ):
     """Массово формирует квитанции по всем активным лицевым счетам за период."""
     year = payload.get("year")
@@ -347,6 +348,7 @@ def get_receipt_pdf(
 def bulk_receipt_pdf(
     payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
+    _auth: User = Depends(require_write_access),
 ):
     """Массово скачивает квитанции за период одним ZIP-архивом."""
     year = payload.get("year")
@@ -388,6 +390,7 @@ def bulk_delete_receipts(
     year: int,
     month: int,
     db: Session = Depends(get_db),
+    _auth: User = Depends(require_write_access),
 ):
     """Массово удаляет квитанции за период (строки удаляются каскадно)."""
     deleted = db.query(ReceiptDocument).filter(

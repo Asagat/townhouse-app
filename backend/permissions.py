@@ -56,6 +56,9 @@ def _role_level(user: User) -> int:
 def _read_allowed(user: User, resource: str) -> bool:
     if user.role == UserRole.admin:
         return True
+    if user.role == UserRole.auditor:
+        # Аудитор видит весь учёт (включая настройки/регистры) — только чтение.
+        return True
     if user.role == UserRole.controller:
         return resource in CONTROLLER_ALLOWED
     if user.role in (UserRole.operator, UserRole.cashier):
@@ -100,6 +103,21 @@ OPERATION_WRITE_DELETE = {
     "accounts",
     "meters",
 }
+
+
+# Роли только на чтение: auditor (и resident для документов/операций).
+READONLY_ROLES = {UserRole.auditor, UserRole.resident}
+
+
+def require_write_access(user: User = Depends(get_current_user)) -> User:
+    """Зависимость для кастомных write-эндпоинтов (документы/квитанции и т.п.):
+    запрещает изменение read-only-ролям (auditor/resident), остальные роли
+    проходят как раньше (исторические проверки этих эндпоинтов сохранены)."""
+    if user.role in READONLY_ROLES:
+        raise HTTPException(
+            status_code=403, detail="Роль только для просмотра — изменения запрещены"
+        )
+    return user
 
 
 def require_resource_access(
