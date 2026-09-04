@@ -118,8 +118,11 @@ def get_current_user(
 
 
 # Иерархия ролей для «уровневого» доступа. resident самая низкая, admin — самая высокая.
+# auditor — read-only, поэтому уровень минимальный (0), чтобы иерархические проверки
+# никогда не давали ему прав на изменение.
 ROLE_LEVEL: dict[UserRole, int] = {
     UserRole.resident: 0,
+    UserRole.auditor: 0,
     UserRole.controller: 1,
     UserRole.cashier: 2,
     UserRole.operator: 3,

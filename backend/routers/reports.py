@@ -184,7 +184,7 @@ def cash_register_report(
     to_date: str | None = Query(None, description="Конец периода YYYY-MM-DD"),
     cash_point_id: int | None = Query(None, description="Фильтр по кассе"),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_roles("admin", "operator", "cashier")),
+    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
 ):
     """Отчёт по кассе: движение денег по кассам/счетам за период.
 
@@ -282,7 +282,7 @@ def expense_report(
     to_date: str | None = Query(None, description="Конец периода YYYY-MM-DD"),
     cash_point_id: int | None = Query(None, description="Фильтр по кассе"),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_roles("admin", "operator", "cashier")),
+    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
 ):
     """Отчёт по расходам: расход кассы за период (итог, по статьям, детализация)."""
     return build_expense_report(db, from_date, to_date, cash_point_id)
@@ -356,7 +356,7 @@ def build_debtors_report(db: Session, min_amount: float = 0.0) -> dict:
 @router.get("/reports/debtors")
 def debtors_report(
     db: Session = Depends(get_db),
-    _user: User = Depends(require_roles("admin", "operator", "cashier")),
+    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
 ):
     """Отчёт по должникам: активные л/с с долгом, по убыванию."""
     return build_debtors_report(db)
@@ -443,7 +443,7 @@ def statement_report(
     from_date: str | None = Query(None),
     to_date: str | None = Query(None),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_roles("admin", "operator", "cashier")),
+    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
 ):
     """Выписка по лицевому счёту: помесячно начислено/списано/остаток."""
     return build_statement_report(db, account_id, from_date, to_date)
