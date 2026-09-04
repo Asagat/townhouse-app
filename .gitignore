@@ -29,6 +29,8 @@ backend/dev_backup_*.sql
 backend/backup_*.sql
 backend/prod_backup_*.sql
 backend/prod_users_backup_*.sql
+# Снапшоты-дапмпы данных для разовых накатов (генерируются локально, из репозитория не нужны)
+backend/migrations/output/*.sql
 *.dump
 
 # OS
