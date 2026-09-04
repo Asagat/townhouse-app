@@ -327,12 +327,10 @@ docker compose up -d --build
 
 ## 8. Резервное копирование БД (дамп)
 
-Дамп PostgreSQL хранится в **корне проекта** как файл `townhouse_db.sql.gz`.
-Он содержит данные (включая чувствительные), поэтому **в git не коммитится**
-(см. `.gitignore`). Используется для переноса локальной базы на VPS и обратно,
-а также как точка восстановления.
+Дамп PostgreSQL хранится в **корне проекта** как файл `townhouse_db.sql.gz` (удобно для переноса локаль↔VPS).
+Данные (включая чувствительные) **в git не коммитятся** (см. `.gitignore`).
 
-Создать дамп (с параметрами подключения из `.env`, из корня проекта):
+Создать дамп (используется DATABASE_URL из `.env`):
 
 ```bash
 .venv/bin/python -c "from dotenv import load_dotenv;load_dotenv();import os;print(os.getenv('DATABASE_URL'))"
@@ -340,15 +338,69 @@ docker compose up -d --build
 pg_dump "$DATABASE_URL" | gzip > townhouse_db.sql.gz
 ```
 
-Восстановить из дампа (пересоздав базу):
+> Если `pg_dump`/`psql` недоступны в PATH, их можно взять из контейнера `postgres`:
+> `docker exec -i <pg-container> pg_dump -U townhouse_user -d townhouse -Fc - | cat > townhouse_db.dump`.
+> Точные значения VARS удобно считывать через `DATABASE_URL` из `.env`.
+
+### 8.1 Дамп штатного состояния (полный + роли) для переноса на другой ПК
+
+Для копии проекта на другой машине снимите **полный plain-SQL дамп данных** и отдельно **роли/пользователей**:
 
 ```bash
-gunzip < townhouse_db.sql.gz | psql "$DATABASE_URL"
+cd townhouse-app
+mkdir -p backend/backups
+STAMP=$(date +%Y%m%d_%H%M%S)
+
+# (а) полный дамп БД townhouse: схема + данные, без владельцев/привилегий
+docker exec townhouse-postgres sh -c \
+  'PGPASSWORD=... pg_dump -U townhouse_user -d townhouse --no-owner --no-privileges' \
+  > "backend/backups/townhouse_${STAMP}.sql"
+
+# (б) роли/пользователи кластера (отдельно от данных)
+docker exec townhouse-postgres sh -c \
+  'PGPASSWORD=... pg_dumpall --roles-only -U townhouse_user' \
+  > "backend/backups/townhouse_roles_${STAMP}.sql"
 ```
 
-> Если `pg_dump`/`psql` недоступны в PATH, их можно взять из контейнера `postgres`
-> (`docker exec -i <pg-container> pg_dump ...`). Точную схему/VARS удобно считывать через
-> `DATABASE_URL` из `.env`.
+На каждом ПК забираете вместе: и сам проект (`townhouse-app/`), и эти два файла.
+
+### 8.2 Восстановление БД
+
+Есть готовый скрипт: **`scripts/restore_townhouse.sh`** (параметры подключения берёт из `.env`). Убедитесь, что postgres-контейнер запущен (`docker compose ps postgres`).
+
+```bash
+# поднять сервисы (если не подняты)
+docker compose up -d postgres backend frontend
+
+# (1) восстановить данные (пример: --fresh стирает и пересоздаёт DB)
+./scripts/restore_townhouse.sh data --fresh backend/backups/townhouse_YYYYMMDD_HHMMSS.sql
+
+# (2) применить роли/пользователей (первый запуск на новом сервере / если юзер отсутствует)
+./scripts/restore_townhouse.sh roles backend/backups/townhouse_roles_YYYYMMDD_HHMMSS.sql
+#    ВАЖНО: на Docker-базе, где пользователь уже создан при старте из .env, роли можно НЕ применять,
+#    либо использовать --force, чтобы пересоздать роли из дампа.
+
+# (3) перезапустить приложение, чтобы оно подключилось к восстановленным данным
+docker restart townhouse-backend townhouse-frontend
+```
+
+Вручную то же самое (без скрипта):
+
+```bash
+# пересоздать чистую DB и залить
+PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postgres -v ON_ERROR_STOP=1 \
+  -c 'DROP DATABASE IF EXISTS townhouse' -c 'CREATE DATABASE townhouse OWNER townhouse_user'
+PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d townhouse -v ON_ERROR_STOP=1 \
+  < backend/backups/townhouse_YYYYMMDD_HHMMSS.sql
+# роли (одноразово) при необходимости
+PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postgres \
+  < backend/backups/townhouse_roles_YYYYMMDD_HHMMSS.sql
+```
+
+**Замечания:**
+- Датамп содержит схему (`CREATE TABLE`) и **не удаляет** существующие объекты — поэтому восстановление лучше делать в **свежую/пересозданную** БД (см. `--fresh`), иначе возможны конфликты существующих таблиц.
+- Перед `DROP DATABASE` остановите или отключите backend, иначе сессия удержит базу (скрипт сам гасит активные сессии).
+- Дампы `backend/backups/townhouse_*.sql` — рабочие, актуальные снимки; при желании добавьте их паттерн в `.gitignore` (данные чувствительны).
 
 ---
 
@@ -366,3 +418,4 @@ gunzip < townhouse_db.sql.gz | psql "$DATABASE_URL"
 | `./scripts/dev.sh` | Локальное развёртывание + запуск uvicorn (`--full` — pip install) |
 | `./scripts/setup_vps.sh` | Полная установка на НОВОМ VPS (пакеты, clone, .env, БД, systemd, build) |
 | `./scripts/deploy_vps.sh` | Обновление VPS (pull, alembic, справочники, админ, restart) |
+| `./scripts/restore_townhouse.sh` | Восстановление БД из дампов (см. §8.2): `data [--fresh] <файл.sql>`, `roles [--force] <файл.sql>`, `all ...` |

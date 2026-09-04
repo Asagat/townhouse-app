@@ -146,6 +146,21 @@ export const categories: Category[] = [
               label: "По кассе",
               icon: "fa-solid fa-cash-register",
             },
+            {
+              key: "expense_report",
+              label: "По расходам",
+              icon: "fa-solid fa-arrow-trend-up",
+            },
+            {
+              key: "debtors_report",
+              label: "По должникам",
+              icon: "fa-solid fa-hand-holding-dollar",
+            },
+            {
+              key: "statement_report",
+              label: "Выписка по счёту",
+              icon: "fa-solid fa-file-lines",
+            },
         ],
     },
 ];

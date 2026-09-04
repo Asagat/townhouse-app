@@ -39,6 +39,27 @@ def _available_cash(db: Session, account_id: int) -> float:
     return float(value or 0.0)
 
 
+def _cash_operation_dates(db: Session, account_id: int) -> dict[int, object]:
+    """operation_date каждой строки Регистра денежных средств (transaction_id -> дата).
+
+    Строка списания в accounts_register должна нести ДАТУ документа «Приход/Расход»,
+    который её профинансировал (а не момент пересчёта). Иначе все списания встают
+    «одним днём» на дату пересчёта, и промежуточные месячные балансы л/с раздуваются
+    (начислено растёт весь период, а оплаты гасятся только в конце). От этого ломался
+    расчёт «долга на начало периода» и «К оплате» в квитанциях.
+    """
+    rows = db.execute(
+        text("""
+            SELECT transaction_id, MIN(operation_date)
+            FROM cash_register
+            WHERE account_id = :a AND transaction_id IS NOT NULL
+            GROUP BY transaction_id
+        """),
+        {"a": account_id},
+    ).fetchall()
+    return {int(r[0]): r[1] for r in rows if r[1] is not None}
+
+
 def _cash_ledger(db: Session, account_id: int) -> list[tuple[int, float]]:
     """Упорядоченная (FIFO) история денег по счёту: пары (transaction_id, net).
 
@@ -284,6 +305,7 @@ def _distribute(
         # FIFO-очередь денег из cash_register с привязкой к документу «Приход/Расход»,
         # чтобы каждая строка списания получила transaction_id (для поля «Документ»).
         cash_queue = _cash_ledger(db, account_id)
+        op_dates_by_tx = _cash_operation_dates(db, account_id)
         available = sum(net for _, net in cash_queue)
         to_allocate = min(available, total_debt)
 
@@ -314,6 +336,10 @@ def _distribute(
                         continue
                     rounded = round(take, 2)
                     if rounded > 0:
+                        # Дата списания = дата документа «Приход/Расход», профинансировавшего
+                        # строку (а не now()): иначе месячные балансы л/с не уменьшаются
+                        # по мере поступления оплат и «раздуваются» (см. _cash_operation_dates).
+                        op = op_dates_by_tx.get(tx_id, op_date)
                         db.execute(
                             text("""
                                 INSERT INTO accounts_register
@@ -322,7 +348,7 @@ def _distribute(
                                 VALUES (:op, :a, :svc, 0, :expense, 0, :wo, :tx)
                             """),
                             {
-                                "op": op_date,
+                                "op": op,
                                 "a": account_id,
                                 "svc": svc_id,
                                 "expense": rounded,

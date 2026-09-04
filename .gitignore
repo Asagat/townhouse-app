@@ -23,6 +23,13 @@ venv~/
 # Локальный дамп обычно лежит в корне проекта как townhouse_db.sql.gz.
 *.sql.gz
 townhouse_db.sql.gz
+# Датампы-снимки со значениями (папка бэкапов + рабочие .sql-снимки в backend).
+backend/backups/
+backend/dev_backup_*.sql
+backend/backup_*.sql
+backend/prod_backup_*.sql
+backend/prod_users_backup_*.sql
+*.dump
 
 # OS
 .DS_Store
