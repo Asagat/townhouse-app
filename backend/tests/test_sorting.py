@@ -59,7 +59,7 @@ def test_nested_sort_by_owner_full_name(client, db, account_factory):
     from models import User, UserRole
     from auth import create_access_token, hash_password
     created_admin = None
-    admin = db.query(User).filter(User.role == UserRole.admin).first()
+    admin = db.query(User).filter(User.role == UserRole.admin, User.is_active == True).first()
     if admin is None:
         admin = User(username="__sort_admin", password_hash=hash_password("p"), full_name="Sort Admin", role=UserRole.admin, is_active=True)
         db.add(admin); db.commit(); db.refresh(admin)
@@ -85,16 +85,28 @@ def test_nested_sort_by_owner_full_name(client, db, account_factory):
 
 
 def test_direct_column_sort_still_works(client, db, account_factory):
-    """Прямой столбец (amount) сортируется по-прежнему."""
+    """Прямой столбец (amount) сортируется по-прежнему.
+
+    Чтобы проверка не зависела от объёма истории в БД (расчёт пагинации по первой
+    странице не гарантирует попадания наших строк в срез при больших данных),
+    сортируем НЕ по возрастанию по историческому полю, а по убыванию (amount desc)
+    и берём вершину: две свежесозданные суммы задаём заведомо ЛОКАЛЬНО-МАКСИМАЛЬНЫМИ,
+    поэтому в первой странице они гарантированно окажутся первыми и по убыванию.
+    """
     rec = account_factory("colsort")
     db.flush()
     article = db.query(AnalyticArticle).filter(AnalyticArticle.kind == AnalyticKind.income).first()
     cp = db.get(CashPoint, rec["cash_point_id"]) or db.query(CashPoint).first()
 
+    # Заведомо больше любых исторических сумм документа «Приход/Расход»;
+    # отличаются друг от друга — чтобы порядок по amount был однозначным.
+    AMT_HI = 50_000_002
+    AMT_LO = 50_000_001
+
     tx_hi = Transaction(account_id=rec["account_id"], cash_point_id=cp.id, article_id=article.id,
-                        transaction_type=TransactionTypeEnum.in_cash, amount=999)
+                        transaction_type=TransactionTypeEnum.in_cash, amount=AMT_HI)
     tx_lo = Transaction(account_id=rec["account_id"], cash_point_id=cp.id, article_id=article.id,
-                        transaction_type=TransactionTypeEnum.in_cash, amount=1)
+                        transaction_type=TransactionTypeEnum.in_cash, amount=AMT_LO)
     db.add_all([tx_hi, tx_lo])
     db.flush()
     set_transaction_title(db, tx_hi)
@@ -104,7 +116,7 @@ def test_direct_column_sort_still_works(client, db, account_factory):
     from models import User, UserRole
     from auth import create_access_token, hash_password
     created_admin = None
-    admin = db.query(User).filter(User.role == UserRole.admin).first()
+    admin = db.query(User).filter(User.role == UserRole.admin, User.is_active == True).first()
     if admin is None:
         admin = User(username="__sort_admin2", password_hash=hash_password("p"), role=UserRole.admin, is_active=True)
         db.add(admin); db.commit(); db.refresh(admin)
@@ -112,14 +124,19 @@ def test_direct_column_sort_still_works(client, db, account_factory):
     try:
         headers = {"Authorization": f"Bearer {create_access_token(admin)}"}
 
-        r = client.get("/api/transactions", params={"_sort": "amount", "_order": "asc", "_start": 0, "_end": 50}, headers=headers)
+        # Выборка по убыванию amount: вершина всегда содержит наши максимальные суммы
+        # независимо от размера таблицы.
+        r = client.get("/api/transactions", params={"_sort": "amount", "_order": "desc", "_start": 0, "_end": 5}, headers=headers)
         assert r.status_code == 200
         data = r.json()
-        ids = [row["id"] for row in data]
-        # Обе созданные суммы присутствуют и упорядочены по возрастанию (1 перед 999).
-        assert tx_lo.id in ids and tx_hi.id in ids
-        assert ids.index(tx_lo.id) < ids.index(tx_hi.id)
-        assert data[0]["amount"] <= data[-1]["amount"]
+        assert len(data) >= 2
+        # Прямой столбец amount проcортировался: вверху две наши суммы, большая первая.
+        top_amounts = [row["amount"] for row in data[:2]]
+        assert top_amounts[0] == AMT_HI
+        assert top_amounts[1] == AMT_LO
+        # Срез в целом не убывает по amount (сортировка применена серверно).
+        amounts = [row["amount"] for row in data]
+        assert amounts == sorted(amounts, reverse=True)
     finally:
         if created_admin is not None:
             db.delete(created_admin)

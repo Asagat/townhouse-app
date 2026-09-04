@@ -23,6 +23,9 @@ import { Users } from "./pages/Users";
 import { ResidentCabinet } from "./pages/ResidentCabinet";
 import { AdminCabinet } from "./pages/AdminCabinet";
 import { CashReport } from "./pages/CashReport";
+import { ExpenseReport } from "./pages/ExpenseReport";
+import { DebtorsReport } from "./pages/DebtorsReport";
+import { StatementReport } from "./pages/StatementReport";
 import { authProvider } from "./auth/authProvider";
 import { apiUrl, http } from "./auth/http";
 import { filterCategoriesByRole } from "./auth/menuAccess";
@@ -33,6 +36,9 @@ const resourceForRoute = (key: string) => {
     if (key === "cabinet") return <ResidentCabinet />;
     if (key === "cabinet_admin") return <AdminCabinet />;
     if (key === "cash_report") return <CashReport />;
+    if (key === "expense_report") return <ExpenseReport />;
+    if (key === "debtors_report") return <DebtorsReport />;
+    if (key === "statement_report") return <StatementReport />;
     return <GenericList resourceName={key} />;
 };
 
