@@ -313,15 +313,49 @@ cd frontend && npx tsc --noEmit             # проверка типов фро
 docker compose up -d --build
 ```
 
-- `backend` читает окружение из `.env` (`env_file: .env`) и подключается к вашей Postgres.
-- `frontend` — dev-сервер Vite (проксирует `/api` на бэкенд через `VITE_PROXY_TARGET`).
+- Сервисы: `postgres` (том `pgdata`), `backend`, `frontend` (dev-сервер Vite, проксирует `/api` на бэкенд через `VITE_PROXY_TARGET`), `nginx` (домашний вход, см. §7.1).
+- Окружение backend собирается из корневого `.env` через `${VAR}` (`DATABASE_URL`, `AUTH_SECRET_KEY`, `CORS_ORIGINS`); контейнеру достаточно набора `POSTGRES_*` или готового `DATABASE_URL`.
 
-**Локально (нужна БД):** в `docker-compose.yml` раскомментируйте сервис `postgres`
-(поднимет БД из `POSTGRES_*`). Тогда `docker compose up -d --build` создаст и БД, и сервисы.
-На VPS сервис `postgres` закомментирован — там Postgres внешний.
+На VPS (системный Postgres вместо контейнерного) сервис `postgres` можно отключить/удалить из compose — там БД внешняя.
 
 Для продакшена бэкенд лучше запускать через systemd-юнит (uvicorn) + nginx,
 а не dev-режимом.
+
+### 7.1 Доступ из Интернета (домашний ПК)
+
+Для домашнего ПК за роутером наружу выставляется только `nginx`-сервис (порты 80/443),
+который отдаёт production-сборку фронтенда и проксирует `/api/` на backend:
+
+```bash
+docker compose exec -T frontend npm run build   # собрать frontend/dist (SPA)
+docker compose up -d nginx
+```
+
+Конфиг — `deploy/nginx-home.conf` (server_name — ваш DDNS-домен). Каталоги
+`deploy/certs/` (сертификаты) и `deploy/certbot-webroot/` (ACME) в git не коммитятся.
+
+На роутере: **DMZ выключить** и раздать порты явными правилами (на многих роутерах
+DMZ перекрывает проброс). Пример для сети 192.168.50.0/24:
+
+| Назначение | Внешний порт | Внутр. IP | Внутр. порт |
+|---|---|---|---|
+| Портал NAS (http/https) | 80 / 443 | NAS | 80 / 443 |
+| Townhouse (HTTP) | 8090 | 192.168.50.101 | 80 |
+| Townhouse (HTTPS, см. ниже) | 9443 | NAS | 8443 |
+
+На ПК открыть порты в файрволе: `sudo firewall-cmd --permanent --add-service=http --add-service=https` (+ `--reload`).
+В `.env` в `CORS_ORIGINS` добавить внешний домен (`http(s)://домен[:порт]`).
+
+**TLS — два варианта:**
+- **Через NAS Synology (рекомендуется, если NAS уже имеет сертификат на домен):**
+  в DSM «Обратный прокси»: источник HTTPS (порт, напр. 8443) на домен → назначение
+  `http://192.168.50.101:80`. TLS терминирует NAS своим сертификатом (продление — DSM),
+  на ПК отдельный сертификат не нужен; наружу правило ведёт на NAS (напр. 9443 → NAS:8443).
+- **TLS на самом ПК (certbot):** сертификат Let's Encrypt по HTTP-01 (нужен временный
+  проброс 80 → ПК на время выпуска/продления), файлы кладутся в `deploy/certs/`
+  (`cp -L /etc/letsencrypt/live/<домен>/{fullchain,privkey}.pem`), перезапуск nginx.
+  Для автоматического продления — `certbot-renew.timer` + renew-hook, копирующий
+  сертификаты в `deploy/certs/` и делающий `nginx -s reload`.
 
 ---
 
