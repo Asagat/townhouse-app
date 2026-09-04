@@ -406,6 +406,14 @@ POST /api/accruals_register/generate
 - Фронт: страница `ResidentCabinet.tsx` (сводка + детализация по услугам + список квитанций с просмотром и PDF), раздел меню «Мой кабинет» — только роль `resident` (`menuAccess.ts` → `cabinet`).
 - Seed (`seed_17_apartments.py`) привязывает пользователя `resident` к `FTH-001` для ЛК.
 
+### Роли и права доступа
+
+Роли системы: `admin` / `operator` / `cashier` / `controller` / `resident` / `auditor` (ролевая матрица — `ROADMAP.md`).
+
+- **`auditor` («Аудитор», 09.2026)** — read-only: видит все разделы, регистры и отчёты, включая ЛК/выписку любого лицевого счёта (`GET /api/accounts/{id}/statement`, `cabinet_admin`).
+  Запись запрещена на всех эндпоинтах: generic CRUD — `permissions.py` (`_read_allowed` для чтения, запись/удаление — `False`); кастомные write-эндпоинты документов/квитанций — зависимость `require_write_access` (`routers/documents.py`, `routers/receipts.py`); настройки и генерация/пересбор регистров недоступны. Отчёты и чтение регистров разрешены (`routers/reports.py`).
+- Фронт: меню аудитора показывает все разделы, кроме «Пользователи и права» и ЛК жителя (`menuAccess.ts`); кнопки «Добавить/Изменить/Удалить» скрыты (`can.ts`).
+
 ### Запуск через nginx
 ```
 Браузер → nginx (townhouse.sagacloud.kz)
