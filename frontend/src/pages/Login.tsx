@@ -1,6 +1,6 @@
 // src/pages/Login.tsx
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Form, Input, Button, Card, Typography } from "antd";
 import { UserOutlined, LockOutlined } from "@ant-design/icons";
 import { useLogin } from "@refinedev/core";
@@ -16,8 +16,13 @@ export const Login = () => {
     const { mutateAsync: login, isLoading } = useLogin<LoginForm>();
     const navigate = useNavigate();
     const [error, setError] = useState<string | null>(null);
+    // Защита от повторной отправки (двойной клик/Enter до блокировки кнопки):
+    // пока первый запрос в полёте — игнорируем повторные submit-ы.
+    const submittingRef = useRef(false);
 
     const onFinish = async (values: LoginForm) => {
+        if (submittingRef.current) return;
+        submittingRef.current = true;
         setError(null);
         try {
             const result = await login(values);
@@ -28,6 +33,8 @@ export const Login = () => {
             }
         } catch (e: any) {
             setError(e?.message ?? "Не удалось выполнить вход");
+        } finally {
+            submittingRef.current = false;
         }
     };
 
