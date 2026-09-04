@@ -32,6 +32,7 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-townhouse_user}:${POSTGRES_PASSWORD:-orapas}@postgres:5432/${POSTGRES_DB:-townhouse}
       # Секрет JWT берём из корневого .env (AUTH_SECRET_KEY); dev-значение — только запасной вариант.
       - AUTH_SECRET_KEY=${AUTH_SECRET_KEY:-dev-only-insecure-secret-change-me}
+      - CORS_ORIGINS=${CORS_ORIGINS}
     volumes:
       - ./backend:/app:z
 
@@ -53,6 +54,23 @@ services:
     volumes:
       - ./frontend:/app:z
       - /app/node_modules
+
+  # Внешний вход (Интернет): статика production-сборки + прокси /api на backend.
+  # Снаружи открываются ТОЛЬКО порты 80/443 (не 5173/8000/5432).
+  nginx:
+    image: nginx:alpine
+    container_name: townhouse-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx-home.conf:/etc/nginx/conf.d/default.conf:ro,z
+      - ./frontend/dist:/usr/share/nginx/html:ro,z
+      - ./deploy/certs:/etc/nginx/certs:ro,z
+      - ./deploy/certbot-webroot:/var/www/certbot:z
+    depends_on:
+      - backend
 
 volumes:
   pgdata:
