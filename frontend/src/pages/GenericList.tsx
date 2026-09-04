@@ -99,6 +99,9 @@ const sortMapping: Record<string, string> = {
     'created_at': 'created_at',
     'accruals_count': 'accruals_count',
     'total_amount': 'total_amount',
+    // Документ начислений: тип (doc_kind) и примечание (comment) — прямые столбцы.
+    'doc_kind': 'doc_kind',
+    'comment': 'comment',
 
     // Поля квитанций
     'owner_name': 'owner_name',
