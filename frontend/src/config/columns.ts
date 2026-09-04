@@ -82,7 +82,7 @@ export const columnsConfig: Record<string, Column[]> = {
         {
             key: 'doc_kind',
             label: 'Тип',
-            format: (v: any) => (v === 'oneoff' ? 'Разовые/персональные' : 'Месячные'),
+            format: (v: any) => (v === 'oneoff' ? 'Разовые/персональные' : 'Регулярные'),
         },
         { key: 'comment', label: 'Примечание' },
         { key: 'accrual_date', label: 'Дата начисления', format: formatDate },
