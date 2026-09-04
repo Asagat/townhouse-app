@@ -7,7 +7,7 @@
 
   ЭТАП 1 (ref): справочники — миграционный пользователь, CashPoint,
                 AnalyticArticle(«Поступления от жителей»), ServiceType (7),
-                TariffType, Owner/Apartment/Account (из apartments.csv),
+                TariffType, Counterparty/Apartment/Account (из apartments.csv),
                 Meter (из meters.csv);
   ЭТАП 2: показания -> документы MeterReadingDocument + строки;
   ЭТАП 3: начисления -> AccrualDocument+строки (reg/vary/razov/manual/enter),
@@ -55,7 +55,7 @@ from models import (  # noqa: E402
     Meter,
     MeterReading,
     MeterReadingDocument,
-    Owner,
+    Counterparty,
     ServiceType,
     TariffType,
     User,
@@ -158,7 +158,7 @@ def stage_ref(db, path) -> dict:
     cash, income_art = ensure_system_refs(db, name_cash="Касса")
     services = ensure_services(db, path)
 
-    owners_by_name: dict[str, Owner] = {}
+    owners_by_name: dict[str, Counterparty] = {}
     apt_rows = _csv(path, "apartments")
     accounts_by_apartment_key: dict[str, Account] = {}
     for row in apt_rows:
@@ -169,7 +169,7 @@ def stage_ref(db, path) -> dict:
         if owner is None and full:
             parts = full.split()
             first = parts[1] if len(parts) > 1 else (parts[0] if parts else full)
-            owner = Owner(full_name=full, first_name=first,
+            owner = Counterparty(full_name=full, first_name=first,
                           last_name=parts[0] if parts else None,
                           middle_name=parts[2] if len(parts) > 2 else None)
             db.add(owner)

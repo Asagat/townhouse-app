@@ -52,7 +52,7 @@ from models import (
     Meter,
     MeterReading,
     MeterReadingDocument,
-    Owner,
+    Counterparty,
     ReceiptDocument,
     ReceiptItem,
     ServiceType,
@@ -326,7 +326,8 @@ def get_list(
     elif resource == "cash_register":
         query = query.options(
             joinedload(CashRegister.account).joinedload(Account.apartment),
-            joinedload(CashRegister.transaction),
+            joinedload(CashRegister.transaction).joinedload(Transaction.article),
+            joinedload(CashRegister.contractor),
         )
     elif resource == "accruals_register":
         query = query.options(
@@ -344,7 +345,9 @@ def get_list(
             joinedload(Transaction.account)
             .joinedload(Account.apartment)
             .joinedload(Apartment.owner),
-            joinedload(Transaction.cash_point)
+            joinedload(Transaction.cash_point),
+            joinedload(Transaction.article),
+            joinedload(Transaction.contractor),
         )
     elif resource == "meter_reading_documents":
         query = query.options(
@@ -416,7 +419,8 @@ async def get_resource_item(
     elif resource == "cash_register":
         item = db.query(model).options(
             joinedload(CashRegister.account).joinedload(Account.apartment),
-            joinedload(CashRegister.transaction),
+            joinedload(CashRegister.transaction).joinedload(Transaction.article),
+            joinedload(CashRegister.contractor),
         ).filter(model.id == item_id).first()
     elif resource == "accruals_register":
         item = db.query(model).options(
@@ -434,7 +438,9 @@ async def get_resource_item(
             joinedload(Transaction.account)
             .joinedload(Account.apartment)
             .joinedload(Apartment.owner),
-            joinedload(Transaction.cash_point)
+            joinedload(Transaction.cash_point),
+            joinedload(Transaction.article),
+            joinedload(Transaction.contractor),
         ).filter(model.id == item_id).first()
     elif resource == "meter_reading_documents":
         item = db.query(model).options(

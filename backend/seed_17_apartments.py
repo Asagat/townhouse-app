@@ -47,7 +47,7 @@ from models import (  # noqa: E402
     Meter,
     MeterReading,
     MeterReadingDocument,
-    Owner,
+    Counterparty,
     ServiceType,
     Transaction,
     TransactionTypeEnum,
@@ -117,9 +117,9 @@ def _owner_for_apt(idx: int) -> dict:
     }
 
 
-def _create_owner(db, idx: int) -> Owner:
+def _create_owner(db, idx: int) -> Counterparty:
     data = _owner_for_apt(idx)
-    existing = db.query(Owner).filter(Owner.phone == data["phone"]).first()
+    existing = db.query(Counterparty).filter(Counterparty.phone == data["phone"]).first()
     if existing:
         # Синхронизируем ФИО у уже существующего владельца (самовосстановление при
         # изменении списков имён/фамилий в генераторе), телефон — неизменный ключ.
@@ -131,7 +131,7 @@ def _create_owner(db, idx: int) -> Owner:
             existing.middle_name = data["middle_name"] or None
         return existing
 
-    owner = Owner(
+    owner = Counterparty(
         full_name=data["full_name"],
         first_name=data["first_name"],
         last_name=data["last_name"],
@@ -147,7 +147,7 @@ def _create_owner(db, idx: int) -> Owner:
     return owner
 
 
-def _create_apartment(db, idx: int, owner: Owner) -> Apartment:
+def _create_apartment(db, idx: int, owner: Counterparty) -> Apartment:
     apt_num = FIRST_APT_NUM + idx
     existing = db.query(Apartment).filter(Apartment.apartment_number == apt_num).first()
     if existing:
@@ -176,7 +176,7 @@ def _create_apartment(db, idx: int, owner: Owner) -> Apartment:
 
 def _cleanup_orphan_owners(db) -> None:
     """Удаляет владельцев, у которых не осталось квартир (после перепривязки)."""
-    orphans = db.query(Owner).filter(~Owner.apartments.any()).all()
+    orphans = db.query(Counterparty).filter(~Counterparty.apartments.any()).all()
     for o in orphans:
         print(f"  - удалён осиротевший владелец: {o.full_name}")
         db.delete(o)
@@ -483,7 +483,7 @@ def _reset_test_data(db) -> None:
         (Meter.__tablename__, "счётчики"),
         (Account.__tablename__, "лицевые счета"),
         (Apartment.__tablename__, "квартиры"),
-        (Owner.__tablename__, "контрагенты (владельцы)"),
+        (Counterparty.__tablename__, "контрагенты (владельцы)"),
     ]
     for table, label in order:
         db.execute(text(f"DELETE FROM \"{table}\""))

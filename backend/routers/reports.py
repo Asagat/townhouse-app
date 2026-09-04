@@ -98,11 +98,13 @@ def build_cash_register_report(
                 SELECT cr.id, cr.operation_date, cr.income, cr.expense,
                        t.title, t.id AS transaction_id,
                        a.account_number, a.account_name,
-                       aa.name AS article_name
+                       aa.name AS article_name,
+                       o.full_name AS contractor_name
                 FROM cash_register cr
                 JOIN transactions t ON t.id = cr.transaction_id
                 LEFT JOIN accounts a ON a.id = cr.account_id
                 LEFT JOIN analytic_articles aa ON aa.id = t.article_id
+                LEFT JOIN owners o ON o.id = t.contractor_id
                 WHERE {' AND '.join(where)}
                 ORDER BY cr.operation_date ASC, cr.id ASC
             """),
@@ -124,6 +126,7 @@ def build_cash_register_report(
                     "account_number": r[6],
                     "account_name": r[7],
                     "article_name": r[8],
+                    "contractor_name": r[9],
                     "income": income,
                     "expense": expense,
                     "amount": income if income else -expense,

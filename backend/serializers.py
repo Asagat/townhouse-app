@@ -18,10 +18,10 @@ from models import (
     Apartment,
     CashPoint,
     CashRegister,
+    Counterparty,
     Meter,
     MeterReading,
     MeterReadingDocument,
-    Owner,
     ReceiptDocument,
     ReceiptItem,
     ServiceType,
@@ -115,11 +115,13 @@ def transaction_serializer(item: Transaction) -> dict:
 
     result = {
         "id": item.id,
+        "doc_no": item.doc_no,
         "title": item.title,
         "transaction_date": item.transaction_date.isoformat() if item.transaction_date else None,
         "account_id": item.account_id,
         "cash_point_id": item.cash_point_id,
         "article_id": item.article_id,
+        "contractor_id": item.contractor_id,
         "transaction_type": item.transaction_type.value if hasattr(item.transaction_type, "value") else item.transaction_type,
         "amount": float(item.amount) if item.amount is not None else 0.0,
         "notes": item.notes,
@@ -179,6 +181,13 @@ def transaction_serializer(item: Transaction) -> dict:
         else None
     )
     result["article_name"] = article.name if article else None
+    result["created_at"] = item.created_at.isoformat() if item.created_at else None
+
+    contractor = item.contractor
+    result["contractor"] = (
+        {"id": contractor.id, "full_name": contractor.full_name} if contractor else None
+    )
+    result["contractor_name"] = contractor.full_name if contractor else None
 
     return result
 
@@ -225,6 +234,7 @@ def meter_reading_document_serializer(item: MeterReadingDocument) -> dict:
     return {
         "id": item.id,
         "title": item.title,
+        "comment": item.comment,
         "reading_date": item.reading_date.isoformat() if item.reading_date else None,
         "services_type_id": item.services_type_id,
         "services_type": {
@@ -296,6 +306,9 @@ def meter_reading_serializer(item: MeterReading) -> dict:
     else:
         result["document"] = None
 
+    # «Примечание» регистра показаний — наследуем из примечания документа показаний.
+    result["notes"] = document.comment if document else None
+
     return result
 
 
@@ -313,6 +326,7 @@ def accruals_register_serializer(item: AccrualsRegister) -> dict:
         "consumption": float(item.consumption) if item.consumption is not None else 0.0,
         "amount": float(item.amount) if item.amount is not None else 0.0,
         "document_title": item.accrual_document.title if item.accrual_document else None,
+        "notes": item.accrual_document.comment if item.accrual_document else None,
     }
 
     if item.account:
@@ -390,6 +404,15 @@ def accounts_register_serializer(item: AccountsRegister) -> dict:
             if item.accrual and item.accrual.accrual_document
             else (item.transaction.title if item.transaction else None)
         ),
+        "notes": (
+            item.transaction.notes
+            if item.transaction and item.transaction.notes
+            else (
+                item.accrual.accrual_document.comment
+                if item.accrual and item.accrual.accrual_document and item.accrual.accrual_document.comment
+                else None
+            )
+        ),
     }
 
     if item.account:
@@ -430,12 +453,15 @@ def cash_register_serializer(item: CashRegister) -> dict:
         "operation_date": item.operation_date.isoformat() if item.operation_date else None,
         "account_id": item.account_id,
         "transaction_id": item.transaction_id,
+        "contractor_id": item.contractor_id,
         "article_id": item.transaction.article_id if item.transaction else None,
         "income": float(item.income) if item.income is not None else 0.0,
         "expense": float(item.expense) if item.expense is not None else 0.0,
         "balance_after": float(item.balance_after) if item.balance_after is not None else 0.0,
         "document_title": item.transaction.title if item.transaction else None,
+        "doc_no": item.transaction.doc_no if item.transaction else None,
         "article_name": (item.transaction.article.name if item.transaction and item.transaction.article else None),
+        "notes": item.transaction.notes if item.transaction else None,
     }
 
     if item.account:
@@ -457,6 +483,20 @@ def cash_register_serializer(item: CashRegister) -> dict:
         if apartment
         else None
     )
+    if item.contractor:
+        result["contractor"] = {"id": item.contractor.id, "full_name": item.contractor.full_name}
+    else:
+        result["contractor"] = None
+    result["contractor_name"] = item.contractor.full_name if item.contractor else None
+    if item.transaction and item.transaction.article:
+        art = item.transaction.article
+        result["article"] = {
+            "id": art.id,
+            "name": art.name,
+            "kind": art.kind.value if hasattr(art.kind, "value") else str(art.kind),
+        }
+    else:
+        result["article"] = None
 
     return result
 
@@ -493,6 +533,7 @@ def receipt_document_serializer(item: ReceiptDocument) -> dict:
         "overpayment": float(item.overpayment) if item.overpayment is not None else 0.0,
         "payable_amount": float(item.payable_amount) if item.payable_amount is not None else 0.0,
         "issued_at": item.issued_at.isoformat() if item.issued_at else None,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
         "items_count": len(item.items) if item.items else 0,
         "created_by": item.created_by,
         "updated_by": item.updated_by,
@@ -562,7 +603,7 @@ def analytic_article_serializer(item: AnalyticArticle) -> dict:
 
 
 SERIALIZERS = {
-    Owner: make_serializer([
+    Counterparty: make_serializer([
         "full_name", "first_name", "last_name", "middle_name",
         "phone", "email", "contact_info", "is_active"
     ]),
