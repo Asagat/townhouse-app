@@ -10,6 +10,7 @@ import {
     Outlet,
     Navigate,
 } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
 import { ConfigProvider, Spin } from "antd";
 import ruRU from "antd/locale/ru_RU";
 import "dayjs/locale/ru";
@@ -29,7 +30,7 @@ import { StatementReport } from "./pages/StatementReport";
 import { authProvider } from "./auth/authProvider";
 import { apiUrl, http } from "./auth/http";
 import { filterCategoriesByRole } from "./auth/menuAccess";
-import { getIdentity } from "./auth/token";
+import { AUTH_EVENT, getIdentity } from "./auth/token";
 
 const resourceForRoute = (key: string) => {
     if (key === "users") return <Users />;
@@ -69,7 +70,17 @@ const ProtectedLayout = () => {
 
 const App = () => {
     // Ресурсы, видимые текущему пользователю (сокрытие меню/роутов по роли).
-    const role = getIdentity()?.role ?? "";
+    // Роль/ресурсы пересчитываются при входе/выходе (событие AUTH_EVENT из token.ts),
+    // иначе роль читается один раз при монтировании и после логина пользователь
+    // попадает не в свой раздел (например, житель — в «Приход/Расход» с 403).
+    const [authVersion, setAuthVersion] = useState(0);
+    useEffect(() => {
+        const onAuthChange = () => setAuthVersion((v) => v + 1);
+        window.addEventListener(AUTH_EVENT, onAuthChange);
+        return () => window.removeEventListener(AUTH_EVENT, onAuthChange);
+    }, []);
+
+    const role = useMemo(() => getIdentity()?.role ?? "", [authVersion]);
     const visibleCategories = filterCategoriesByRole(role, categories);
     const visibleItems = visibleCategories.flatMap((c) => c.items);
     const defaultResource = visibleItems[0]?.key ?? "owners";
