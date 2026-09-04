@@ -44,12 +44,15 @@ export const columnsConfig: Record<string, Column[]> = {
     ],
 
     payments: [
+        { key: 'doc_no', label: '№' },
         { key: 'title', label: 'Название' },
-        { key: 'transaction_date', label: 'Дата', format: formatDateTime },
+        { key: 'transaction_date', label: 'Дата документа', format: formatDateTime },
+        { key: 'created_at', label: 'Дата создания', format: formatDateTime },
         { key: 'cash_point.name', label: 'Касса/Счёт' },
         { key: 'apartment.apartment_number', label: '№ квартиры' },
         { key: 'account.account_number', label: 'Лицевой счёт' },
-        { key: 'article.name', label: 'Аналитика' },
+        { key: 'article.name', label: 'Статья' },
+        { key: 'contractor.full_name', label: 'Контрагент' },
         { key: 'owner.full_name', label: 'Собственник' },
         { key: 'transaction_type', label: 'Тип операции' },
         { key: 'amount', label: 'Сумма', format: formatNumber },
@@ -58,12 +61,15 @@ export const columnsConfig: Record<string, Column[]> = {
     ],
 
     transactions: [
+        { key: 'doc_no', label: '№' },
         { key: 'title', label: 'Название' },
-        { key: 'transaction_date', label: 'Дата', format: formatDateTime },
+        { key: 'transaction_date', label: 'Дата документа', format: formatDateTime },
+        { key: 'created_at', label: 'Дата создания', format: formatDateTime },
         { key: 'cash_point.name', label: 'Касса/Счёт' },
         { key: 'apartment.apartment_number', label: '№ квартиры' },
         { key: 'account.account_number', label: 'Лицевой счёт' },
-        { key: 'article.name', label: 'Аналитика' },
+        { key: 'article.name', label: 'Статья' },
+        { key: 'contractor.full_name', label: 'Контрагент' },
         { key: 'owner.full_name', label: 'Собственник' },
         { key: 'transaction_type', label: 'Тип операции' },
         { key: 'amount', label: 'Сумма', format: formatNumber },
@@ -96,6 +102,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'consumption', label: 'Потребление', format: formatNumber },
         { key: 'amount', label: 'Сумма', format: formatNumber },
         { key: 'document_title', label: 'Документ' },
+        { key: 'notes', label: 'Примечание' },
     ],
 
     accounts_register: [
@@ -107,16 +114,21 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'expense', label: 'Расход', format: formatNumber },
         { key: 'balance_after', label: 'Баланс', format: formatNumber },
         { key: 'document_title', label: 'Документ' },
+        { key: 'notes', label: 'Примечание' },
     ],
 
     cash_register: [
+        { key: 'doc_no', label: '№' },
         { key: 'apartment.apartment_number', label: '№ квартиры' },
         { key: 'account.account_number', label: 'Лицевой счёт' },
+        { key: 'article.name', label: 'Статья' },
+        { key: 'contractor.full_name', label: 'Контрагент' },
         { key: 'operation_date', label: 'Дата операции', format: formatDateTime },
         { key: 'income', label: 'Приход', format: formatNumber },
         { key: 'expense', label: 'Расход', format: formatNumber },
         { key: 'balance_after', label: 'Баланс', format: formatNumber },
         { key: 'document_title', label: 'Документ' },
+        { key: 'notes', label: 'Примечание' },
     ],
 
     services_type: [
@@ -156,10 +168,12 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'reading', label: 'Показание', format: formatNumber },
         { key: 'meter.serial_number', label: 'Счётчик' },
         { key: 'document.title', label: 'Документ' },
+        { key: 'notes', label: 'Примечание' },
     ],
 
     meter_reading_documents: [
         { key: 'title', label: 'Название' },
+        { key: 'comment', label: 'Примечание' },
         { key: 'reading_date', label: 'Дата показаний', format: formatDate },
         { key: 'services_type.services_type', label: 'Вид услуги' },
         { key: 'readings_count', label: 'Количество записей' },
@@ -171,6 +185,8 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'apartment_number', label: '№ квартиры' },
         { key: 'owner_name', label: 'Собственник' },
         { key: 'account_number', label: 'Лицевой счёт' },
+        { key: 'issued_at', label: 'Дата документа', format: formatDateTime },
+        { key: 'created_at', label: 'Дата создания', format: formatDateTime },
         { key: 'period_month', label: 'Месяц' },
         { key: 'period_year', label: 'Год' },
         { key: 'total_amount', label: 'Начислено', format: formatNumber },
@@ -186,7 +202,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'items_count', label: 'Записей' },
         { key: 'total_allocated', label: 'Распределено', format: formatNumber },
         { key: 'title', label: 'Название' },
-        { key: 'created_at', label: 'Создан', format: formatDateTime },
+        { key: 'created_at', label: 'Дата создания', format: formatDateTime },
         { key: 'created_by_name', label: 'Автор' },
     ],
 };
@@ -198,8 +214,8 @@ export const formFieldConfig: Record<string, string[]> = {
     apartments: ['apartment_number', 'address', 'square', 'owner_id'],
     accounts: ['account_number', 'account_name', 'is_active', 'apartment_id'],
     cash_points: ['name', 'is_active'],
-    payments: ['title', 'transaction_date', 'apartment_id', 'cash_point_id', 'transaction_type', 'article_id', 'amount', 'notes'],
-    transactions: ['title', 'transaction_date', 'apartment_id', 'cash_point_id', 'transaction_type', 'article_id', 'amount', 'notes'],
+    payments: ['transaction_date', 'cash_point_id', 'transaction_type', 'article_id', 'contractor_id', 'apartment_id', 'amount', 'notes'],
+    transactions: ['transaction_date', 'cash_point_id', 'transaction_type', 'article_id', 'contractor_id', 'apartment_id', 'amount', 'notes'],
     accruals_register: ['accrual_date', 'account_id', 'services_type_id', 'past_reading_value', 'current_reading_value', 'consumption', 'amount'],
     accounts_register: ['account_id', 'services_type_id', 'income', 'expense', 'balance_after'],
     services_type: ['services_type', 'priority'],

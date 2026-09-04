@@ -28,7 +28,7 @@ from models import (  # noqa: E402
     Account,
     Apartment,
     CashPoint,
-    Owner,
+    Counterparty,
     Transaction,
     TransactionTypeEnum,
     User,
@@ -118,7 +118,7 @@ def account_factory(db):
     created: list[dict] = []
 
     def _make(marker: str):
-        own = Owner(full_name=f"{marker} T", first_name=marker, last_name="O")
+        own = Counterparty(full_name=f"{marker} T", first_name=marker, last_name="O")
         db.add(own)
         db.flush()
         apt = Apartment(

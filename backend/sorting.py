@@ -32,6 +32,7 @@ from models import User
 SORT_FIELDS: dict[tuple[str, str], dict] = {
     # --- Приход/Расход (таблица transactions; ресурсы payments и transactions) ---
     ("transactions", "article.name"): {"path": ["article"], "col": "name"},
+    ("transactions", "contractor.full_name"): {"path": ["contractor"], "col": "full_name"},
     ("transactions", "cash_point.name"): {"path": ["cash_point"], "col": "name"},
     ("transactions", "account.account_number"): {"path": ["account"], "col": "account_number"},
     ("transactions", "owner.full_name"): {"path": ["account", "apartment", "owner"], "col": "full_name"},
@@ -52,6 +53,7 @@ SORT_FIELDS: dict[tuple[str, str], dict] = {
     ("accruals_register", "services_type.services_type"): {"path": ["services_type"], "col": "services_type"},
     ("accruals_register", "apartment.apartment_number"): {"path": ["account", "apartment"], "col": "apartment_number"},
     ("accruals_register", "document_title"): {"path": ["accrual_document"], "col": "title"},
+    ("accruals_register", "notes"): {"path": ["accrual_document"], "col": "comment"},
 
     # --- Регистр взаиморасчётов ---
     ("accounts_register", "account.account_number"): {"path": ["account"], "col": "account_number"},
@@ -64,16 +66,22 @@ SORT_FIELDS: dict[tuple[str, str], dict] = {
             {"path": ["transaction"], "col": "title"},
         ]
     },
-
-    # --- Регистр денежных средств ---
+    ("accounts_register", "notes"): {
+        "coalesce": [
+            {"path": ["accrual", "accrual_document"], "col": "comment"},
+            {"path": ["transaction"], "col": "notes"},
+        ]
+    },
     ("cash_register", "account.account_number"): {"path": ["account"], "col": "account_number"},
     ("cash_register", "apartment.apartment_number"): {"path": ["account", "apartment"], "col": "apartment_number"},
+    ("cash_register", "notes"): {"path": ["transaction"], "col": "notes"},
 
     # --- Показания (регистр) ---
     ("meter_readings", "services_type.services_type"): {"path": ["services_type"], "col": "services_type"},
     ("meter_readings", "meter.serial_number"): {"path": ["meter"], "col": "serial_number"},
     ("meter_readings", "document.title"): {"path": ["document"], "col": "title"},
     ("meter_readings", "apartment.apartment_number"): {"path": ["apartment"], "col": "apartment_number"},
+    ("meter_readings", "notes"): {"path": ["document"], "col": "comment"},
 
     # --- Показания (документы) ---
     ("meter_reading_documents", "services_type.services_type"): {"path": ["services_type"], "col": "services_type"},

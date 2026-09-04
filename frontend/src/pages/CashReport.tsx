@@ -27,6 +27,7 @@ interface MovementRow {
     account_number: string | null;
     account_name: string | null;
     article_name: string | null;
+    contractor_name: string | null;
     income: number;
     expense: number;
     amount: number;
@@ -102,7 +103,8 @@ export const CashReport = () => {
         { title: "Документ", dataIndex: "document_title", key: "document_title" },
         { title: "Касса", dataIndex: "cash_point_name", key: "cash_point_name" },
         { title: "Лицевой счёт", dataIndex: "account_number", key: "account_number", render: (v: string | null) => v ?? "—" },
-        { title: "Аналитика", dataIndex: "article_name", key: "article_name", render: (v: string | null) => v ?? "—" },
+        { title: "Статья", dataIndex: "article_name", key: "article_name", render: (v: string | null) => v ?? "—" },
+        { title: "Контрагент", dataIndex: "contractor_name", key: "contractor_name", render: (v: string | null) => v ?? "—" },
         { title: "Приход", dataIndex: "income", key: "income", align: "right" as const, render: (v: number) => fmt(v) },
         { title: "Расход", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => fmt(v) },
     ];

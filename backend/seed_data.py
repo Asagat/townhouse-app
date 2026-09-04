@@ -6,7 +6,7 @@ from models import (
     Apartment,
     CashPoint,
     Meter,
-    Owner,
+    Counterparty,
     ServiceType,
     Transaction,
     TransactionTypeEnum,
@@ -17,7 +17,7 @@ def seed():
     db = SessionLocal()
     try:
         # 1. Создаем Владельца
-        owner = Owner(
+        owner = Counterparty(
             full_name="Arman Sagat",
             first_name="Arman",
             last_name="Sagat",

@@ -60,23 +60,26 @@ _DEFAULT_TARIFFS = [
     ("Обслуживание ТП", "По площади", 10.00),
 ]
 
-# Дефолтные статьи аналитики (доходы/расходы ТСН/КСК на коммунальный дом).
+# Эталонный справочник «Статьи доходов и расходов» (для документа «Приход/Расход»).
+# Доходы / Расходы — по решению владельца (сент. 2026), эталон для миграции.
 _ANALYTIC_ARTICLES = [
+    # --- Доходы ---
     ("Поступления от жителей", AnalyticKind.income),
-    ("Субсидии и дотации", AnalyticKind.income),
+    ("Возвраты от контрагентов", AnalyticKind.income),
     ("Прочие доходы", AnalyticKind.income),
+    # --- Расходы ---
     ("Электроэнергия", AnalyticKind.expense),
-    ("Холодная вода", AnalyticKind.expense),
-    ("Охрана", AnalyticKind.expense),
-    ("Обслуживание ТП", AnalyticKind.expense),
-    ("Текущий ремонт и обслуживание", AnalyticKind.expense),
+    ("Водоснабжение", AnalyticKind.expense),
+    ("Вывоз мусора и утилизация", AnalyticKind.expense),
     ("Заработная плата персонала", AnalyticKind.expense),
-    ("Налоги на ФОТ", AnalyticKind.expense),
-    ("Банковские услуги и комиссии", AnalyticKind.expense),
-    ("Офисные и хозяйственные расходы", AnalyticKind.expense),
-    ("Связь и интернет", AnalyticKind.expense),
-    ("Материалы и запчасти", AnalyticKind.expense),
+    ("Обслуживание инженерных систем", AnalyticKind.expense),
+    ("Благоустройство территории", AnalyticKind.expense),
+    ("Безопасность и проверки", AnalyticKind.expense),
+    ("Материалы и инвентарь", AnalyticKind.expense),
+    ("Возвраты жителям", AnalyticKind.expense),
     ("Прочие расходы", AnalyticKind.expense),
+    # Отдельный тип: входящее сальдо/сторно, не доход и не расход.
+    ("Входящий остаток", AnalyticKind.opening),
 ]
 
 

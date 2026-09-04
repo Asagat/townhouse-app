@@ -32,6 +32,7 @@ class TransactionTypeEnum(enum.Enum):
 class AnalyticKind(enum.Enum):
     income = "Доход"
     expense = "Расход"
+    opening = "Входящий остаток"
 
 
 class UserRole(enum.Enum):
@@ -69,8 +70,8 @@ class User(Base):
 # --- СПРАВОЧНИКИ ---
 
 
-class Owner(Base):
-    __tablename__ = "owners"
+class Counterparty(Base):
+    __tablename__ = "counterparties"
     id = Column(Integer, primary_key=True, autoincrement=True)
     full_name = Column(String(255), nullable=False)
     first_name = Column(String(255), nullable=False)
@@ -90,13 +91,13 @@ class Owner(Base):
 class Apartment(Base):
     __tablename__ = "apartments"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    owner_id = Column(Integer, ForeignKey("owners.id", ondelete="RESTRICT"))
+    owner_id = Column(Integer, ForeignKey("counterparties.id", ondelete="RESTRICT"))
     apartment_number = Column(Integer, nullable=False, unique=True)
     address = Column(String(255), nullable=False)
     square = Column(Numeric(10, 2), default=0)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
-    owner = relationship("Owner", back_populates="apartments")
+    owner = relationship("Counterparty", back_populates="apartments")
     accounts = relationship(
         "Account", back_populates="apartment", passive_deletes=True
     )
@@ -231,6 +232,9 @@ class MeterReadingDocument(Base):
     services_type_id = Column(
         Integer, ForeignKey("services_type.id", ondelete="RESTRICT"), nullable=False
     )
+    # Примечание к документу показаний (заполняется пользователем); наследуется
+    # строками «Регистра показаний» как «Примечание».
+    comment = Column(String(500))
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
@@ -273,11 +277,22 @@ class MeterReading(Base):
 class Transaction(Base):
     __tablename__ = "transactions"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    # Сквозной номер документа по хронологии (не совпадает с id). Заполняется при
+    # импорте/создании документа; может быть NULL до назначения.
+    doc_no = Column(Integer, nullable=True)
     transaction_date = Column(TIMESTAMP, server_default=func.now())
+    # Дата создания документа (момент внесения записи) — отдельно от transaction_date,
+    # который является «датой документа» (может быть установлена в прошлое).
+    created_at = Column(TIMESTAMP, server_default=func.now())
     account_id = Column(Integer, ForeignKey("accounts.id", ondelete="RESTRICT"))
     cash_point_id = Column(Integer, ForeignKey("cash_points.id", ondelete="RESTRICT"))
     article_id = Column(
         Integer, ForeignKey("analytic_articles.id", ondelete="SET NULL"), nullable=True
+    )
+    # Контрагент, связанный с денежной операцией (из справочника «Контрагенты»=
+    # owners). Необязательно: операции без конкретного контрагента хранят NULL.
+    contractor_id = Column(
+        Integer, ForeignKey("counterparties.id", ondelete="RESTRICT"), nullable=True
     )
     transaction_type = Column(Enum(TransactionTypeEnum), nullable=False)
     amount = Column(Numeric(15, 2), nullable=False)
@@ -295,6 +310,7 @@ class Transaction(Base):
     account = relationship("Account", back_populates="transactions")
     cash_point = relationship("CashPoint", back_populates="transactions")
     article = relationship("AnalyticArticle", back_populates="transactions")
+    contractor = relationship("Counterparty", foreign_keys=[contractor_id])
     accounts_register = relationship("AccountsRegister", back_populates="transaction", passive_deletes=True)
     cash_register = relationship("CashRegister", back_populates="transaction", passive_deletes=True)
     creator = relationship("User", foreign_keys=[created_by], lazy="joined")
@@ -466,6 +482,12 @@ class CashRegister(Base):
     transaction_id = Column(
         Integer, ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False
     )
+    # Контрагент, связанный с операцией (зеркало из шапки «Приход/Расход»),
+    # чтобы регистр фильтровался/отчитывался по «Контрагенту» без JOIN и без
+    # потери при редактировании шапки (см. событие update_cash_register_entry).
+    contractor_id = Column(
+        Integer, ForeignKey("counterparties.id", ondelete="RESTRICT"), nullable=True
+    )
 
     income = Column(Numeric(15, 2), default=0)
     expense = Column(Numeric(15, 2), default=0)
@@ -473,6 +495,7 @@ class CashRegister(Base):
 
     account = relationship("Account", back_populates="cash_register")
     transaction = relationship("Transaction", back_populates="cash_register")
+    contractor = relationship("Counterparty", foreign_keys=[contractor_id])
 
 
 # --- ОБРАБОТЧИКИ ---
@@ -551,12 +574,13 @@ def insert_cash_register_entry(connection, target) -> None:
     """Создаёт запись cash_register для вставленной транзакции («Приход/Расход»)."""
     income, expense = transaction_income_expense(target)
     connection.execute(
-        text("INSERT INTO cash_register (operation_date, account_id, transaction_id, income, expense, balance_after) "
-             "VALUES (:operation_date, :account_id, :transaction_id, :income, :expense, :balance_after)"),
+        text("INSERT INTO cash_register (operation_date, account_id, transaction_id, contractor_id, income, expense, balance_after) "
+             "VALUES (:operation_date, :account_id, :transaction_id, :contractor_id, :income, :expense, :balance_after)"),
         {
             "operation_date": target.transaction_date or datetime.now(),
             "account_id": target.account_id,
             "transaction_id": target.id,
+            "contractor_id": target.contractor_id,
             "income": income,
             "expense": expense,
             # значение пересчитается ниже по всей истории аккаунта
@@ -569,11 +593,12 @@ def update_cash_register_entry(connection, target) -> None:
     """Обновляет содержимое записи cash_register для изменённой транзакции."""
     income, expense = transaction_income_expense(target)
     connection.execute(
-        text("UPDATE cash_register SET operation_date = :operation_date, income = :income, expense = :expense "
+        text("UPDATE cash_register SET operation_date = :operation_date, contractor_id = :contractor_id, income = :income, expense = :expense "
              "WHERE transaction_id = :transaction_id"),
         {
             "operation_date": target.transaction_date or datetime.now(),
             "transaction_id": target.id,
+            "contractor_id": target.contractor_id,
             "income": income,
             "expense": expense,
         }
@@ -635,6 +660,9 @@ class ReceiptDocument(Base):
     payable_amount = Column(Numeric(15, 2), default=0)    # к оплате = total + debt - overpayment
 
     issued_at = Column(TIMESTAMP, server_default=func.now())
+    # Дата создания записи о квитанции (момент внесения в БД), отдельно от `issued_at`
+    # (момент выставления квитанции), чтобы даты документа и создания были различимы.
+    created_at = Column(TIMESTAMP, server_default=func.now())
 
     # Аудит документа (п. 2.9).
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

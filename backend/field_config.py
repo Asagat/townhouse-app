@@ -25,7 +25,7 @@ from models import (
     Meter,
     MeterReading,
     MeterReadingDocument,
-    Owner,
+    Counterparty,
     ReceiptDocument,
     ReceiptItem,
     ServiceType,
@@ -39,7 +39,7 @@ from models import (
 
 
 MODEL_MAP = {
-    "owners": Owner,
+    "owners": Counterparty,
     "apartments": Apartment,
     "accounts": Account,
     "cash_points": CashPoint,
@@ -132,9 +132,16 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         },
         {
             "name": "article_id",
-            "label": "Аналитика",
+            "label": "Статья",
             "type": "reference",
             "reference": "analytic_articles",
+            "required": True,
+        },
+        {
+            "name": "contractor_id",
+            "label": "Контрагент",
+            "type": "reference",
+            "reference": "owners",
             "required": True,
         },
         {
@@ -166,9 +173,16 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         },
         {
             "name": "article_id",
-            "label": "Аналитика",
+            "label": "Статья",
             "type": "reference",
             "reference": "analytic_articles",
+            "required": True,
+        },
+        {
+            "name": "contractor_id",
+            "label": "Контрагент",
+            "type": "reference",
+            "reference": "owners",
             "required": True,
         },
         {
@@ -272,6 +286,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "reference": "services_type",
             "required": True,
         },
+        {"name": "comment", "label": "Примечание", "type": "text", "required": False},
         {"name": "readings_count", "label": "Количество записей", "type": "integer", "required": False},
         {"name": "created_at", "label": "Дата создания", "type": "datetime", "required": False},
     ],
