@@ -753,7 +753,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         onOpenChange={(open) => setFiltersOpen(open)}
                         placement="bottomRight"
                         content={
-                            <div style={{ width: 320 }}>
+                            <div style={{ width: 540 }}>
                                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: "#666" }}>
                                     Фильтры
                                 </div>
@@ -770,7 +770,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                                     marginBottom: 8,
                                                 }}
                                             >
-                                                <div style={{ width: 130, flexShrink: 0, fontSize: 13 }}>
+                                                <div style={{ width: 170, flexShrink: 0, fontSize: 13 }}>
                                                     {col.label}
                                                 </div>
                                                 <div style={{ flex: 1 }}>
