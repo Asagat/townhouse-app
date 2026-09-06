@@ -22,6 +22,24 @@
 
 ## 📁 Структура папок и файлов
 
+### Корневая директория репозитория
+
+```
+townhouse-app/
+├── frontend/src/       # SPA (React + Refine) — см. ниже
+├── backend/            # FastAPI + SQLAlchemy + Alembic (модели, роутеры, тесты)
+├── scripts/            # dev.sh, setup_vps.sh, deploy_vps.sh, restore_townhouse.sh, …
+├── deploy/             # nginx-конфиги (VPS/дом), systemd-юнит townhouse-backend
+├── templates/          # файлы-источники миграции данных (Миграция данных FTH.xlsx)
+├── .github/            # CI/CD — GitHub Actions
+│   ├── workflows/
+│   │   ├── ci.yml               # pytest на disposable PostgreSQL 16 + frontend build (push/PR в main)
+│   │   ├── docker-build.yml     # сборка образов backend/frontend в ghcr.io (main / тег v*)
+│   │   └── deploy.yml           # выкат на staging/production (вручную или по тегу v*)
+│   └── actions/deploy/          # composite action: SSH-деплой с гейтом «зелёный CI»
+└── docker-compose.yml  # локальный стек: postgres/backend/frontend/nginx
+```
+
 ### Корневая директория: `src/`
 
 ```
@@ -380,6 +398,7 @@ POST /api/accruals_register/generate
 - Универсальные CRUD-эндпоинты `GET/POST/PATCH/DELETE /api/{resource}` через `MODEL_MAP` / `SERIALIZERS` / `FIELD_CONFIG`
 - `GET /api/meta/{resource}` — метаданные полей для динамической формы на фронте
 - Кастомные билдеры значений (`CUSTOM_VALUE_BUILDERS`): для `transactions`/`payments` и `meter_readings` сервер сам подбирает лицевой счёт/счётчик по квартире и виду услуги
+- Ресурс `meters` (2.7): при создании/изменении generic CRUD валидирует, что у выбранного «Вида услуги» тип тарифа «По счетчику» (`validate_meter_service_type` из `services.py` → 422); сериализатор `services_type` отдаёт признак `has_meter_tariff`, по нему фронт фильтрует «Вид услуги» в форме «Счетчики»
 - Документы «Приход/Расход» (`transactions`/`payments`) имеют поле `title` — название формируется автоматически по формуле «Тип операции + №(ID) + дата операции» (например, «Приход в кассу №17 от 24.08.2026») в момент создания и пересчитывается при изменении типа/даты операции
 - `POST /api/meter_readings/bulk` — создаёт `MeterReadingDocument` и набор `MeterReading` за один запрос, автоподбор счётчика по квартире/виду услуги
 - `GET /api/meter_reading_documents/{id}/readings` — детализация показаний конкретного документа
@@ -394,7 +413,7 @@ POST /api/accruals_register/generate
 
 Регистры показывают название документа-источника (`document_title`): в `accruals_register` — название документа начислений (`accrual_document.title`); в `accounts_register` — название начисления либо название документа «Приход/Расход» (`transaction.title`), в зависимости от того, что создало запись.
 
-**Квитанции** (`receipt_documents` + `receipt_items`): формируются массово по всем активным лицевым счетам за период из строк начислений. Документ-шапка хранит реквизиты плательщика и итоги (начислено / долг / переплата / к оплате), строки — услуги с показаниями, тарифом и суммой. Текущий баланс счёта (долг или переплата) «садится» на строку «Фонд развития» (ID 7); если её нет в начислениях — добавляется отдельно. PDF генерируется на лету через `reportlab` (эндпоинт `GET /api/receipt_documents/{id}/pdf`, вёрстка в стиле образца «Квитанция.pdf» со столбцом «Переплата»).
+**Квитанции** (`receipt_documents` + `receipt_items`): формируются массово по всем активным лицевым счетам за период из строк начислений. Документ-шапка хранит реквизиты плательщика и итоги (начислено / долг / переплата / к оплате), строки — услуги с показаниями, тарифом и суммой. Текущий баланс счёта (долг или переплата) «садится» на строку «Фонд развития» (услуга определяется по имени; если её нет в начислениях — добавляется отдельно). PDF генерируется на лету через `reportlab` (эндпоинт `GET /api/receipt_documents/{id}/pdf`, вёрстка в стиле образца «Квитанция.pdf» со столбцом «Переплата»).
 
 Протокол списков совместим с `@refinedev/simple-rest`: параметры `_start/_end/_sort/_order`, ответ — JSON-массив с заголовком `X-Total-Count`.
 
@@ -631,7 +650,7 @@ npm install
 
 ---
 
-*Последнее обновление: Август 2026*
+*Последнее обновление: Сентябрь 2026*
 
 ---
 
@@ -680,3 +699,9 @@ npm install
 | Сентябрь 2026 | **Роль «Аудитор» (read-only)** — новая роль `auditor` (models.UserRole; БД-миграция не нужна — `users.role` VARCHAR): просмотр всех разделов/регистров/отчётов и ЛК/выписки любого счёта; запись запрещена (generic CRUD — `permissions._read_allowed`; кастомные write-эндпоинты документов/квитанций — `require_write_access` в `routers/documents.py`/`receipts.py`; спец-операции регистров/настроек недоступны). Фронт: меню аудитора — все разделы кроме «Пользователи и права» и ЛК жителя (`menuAccess.ts`), кнопки изменений скрыты (`can.ts`); роль добавлена в UI пользователей (`Users.tsx`). Создан пользователь `audit`. |
 | Сентябрь 2026 | **Доступ из Интернета (домашний ПК)** — в `docker-compose.yml` добавлен сервис `nginx` (80/443): статика production-сборки `frontend/dist` + прокси `/api/` на backend (конфиг `deploy/nginx-home.conf`); `CORS_ORIGINS` пробрасывается в backend из корневого `.env`. Внешний вход: роутер (DMZ off, правила проброса портов) — либо обратный прокси NAS Synology DSM (HTTPS, сертификат DSM) на `http://192.168.50.101:80`. Каталоги сертификатов/ACME (`deploy/certs/`, `deploy/certbot-webroot/`) — в `.gitignore`. |
 | Сентябрь 2026 | **Пользователи и ЛК (фиксы)** — заведены сотрудники `operator`/`cashier`/`controller` и жители `fth001…fth017` (привязка к ЛС, `full_name` = ФИО собственника); исправлен вход в ЛК жителя (пересчёт ролей/ресурсов по событию `townhouse:auth-change`), форма входа защищена от двойной отправки; бэкапы БД обновлены (`backend/backups/townhouse_20260904_230601.sql` + roles). |
+| Сентябрь 2026 | **CI/CD (п. 3.3 роадмапа)** — добавлены `.github/workflows/ci.yml` (backend: disposable `postgres:16` → `alembic upgrade head` → `init_data.py` → `pytest`; frontend: `npm ci` → `npm run build`), `.github/workflows/docker-build.yml` (публикация образов в `ghcr.io/asagat/townhouse-app-{backend,frontend}`: push в main → тег `main`, тег `v*` → semver), `.github/workflows/deploy.yml` + `.github/actions/deploy` (выкат `scripts/deploy_vps.sh <ref>` по релизному тегу или вручную на staging/production; деплой только при зелёном CI для коммита). `scripts/deploy_vps.sh`: аргумент ветка/тег/SHA + пересборка фронтенда при каждом деплое (раньше статика nginx не обновлялась). Тест сверки с файлом-источником (`test_control_sums_vs_source.py`) пропускается на пустой БД (disposable-БД CI). Документация: DEPLOY.md §10, ROADMAP 3.3/ТД-3. |
+| Сентябрь 2026 | **Роадмап: новые заявки владельца** — зафиксированы задачи 2.13–2.17 (отдельное хранение настроек пользователя; разделение «Приходы/Расходы» на ПКО/РКО/платёжное поручение/поступление на счёт; поле «Тип» = Счёт/Касса в «Кассы/Счета»; экспорт всех отчётов в PDF; сортировка столбца только по возр./убыв.); раздел «Что осталось сделать» (ввод CI/CD в строй: секреты/окружения/required checks — DEPLOY.md §10). |
+| Сентябрь 2026 | **«Тип тарифа» и «Ед. изм.» перенесены с тарифа на вид услуги** — одна привязка на услугу (`services_type.tariff_type_id` NOT NULL FK, `services_type.unit`), наследуется всеми тарифами; колонки `tariffs.tariff_type_id`/`tariffs.unit` удалены (миграции `0012_service_tariff_type`, `0013_service_unit` с бэкафиллом из регулярных тарифов). Мотив: ошибочный тип на часто вводимом тарифе ломал начисление. Расчёт начислений и валидация счётчиков читают тип услуги (`services.calculate_accrual_*`, `service_supports_meter`), `has_meter_tariff` = тип услуги «По счетчику»; сериализаторы услуги/тарифа/`accruals_register` отдают наследуемые тип и ед. изм.; поле «Тип тарифа»/«Ед. изм.» в форме «Виды услуг», из «Тарифов» убраны; сортировка тарифов по этим полям — через вид услуги (`sorting.py`). Контроль: начисление 08.2026 не изменилось (100 строк / 614 680 ₸ до/после), pytest 42 passed. |
+| Сентябрь 2026 | **Развёртывание: HTTP-only + зеркальная синхронизация ПК** — внешний nginx домашнего ПК переведён на HTTP (:80), HTTPS-сертификат/ACME удалены (HTTPS — опционально через NAS Synology). DEPLOY §7.2–7.5: схемы ПК «corsus» (docker-стек) и «snowflake» (нативный), симметричный режим «разработка по очереди» с передачей дампов через Synology Drive; скрипты `scripts/dump_to_sync.sh` (выгрузка дампа + маркер), `scripts/refresh_from_backups.sh` (импорт свежих дампов из `DB_MIRROR_BACKUPS`), `scripts/update_db_after_pull.sh` + git-hook `post-merge` (автоимпорт после pull), `scripts/install_pre_push_hook.sh` + hook `pre-push` (автодамп перед push); у `restore_townhouse.sh` флаг `--yes` для неинтерактивной автоматизации. |
+| Сентябрь 2026 | **Чистка «Видов услуг» (по решению владельца)** — удалён дубль «Электричество» (`backend/migrations/dedupe_electricity_service.py`, каноническая — «Электроэнергия»); услуга «Прочие расходы» удалена, её 30 исторических начислений (206 520 ₸: парковка/освещение, проверка газа) переведены на «Фонд развития» с разовыми тарифами 6000/7560 ₸ (`move_prochie_rashody_to_fond.py` + `fix_fond_oneoff_tariffs_for_prochie.py`): пересборка `accounts_register`, перегенерация квитанций, контрольные суммы по квартирам/итогам не изменились (60 008 492,00). В `init_data.py` из услуг по умолчанию убраны «Электричество»/«Холодная вода». Итог: в справочнике 6 услуг. |
+| Сентябрь 2026 | **Контрольные суммы регистров vs файл-источник** — `backend/tests/test_control_sums_vs_source.py`: начисления (по квартирам/итог/кол-во) и касса (расход; приход по квартире нетто сторно; приход итог + входящее сальдо) сверяются с `templates/Миграция данных FTH.xlsx`; `openpyxl` добавлен в `backend/requirements.txt`; требует файл-источник/пакет (`MIGRATION_SRC_XLSX`), иначе тест пропускается (на пустой БД CI — тоже skip). |
