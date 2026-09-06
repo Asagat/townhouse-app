@@ -1,11 +1,12 @@
 // frontend/src/pages/StatementReport.tsx
-// Выписка по лицевому счёту: помесячно начислено/списано/остаток.
+// Выписка по лицевому счёту: помесячно начислено/списано/остаток (с фильтром по периоду и PDF).
 
 import { useCallback, useState } from "react";
-import { Card, Table, Spin, Alert, Select, Button, Space, Typography, Statistic, Row, Col } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
+import { Card, Table, Spin, Alert, Select, Button, Space, Typography, Statistic, Row, Col, DatePicker } from "antd";
+import { FilePdfOutlined, ReloadOutlined } from "@ant-design/icons";
+import dayjs from "dayjs";
 import { useList } from "@refinedev/core";
-import { authedFetch, apiUrl } from "../auth/http";
+import { authedFetch, apiUrl, openAuthorizedPdf } from "../auth/http";
 
 interface MonthlyRow { period: string; accrued: number; paid: number; closing: number; }
 interface StmtData {
@@ -24,6 +25,14 @@ const fmt = (v: number | null | undefined): string => {
 };
 const periodLabel = (p: string) => { const [y, m] = p.split("-"); return `${m}.${y}`; };
 
+const buildQuery = (id: number | undefined, fromDate?: string, toDate?: string) => {
+    if (!id) return "";
+    const p = new URLSearchParams({ account_id: String(id) });
+    if (fromDate) p.set("from_date", fromDate);
+    if (toDate) p.set("to_date", toDate);
+    return p.toString();
+};
+
 export const StatementReport = () => {
     const [accountId, setAccountId] = useState<number | undefined>(undefined);
     const { data: accountsData } = useList({ resource: "accounts", pagination: { mode: "off" } });
@@ -31,11 +40,13 @@ export const StatementReport = () => {
     const [data, setData] = useState<StmtData | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [fromDate, setFromDate] = useState<string | undefined>(undefined);
+    const [toDate, setToDate] = useState<string | undefined>(undefined);
 
-    const load = useCallback((id?: number) => {
+    const load = useCallback((id?: number, f?: string, t?: string) => {
         if (!id) { setData(null); return; }
         setLoading(true); setError(null);
-        authedFetch(`${apiUrl}/reports/statement?account_id=${id}`)
+        authedFetch(`${apiUrl}/reports/statement?${buildQuery(id, f, t)}`)
             .then(async (r) => {
                 if (!r.ok) { let d = "Не удалось загрузить выписку"; try { d = (await r.json())?.detail ?? d; } catch {} throw new Error(d); }
                 return r.json();
@@ -45,7 +56,17 @@ export const StatementReport = () => {
             .finally(() => setLoading(false));
     }, []);
 
-    const handleSelect = (id?: number) => { setAccountId(id); load(id); };
+    const handleSelect = (id?: number) => { setAccountId(id); setData(null); load(id, fromDate, toDate); };
+
+    const handleGenerate = () => load(accountId, fromDate, toDate);
+
+    const handlePdf = () => {
+        if (!accountId) return;
+        openAuthorizedPdf(
+            `${apiUrl}/reports/statement/pdf?${buildQuery(accountId, fromDate, toDate)}`,
+            `statement_${accountId}.pdf`,
+        );
+    };
 
     const cols = [
         { title: "Период", dataIndex: "period", key: "period", render: (v: string) => periodLabel(v) },
@@ -70,8 +91,24 @@ export const StatementReport = () => {
                         onChange={handleSelect}
                         options={accountOptions}
                     />
-                    <Button type="primary" icon={<ReloadOutlined />} onClick={() => load(accountId)} disabled={loading || !accountId}>
+                    <DatePicker.RangePicker
+                        allowEmpty={[true, true]}
+                        format="DD.MM.YYYY"
+                        value={
+                            fromDate || toDate
+                                ? [fromDate ? dayjs(fromDate) : null, toDate ? dayjs(toDate) : null]
+                                : undefined
+                        }
+                        onChange={(dates) => {
+                            setFromDate(dates?.[0]?.format("YYYY-MM-DD"));
+                            setToDate(dates?.[1]?.format("YYYY-MM-DD"));
+                        }}
+                    />
+                    <Button type="primary" icon={<ReloadOutlined />} onClick={handleGenerate} disabled={loading || !accountId}>
                         Сформировать
+                    </Button>
+                    <Button icon={<FilePdfOutlined />} onClick={handlePdf} disabled={!accountId || loading}>
+                        PDF
                     </Button>
                 </Space>
             </Card>

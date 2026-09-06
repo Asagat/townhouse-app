@@ -1,14 +1,16 @@
 // frontend/src/components/cabinet/CabinetView.tsx
-// Общий блок «Личный кабинет»: сводка по лицевому счёту, детализация по услугам
-// и список квитанций (просмотр/PDF). Используется:
-//   - в ЛК жителя (pages/ResidentCabinet) — данные по своему счёту;
-//   - в просмотре администратора (pages/AdminCabinet) — по выбранному счёту.
+// Общий блок «Личный кабинет»: сводка по лицевому счёту, детализация по услугам,
+// движения по счёту и список квитанций (просмотр/PDF). Используется:
+//   - в ЛК жителя (pages/ResidentCabinet) — данные по своему счёту (mode='me');
+//   - в просмотре администратора (pages/AdminCabinet) — по выбранному счёту (mode='account').
 
-import { useState } from "react";
-import { Button, Card, Space, Table, Typography } from "antd";
+import { useEffect, useState } from "react";
+import { Button, Card, Col, DatePicker, Row, Space, Statistic, Table, Typography } from "antd";
 import { EyeOutlined, FilePdfOutlined } from "@ant-design/icons";
+import dayjs from "dayjs";
 import { ReceiptViewModal } from "../receipts/ReceiptViewModal";
-import { openAuthorizedPdf } from "../../auth/http";
+import { authedFetch, openAuthorizedPdf } from "../../auth/http";
+import { formatPhone } from "../../config/formatters";
 
 export interface StatementMetrics {
     accrued_total: number;
@@ -45,6 +47,23 @@ export interface ReceiptRow {
     payable_amount: number;
 }
 
+export interface MovementRow {
+    date: string | null;
+    kind: string;
+    kind_label: string;
+    service: string;
+    amount: number;
+    balance_after: number;
+    document: string | null;
+}
+
+export interface MovementMetrics {
+    accrued: number;
+    paid: number;
+    available: number;
+    debt: number;
+}
+
 const MONTH_NAMES = [
     "январь", "февраль", "март", "апрель", "май", "июнь",
     "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
@@ -65,21 +84,89 @@ const periodLabel = (receipt: ReceiptRow): string => {
     return `${cap} ${receipt.period_year}`;
 };
 
+const fmtDate = (iso?: string | null): string => {
+    if (!iso) return "—";
+    const s = String(iso);
+    return s.length >= 10 ? `${s.slice(8, 10)}.${s.slice(5, 7)}.${s.slice(0, 4)}` : s;
+};
+
+const fmtSigned = (v: number): string => {
+    const num = Number(v ?? 0);
+    return (num >= 0 ? "+" : "−") + fmt(Math.abs(num));
+};
+
 export const CabinetView = ({
     statement,
     receipts,
     apiUrl,
     userLabel,
     receiptsTitle = "Мои квитанции",
+    mode = "me",
 }: {
     statement: StatementData | null;
     receipts: ReceiptRow[];
     apiUrl: string;
     userLabel?: string;
     receiptsTitle?: string;
+    /** me — данные «моего» счёта (эндпоинты /me), account — по выбранному счёту. */
+    mode?: "me" | "account";
 }) => {
     const [viewId, setViewId] = useState<number | undefined>(undefined);
     const m = statement?.metrics;
+    const accountId = statement?.account?.id;
+
+    // --- Движения по счёту (2.3 + Б15): период + таблица + PDF выписки. ---
+    const [movements, setMovements] = useState<MovementRow[]>([]);
+    const [movementMetrics, setMovementMetrics] = useState<MovementMetrics | null>(null);
+    const [movementsLoading, setMovementsLoading] = useState(false);
+    const [fromDate, setFromDate] = useState<string | undefined>(undefined);
+    const [toDate, setToDate] = useState<string | undefined>(undefined);
+
+    const movementBase =
+        mode === "me" ? `${apiUrl}/me/movements` : `${apiUrl}/accounts/${accountId}/movements`;
+    const pdfBase =
+        mode === "me" ? `${apiUrl}/me/statement/pdf` : `${apiUrl}/accounts/${accountId}/statement/pdf`;
+
+    const rangeParams = () => {
+        const p = new URLSearchParams();
+        if (fromDate) p.set("from_date", fromDate);
+        if (toDate) p.set("to_date", toDate);
+        return p.toString();
+    };
+
+    useEffect(() => {
+        if (!accountId) {
+            setMovements([]);
+            setMovementMetrics(null);
+            return;
+        }
+        let cancelled = false;
+        setMovementsLoading(true);
+        const q = rangeParams();
+        authedFetch(q ? `${movementBase}?${q}` : movementBase)
+            .then(async (r) => {
+                if (!r.ok) return { movements: [] as MovementRow[] };
+                return r.json();
+            })
+            .then((d: any) => {
+                if (!cancelled) {
+                    setMovements((d?.movements ?? []) as MovementRow[]);
+                    setMovementMetrics((d?.metrics ?? null) as MovementMetrics | null);
+                }
+            })
+            .finally(() => {
+                if (!cancelled) setMovementsLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [accountId, apiUrl, mode, fromDate, toDate]);
+
+    const handlePdf = () => {
+        const q = rangeParams();
+        openAuthorizedPdf(q ? `${pdfBase}?${q}` : pdfBase, `statement_${accountId}.pdf`);
+    };
 
     const receiptCols = [
         { title: "Период", dataIndex: "period", key: "period", render: (_: unknown, r: ReceiptRow) => periodLabel(r) },
@@ -123,7 +210,7 @@ export const CabinetView = ({
                             </Typography.Text>
                         )}
                         {statement.owner && (
-                            <Typography.Text>{`Собственник: ${statement.owner.full_name} (${statement.owner.phone})`}</Typography.Text>
+                            <Typography.Text>{`Собственник: ${statement.owner.full_name}, ${formatPhone(statement.owner.phone)}`}</Typography.Text>
                         )}
                     </Space>
                     <Table
@@ -161,6 +248,97 @@ export const CabinetView = ({
                             { title: "Списано", dataIndex: "paid", key: "paid", align: "right", render: (v: number) => fmt(v) },
                             { title: "Долг", dataIndex: "debt", key: "debt", align: "right", render: (v: number) => fmt(v) },
                         ]}
+                    />
+                </Card>
+            )}
+
+            {statement && accountId !== undefined && (
+                <Card
+                    title="Движения по счёту"
+                    style={{ marginBottom: 16 }}
+                    extra={
+                        <Space wrap>
+                            <DatePicker.RangePicker
+                                allowEmpty={[true, true]}
+                                format="DD.MM.YYYY"
+                                value={
+                                    fromDate || toDate
+                                        ? [
+                                              fromDate ? dayjs(fromDate) : null,
+                                              toDate ? dayjs(toDate) : null,
+                                          ]
+                                        : undefined
+                                }
+                                onChange={(dates) => {
+                                    setFromDate(dates?.[0]?.format("YYYY-MM-DD"));
+                                    setToDate(dates?.[1]?.format("YYYY-MM-DD"));
+                                }}
+                            />
+                            <Button icon={<FilePdfOutlined />} disabled={!accountId} onClick={handlePdf}>
+                                Выписка PDF
+                            </Button>
+                        </Space>
+                    }
+                >
+                    {movementMetrics && (
+                        <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
+                            <Col span={6}>
+                                <Card size="small"><Statistic title="Начислено" value={movementMetrics.accrued} precision={2} valueStyle={{ fontSize: 15 }} /></Card>
+                            </Col>
+                            <Col span={6}>
+                                <Card size="small"><Statistic title="Внесено на счёт" value={movementMetrics.available} precision={2} valueStyle={{ fontSize: 15 }} /></Card>
+                            </Col>
+                            <Col span={6}>
+                                <Card size="small"><Statistic title="Списано" value={movementMetrics.paid} precision={2} valueStyle={{ fontSize: 15 }} /></Card>
+                            </Col>
+                            <Col span={6}>
+                                <Card size="small"><Statistic title="Долг" value={movementMetrics.debt} precision={2} valueStyle={{ fontSize: 15, color: movementMetrics.debt > 0 ? "#cf1322" : "#3f8600" }} /></Card>
+                            </Col>
+                        </Row>
+                    )}
+                    <Table<MovementRow>
+                        rowKey={(r, i) => `${r.date ?? ""}-${r.kind}-${i}`}
+                        size="small"
+                        loading={movementsLoading}
+                        dataSource={movements}
+                        pagination={{ pageSize: 20, showSizeChanger: true }}
+                        scroll={{ y: 420 }}
+                        columns={[
+                            { title: "Дата", dataIndex: "date", key: "date", width: 90, render: (v: string | null) => fmtDate(v) },
+                            { title: "Вид", dataIndex: "kind_label", key: "kind_label", width: 110 },
+                            { title: "Услуга", dataIndex: "service", key: "service" },
+                            {
+                                title: "Основание",
+                                dataIndex: "document",
+                                key: "document",
+                                render: (v: string | null) => v ?? "—",
+                            },
+                            {
+                                title: "Сумма",
+                                dataIndex: "amount",
+                                key: "amount",
+                                align: "right" as const,
+                                width: 110,
+                                render: (v: number, r: MovementRow) => (
+                                    <Typography.Text
+                                        style={{
+                                            color: r.amount > 0 ? "#cf1322" : r.amount < 0 ? "#3f8600" : undefined,
+                                        }}
+                                    >
+                                        {fmtSigned(r.amount)}
+                                    </Typography.Text>
+                                ),
+                            },
+                            {
+                                title: "Баланс после",
+                                dataIndex: "balance_after",
+                                key: "balance_after",
+                                align: "right" as const,
+                                width: 110,
+                                render: (v: number) => fmt(v),
+                            },
+                        ]}
+                        locale={{ emptyText: "Движений за выбранный период нет" }}
                     />
                 </Card>
             )}

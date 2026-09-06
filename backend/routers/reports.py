@@ -10,6 +10,7 @@
 фактическим учётом (без пересчёта среза).
 """
 
+import io
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -17,9 +18,11 @@ from typing import Any
 from auth import require_roles
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+import statement_pdf as spdf
 from models import User
 
 
@@ -447,3 +450,34 @@ def statement_report(
 ):
     """Выписка по лицевому счёту: помесячно начислено/списано/остаток."""
     return build_statement_report(db, account_id, from_date, to_date)
+
+
+@router.get("/reports/statement/pdf")
+def statement_report_pdf(
+    account_id: int = Query(..., description="ID лицевого счёта"),
+    from_date: str | None = Query(None),
+    to_date: str | None = Query(None),
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
+):
+    """PDF выписки по лицевому счёту (помесячно) за период."""
+    data = build_statement_report(db, account_id, from_date, to_date)
+    period_label = _period_label(from_date, to_date)
+    pdf = spdf.build_monthly_pdf(data["account"], data["monthly"], data["closing"],
+                                 period_label=period_label)
+    filename = f"statement_{account_id}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
+    )
+
+
+def _period_label(from_date: str | None, to_date: str | None) -> str:
+    if from_date and to_date:
+        return f"с {from_date[8:10]}.{from_date[5:7]}.{from_date[:4]} по {to_date[8:10]}.{to_date[5:7]}.{to_date[:4]}"
+    if from_date:
+        return f"с {from_date[8:10]}.{from_date[5:7]}.{from_date[:4]}"
+    if to_date:
+        return f"по {to_date[8:10]}.{to_date[5:7]}.{to_date[:4]}"
+    return "за всё время"

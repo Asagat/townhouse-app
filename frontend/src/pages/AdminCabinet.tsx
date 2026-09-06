@@ -115,6 +115,7 @@ export const AdminCabinet = () => {
                     statement={statement}
                     receipts={receipts}
                     apiUrl={apiUrl}
+                    mode="account"
                     receiptsTitle="Квитанции жителя"
                     userLabel={selectedAccount ? selectedAccount.label : undefined}
                 />

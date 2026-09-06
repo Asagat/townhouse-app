@@ -1,7 +1,7 @@
 // src/config/columns.ts
 
 import type { Column, FieldMeta } from '../types';
-import { formatDate, formatDateTime, formatNumber, formatBool, formatPeriod, formatMonth, formatMoney } from './formatters';
+import { formatDate, formatDateTime, formatNumber, formatBool, formatPeriod, formatMonth, formatMoney, formatPhone } from './formatters';
 
 /**
  * Базовые колонки по умолчанию, если для ресурса не задана своя конфигурация
@@ -16,12 +16,17 @@ export const defaultColumns: Column[] = [
  * Используем вложенные поля (apartment.number, owner.full_name и т.д.)
  */
 export const columnsConfig: Record<string, Column[]> = {
+    owners: [
+        { key: 'full_name', label: 'ФИО' },
+        { key: 'phone', label: 'Телефон', format: formatPhone },
+    ],
+
     apartments: [
         { key: 'apartment_number', label: '№ квартиры' },
         { key: 'address', label: 'Адрес' },
         { key: 'square', label: 'Площадь, м²', format: formatNumber },
         { key: 'owner.full_name', label: 'Собственник' },
-        { key: 'owner.phone', label: 'Телефон собственника' },
+        { key: 'owner.phone', label: 'Телефон собственника', format: formatPhone },
     ],
 
     accounts: [
