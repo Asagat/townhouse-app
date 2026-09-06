@@ -107,6 +107,9 @@ const App = () => {
                         headerColor: "#0f4d38",
                         headerSortHoverBg: "#e3f3e6",
                         headerSortActiveBg: "#d9f2df",
+                        // Выделенная запись — тем же светло-зелёным, что и активный заголовок.
+                        rowSelectedBg: "#d9f2df",
+                        rowSelectedHoverBg: "#d9f2df",
                     },
                 },
             }}
