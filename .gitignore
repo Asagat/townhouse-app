@@ -50,9 +50,6 @@ backend/migrations/output/*.sql
 /templates/Учет_коммунальных_be.accdb
 
 /templates/*
-# Но отслеживаем ФАЙЛЫ ДАННЫХ переноса (актуальная история + будущие месячные
-# выгрузки „Миграция данных …“, чтобы довносить август/сентябрь и далее):
-!/templates/Миграция данных FTH.xlsx
-!/templates/Миграция данных FTH.ods
-!/templates/Миграция данных FTH*.xlsx
-!/templates/Миграция данных FTH*.ods
+# Файлы данных переноса („Миграция данных FTH*.xlsx/.ods“) с 09.2026 в git НЕ хранятся:
+# синхронизируются между ПК напрямую через Synology Drive (см. DEPLOY.md §7.3-7.4).
+# Тест сверки (backend/tests/test_control_sums_vs_source.py) сам пропускается, если файла нет.
