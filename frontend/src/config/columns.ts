@@ -1,7 +1,7 @@
 // src/config/columns.ts
 
 import type { Column, FieldMeta } from '../types';
-import { formatDate, formatDateTime, formatNumber, formatBool } from './formatters';
+import { formatDate, formatDateTime, formatNumber, formatBool, formatPeriod } from './formatters';
 
 /**
  * Базовые колонки по умолчанию, если для ресурса не задана своя конфигурация
@@ -85,7 +85,7 @@ export const columnsConfig: Record<string, Column[]> = {
             format: (v: any) => (v === 'oneoff' ? 'Разовые/персональные' : 'Регулярные'),
         },
         { key: 'comment', label: 'Примечание' },
-        { key: 'accrual_date', label: 'Дата начисления', format: formatDate },
+        { key: 'accrual_date', label: 'Период', format: formatPeriod },
         { key: 'accruals_count', label: 'Количество записей' },
         { key: 'total_amount', label: 'Общая сумма', format: formatNumber },
         { key: 'created_at', label: 'Дата создания', format: formatDateTime },
@@ -96,7 +96,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'apartment.apartment_number', label: '№ квартиры' },
         { key: 'account.account_number', label: 'Лицевой счёт' },
         { key: 'services_type.services_type', label: 'Вид услуги' },
-        { key: 'accrual_date', label: 'Дата начисления', format: formatDate },
+        { key: 'accrual_date', label: 'Период', format: formatPeriod },
         { key: 'past_reading_value', label: 'Показание прошлое', format: formatNumber },
         { key: 'current_reading_value', label: 'Показание текущее', format: formatNumber },
         { key: 'consumption', label: 'Потребление', format: formatNumber },

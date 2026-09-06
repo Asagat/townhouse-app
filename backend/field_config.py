@@ -299,7 +299,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         {"name": "created_at", "label": "Дата создания", "type": "datetime", "required": False},
     ],
     "accruals_register": [
-        {"name": "accrual_date", "label": "Дата начисления", "type": "date", "required": True},
+        {"name": "accrual_date", "label": "Период", "type": "date", "required": True},
         {
             "name": "account_id",
             "label": "Лицевой счёт",
@@ -352,7 +352,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
     ],
     "accrual_documents": [
         {"name": "id", "label": "ID документа", "type": "integer", "required": False},
-        {"name": "accrual_date", "label": "Дата начисления", "type": "date", "required": True},
+        {"name": "accrual_date", "label": "Период", "type": "date", "required": True},
         {"name": "title", "label": "Название документа", "type": "string", "required": False},
         {"name": "comment", "label": "Примечание", "type": "text", "required": False},
         {"name": "doc_kind", "label": "Тип", "type": "string", "required": False},

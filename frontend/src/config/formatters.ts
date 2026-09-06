@@ -44,3 +44,29 @@ export const formatBool = (v: any): string =>
  */
 export const formatPrice = (v: any): string =>
     v != null ? `${Number(v).toLocaleString('ru-RU')} ₸` : '—';
+
+/** Названия месяцев (именительный падеж, как в «Январь, 2025 г.»). */
+const MONTH_NAMES = [
+    'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+    'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
+];
+
+/**
+ * Форматирует дату-период в «Январь, 2025 г.»
+ * (без сдвига по часовому поясу: дата вида YYYY-MM-DD разбирается по компонентам).
+ */
+export const formatPeriod = (v: any): string => {
+    if (v == null || v === '') return '—';
+    const s = String(v);
+    const m = s.match(/^(\d{4})-(\d{2})/);
+    if (m) {
+        const month = parseInt(m[2], 10);
+        const year = parseInt(m[1], 10);
+        if (month >= 1 && month <= 12) {
+            return `${MONTH_NAMES[month - 1]}, ${year} г.`;
+        }
+    }
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return '—';
+    return `${MONTH_NAMES[d.getMonth()]}, ${d.getFullYear()} г.`;
+};
