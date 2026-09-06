@@ -819,3 +819,66 @@ CI оставался зелёным.
 - Тесты в CI идут против **отдельной disposable-БД** (`postgres:16`), никак не
   связанной с живыми данными (см. `conftest.py`: автоочистка тестовых сущностей;
   задачу ТД-3 роадмапа).
+
+### 10.6 Статус настройки на GitHub (09.2026) — памятка, с чего продолжить
+
+> **Где будут тестовый (`staging`) и продовый (`production`) серверы — решение
+> отложено.** Этот раздел фиксирует, что уже сделано и что вернуть, когда серверы
+> появятся. Управление — через `gh` (авторизован как `Asagat`).
+
+**Уже сделано:**
+
+- Окружения `staging` и `production` созданы (`PUT /repos/…/environments/…`).
+- Секрет **`SSH_KEY`** (deploy-ключ) положен в оба окружения;
+  локальный ключ — `~/.ssh/townhouse_deploy` (+ `.pub`), приватный в GitHub не светится.
+- **Branch protection** для `main`: required checks `Backend · pytest на PostgreSQL 16`
+  и `Frontend · npm ci + build (tsc + vite)`; force-push и удаление ветки запрещены;
+  `enforce_admins=false` (прямые пуши в main остаются возможны).
+- CI на main зелёный (workflows `ci.yml`/`docker-build.yml` отрабатывают на push).
+
+**Публичный ключ (добавить в `~/.ssh/authorized_keys` пользователя на каждом
+целевом сервере, под которым идёт деплой — обычно `root`):**
+
+```bash
+ssh root@<SSH-адрес-сервера> 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMNHRYk8Amdddm7wLVSRUlnui8wtFSMoLu6nbRbDNIIg github-actions-deploy" >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
+```
+
+**Чего не хватает (вернуться сюда, когда определишься с серверами):**
+
+1. Решить, **где** будут `staging` и `production` (варианты ниже) и **как туда
+   доставлять код**;
+2. Положить секреты **`SSH_HOST`** и **`SSH_USER`** (+ при необходимости `APP_DIR`)
+   в соответствующие окружения;
+3. (опц.) включить required reviewers для `production`;
+4. Прогнать первый деплой из Actions (Actions → *Deploy* → Run workflow).
+
+> ⚠️ Пока секреты `SSH_HOST`/`SSH_USER` не заданы, workflow *Deploy* запускать не
+> нужно: job'ы `staging`/`production` упадут на пустом хосте. На тег `v*` деплой
+> триггерится автоматически — до появления серверов релизные теги не создавать.
+
+**Варианты размещения (кандидаты):**
+
+- **corsus (домашний ПК, docker-стек)** — уже отдаёт приложение через
+  `https://sagacloud.synology.me:9443` и содержит полную историю для сверки данных;
+  подходит как `staging`. НО: за роутером, без публичного SSH — для деплоя из GitHub
+  нужен **self-hosted runner** на corsus (см. ниже) либо проброс порта 22 наружу.
+- **snowflake (нативный dev)** — рабочая машина, обновляется `git pull` + хуки;
+  в автодеплой не включать.
+- **Новый сервер (VPS/ПК) по §3** — нативный (venv + systemd): для него подходит
+  текущий SSH-вариант деплоя «как есть» (рабочий `scripts/deploy_vps.sh`).
+
+**Способ доставки — два варианта:**
+
+*Вариант 1 — GitHub-hosted runner + SSH (текущий `deploy.yml`).*
+Требует доступности порта 22 с серверов GitHub (публичный IP / проброс). Подходит
+для обычного VPS; для домашних ПК — только с пробросом порта наружу.
+
+*Вариант 2 — self-hosted runner на corsus (для `staging`), без открытых портов.*
+
+1. На corsus: GitHub → Settings → Actions → **Runners** → *New self-hosted runner*
+   → Linux x64 → выполнить команды `./config.sh …` и `./run.sh`;
+2. Поставить runner службой: `./svc.sh install` и `./svc.sh start`;
+3. Доработать workflow: job `staging` выполняется на self-hosted runner и делает
+   `git pull` → `docker compose up -d --build backend frontend nginx` (БД не трогаем),
+   CI-проверки остаются на `ubuntu-latest` (на self-hosted runner их не гонять);
+4. `production` — по Варианту 1 на будущий сервер.

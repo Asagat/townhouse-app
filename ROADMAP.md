@@ -4,13 +4,18 @@
 
 ## Что осталось сделать (ввод CI/CD в строй; код готов — нужна настройка GitHub и сервера)
 
-> По задаче 3.3: каркас уже в репозитории, осталась разовая настройка (пошагово — DEPLOY.md §10).
+> По задаче 3.3: каркас в репозитории, GitHub-часть выполнена частично (09.2026):
+> окружения `staging`/`production` созданы, секрет `SSH_KEY` добавлен, branch protection
+> с required checks на `main` включён. Где будут тестовый и продовый серверы — решение
+> отложено; памятка с чего продолжить — DEPLOY.md §10.6.
 
-- [ ] **Секреты GitHub**: `SSH_HOST`, `SSH_USER`, `SSH_KEY` (+`APP_DIR`) в окружениях `staging` и `production`;
-- [ ] **Публичный SSH-ключ** деплоя — в `~/.ssh/authorized_keys` на сервере;
-- [ ] **Branch protection** для `main`: required checks `CI / Backend…` и `CI / Frontend…`;
-- [ ] (опц.) **Required reviewers** для окружения `production`;
-- [ ] **Тестовый (staging) сервер** для сверки данных — развернуть по DEPLOY.md §3, выкатывать окружением `staging`.
+- [x] Окружения `staging`/`production` созданы; секрет `SSH_KEY` добавлен (09.2026);
+- [x] Branch protection для `main`: required checks `CI / Backend…`, `CI / Frontend…` (09.2026);
+- [ ] Определить, **где** будут `staging` и `production`, и способ доставки (SSH или self-hosted runner на corsus) — отложено (см. DEPLOY.md §10.6);
+- [ ] Секреты `SSH_HOST`/`SSH_USER` (+`APP_DIR`) в окружениях — после выбора серверов;
+- [ ] Публичный SSH-ключ — в `~/.ssh/authorized_keys` на каждом целевом сервере;
+- [ ] (опц.) Required reviewers для окружения `production`;
+- [ ] Тестовый (staging) сервер для сверки данных + первый деплой из Actions.
 
 ---
 
