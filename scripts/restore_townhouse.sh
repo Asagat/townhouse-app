@@ -14,10 +14,13 @@
 #   backend/backups/townhouse_roles_<дата>.sql    — только роли/пользователи кластера
 #
 # ИСПОЛЬЗОВАНИЕ:
-#   ./scripts/restore_townhouse.sh data <файл.sql>            # залить данные в существующую БД
-#   ./scripts/restore_townhouse.sh data --fresh <файл.sql>    # СТЕРЕТЬ БД и пересоздать, затем залить
-#   ./scripts/restore_townhouse.sh roles [--force] <роли.sql> # применить роли
+#   ./scripts/restore_townhouse.sh data <файл.sql>                  # залить данные в существующую БД
+#   ./scripts/restore_townhouse.sh data --fresh <файл.sql>          # СТЕРЕТЬ БД и пересоздать, затем залить
+#   ./scripts/restore_townhouse.sh roles [--force] <роли.sql>       # применить роли
 #   ./scripts/restore_townhouse.sh all --fresh <файл.sql> <роли.sql>
+#
+# Флаг --yes отключает интерактивный запрос подтверждения (для автоматизации:
+# refresh_from_backups.sh / git-hook post-merge).
 # ============================================================================
 
 set -euo pipefail
@@ -64,16 +67,26 @@ require_backend() {
 
 # ============================= данные ========================================
 restore_data() {
-  local fresh=0
-  [ "${1:-}" = "--fresh" ] && { fresh=1; shift; }
+  local fresh=0 yes=0
+  while :; do
+    case "${1:-}" in
+      --fresh) fresh=1; shift;;
+      --yes)   yes=1;   shift;;
+      *) break;;
+    esac
+  done
   local file="${1:-}"
   [ -n "$file" ] && [ -f "$file" ] || { echo "ОШИБКА: файл дампа не найден: $file" >&2; exit 1; }
   require_backend
 
   if [ "$fresh" -eq 1 ]; then
-    echo ">> ВНИМАНИЕ: БД '$PG_DB' будет СТЁРТА и пересоздана. Отвечайте 'yes' для продолжения:"
-    read -r ans
-    [ "$ans" = "yes" ] || { echo "Прервано пользователем."; exit 1; }
+    if [ "$yes" -eq 1 ]; then
+      echo ">> БД '$PG_DB' будет СТЁРТА и пересоздана (--yes)."
+    else
+      echo ">> ВНИМАНИЕ: БД '$PG_DB' будет СТЁРТА и пересоздана. Отвечайте 'yes' для продолжения:"
+      read -r ans
+      [ "$ans" = "yes" ] || { echo "Прервано пользователем."; exit 1; }
+    fi
 
     echo ">> завершение активных сессий к '$PG_DB' ..."
     printf "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='%s' AND pid<>pg_backend_pid();\n" "$PG_DB" | run_psql postgres >/dev/null 2>&1 || true
@@ -118,11 +131,20 @@ main() {
       shift; restore_roles "$@";;
     all)
       shift
-      local fresh=0
-      [ "${1:-}" = "--fresh" ] && { fresh=1; shift; }
-      [ $# -ge 2 ] || { echo "Использование: all [--fresh] <данные.sql> <роли.sql>"; exit 1; }
+      local fresh=0 yes=0
+      while :; do
+        case "${1:-}" in
+          --fresh) fresh=1; shift;;
+          --yes)   yes=1;   shift;;
+          *) break;;
+        esac
+      done
+      [ $# -ge 2 ] || { echo "Использование: all [--fresh] [--yes] <данные.sql> <роли.sql>"; exit 1; }
       local df="${1:-}" rf="${2:-}"
-      restore_data $([ "$fresh" -eq 1 ] && echo --fresh || true) "$df"
+      local flags=()
+      [ "$fresh" -eq 1 ] && flags+=(--fresh)
+      [ "$yes" -eq 1 ] && flags+=(--yes)
+      restore_data "${flags[@]}" "$df"
       restore_roles "$rf";;
     *)
       echo "Неизвестная команда: $1" >&2; exit 1;;

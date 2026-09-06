@@ -323,7 +323,7 @@ docker compose up -d --build
 
 ### 7.1 Доступ из Интернета (домашний ПК)
 
-Для домашнего ПК за роутером наружу выставляется только `nginx`-сервис (порты 80/443),
+Для домашнего ПК за роутером наружу выставляется только `nginx`-сервис (порт 80),
 который отдаёт production-сборку фронтенда и проксирует `/api/` на backend:
 
 ```bash
@@ -331,31 +331,279 @@ docker compose exec -T frontend npm run build   # собрать frontend/dist (
 docker compose up -d nginx
 ```
 
-Конфиг — `deploy/nginx-home.conf` (server_name — ваш DDNS-домен). Каталоги
-`deploy/certs/` (сертификаты) и `deploy/certbot-webroot/` (ACME) в git не коммитятся.
+Конфиг — `deploy/nginx-home.conf` (server_name — ваш DDNS-домен).
 
 На роутере: **DMZ выключить** и раздать порты явными правилами (на многих роутерах
 DMZ перекрывает проброс). Пример для сети 192.168.50.0/24:
 
 | Назначение | Внешний порт | Внутр. IP | Внутр. порт |
 |---|---|---|---|
-| Портал NAS (http/https) | 80 / 443 | NAS | 80 / 443 |
 | Townhouse (HTTP) | 8090 | 192.168.50.101 | 80 |
-| Townhouse (HTTPS, см. ниже) | 9443 | NAS | 8443 |
 
-На ПК открыть порты в файрволе: `sudo firewall-cmd --permanent --add-service=http --add-service=https` (+ `--reload`).
-В `.env` в `CORS_ORIGINS` добавить внешний домен (`http(s)://домен[:порт]`).
+На ПК открыть порт в файрволе: `sudo firewall-cmd --permanent --add-service=http` (+ `--reload`).
+В `.env` в `CORS_ORIGINS` добавить внешний домен (`http://домен[:порт]`).
 
-**TLS — два варианта:**
-- **Через NAS Synology (рекомендуется, если NAS уже имеет сертификат на домен):**
-  в DSM «Обратный прокси»: источник HTTPS (порт, напр. 8443) на домен → назначение
-  `http://192.168.50.101:80`. TLS терминирует NAS своим сертификатом (продление — DSM),
-  на ПК отдельный сертификат не нужен; наружу правило ведёт на NAS (напр. 9443 → NAS:8443).
-- **TLS на самом ПК (certbot):** сертификат Let's Encrypt по HTTP-01 (нужен временный
-  проброс 80 → ПК на время выпуска/продления), файлы кладутся в `deploy/certs/`
-  (`cp -L /etc/letsencrypt/live/<домен>/{fullchain,privkey}.pem`), перезапуск nginx.
-  Для автоматического продления — `certbot-renew.timer` + renew-hook, копирующий
-  сертификаты в `deploy/certs/` и делающий `nginx -s reload`.
+**HTTPS (по желанию) терминируется на NAS Synology** (сертификат DSM, продление — DSM):
+в DSM «Обратный прокси» источник HTTPS на домен → назначение `http://192.168.50.101:80`.
+Отдельный сертификат на ПК не нужен — nginx на ПК слушает только HTTP.
+
+### 7.2 Схема потоков на домашнем ПК «corsus» (актуальное состояние)
+
+> Машина `corsus` (Fedora Linux 44, desktop). Всё приложение крутится в Docker одним
+> compose-проектом (`townhouse-app`); нативных сервисов (Postgres/nginx) на ПК нет.
+> Контейнеры общаются между собой по именам сервисов (docker DNS), IP в сети
+> `townhouse-app_default` (172.18.0.0/16) назначаются динамически.
+
+**Контейнеры и порты:**
+
+| Контейнер | Роль | Порт на хосте |
+|---|---|---|
+| `townhouse-nginx` | статика `frontend/dist` + прокси `/api` → backend | 80 (единственный внешний вход) |
+| `townhouse-frontend` | dev-сервер Vite (HMR), прокси `/api` → backend | 5173 |
+| `townhouse-backend` | FastAPI/uvicorn, единственный клиент БД | 8000 |
+| `townhouse-postgres` | PostgreSQL 16, данные в volume `townhouse-app_pgdata` | 5432 (для pg_dump/psql с хоста) |
+
+**Схема потоков:**
+
+```mermaid
+graph LR
+    subgraph Docker["docker compose — townhouse-app"]
+        NG["townhouse-nginx :80<br/>статика dist + прокси /api"]
+        FE["townhouse-frontend :5173<br/>Vite dev (HMR)"]
+        BE["townhouse-backend :8000<br/>uvicorn (FastAPI)"]
+        PG[("townhouse-postgres :5432<br/>volume pgdata — одна БД townhouse")]
+        FE -->|"/api → backend:8000"| BE
+        NG -->|"/api → backend:8000"| BE
+        BE -->|"townhouse_user@postgres:5432/townhouse"| PG
+    end
+    DEV["Разработчик:<br/>localhost:5173"] --> FE
+    EXT["Внешний HTTP:<br/>http://sagacloud.synology.me:8090<br/>роутер → ПК:80"] --> NG
+    NAS["NAS Synology (опционально):<br/>HTTPS → http://ПК:80"] --> NG
+```
+
+**Ключевые факты:**
+
+- «Dev» (Vite на :5173) и «внешний» (nginx на :80) входы — **один и тот же**
+  backend-контейнер и **одна общая БД**; отдельного dev/prod окружения нет.
+- Фронтенд в БД напрямую не ходит — только backend. В `pg_stat_activity` видны
+  подключения лишь с IP backend-контейнера.
+- На хост проброшены порты 80/5173/8000/5432; наружу через роутер отдаётся только 80.
+- HTTPS при необходимости терминируется на NAS Synology (сертификат DSM) — см. §7.1;
+  на самом ПК nginx слушает только HTTP, сертификата на ПК нет.
+
+### 7.3 ПК «snowflake» — локальный запуск + собственная БД (целевая схема)
+
+> Договорённость для `snowflake`: фронтенд и бэкенд работают **локально** (не в Docker)
+> и обновляются **из git** (код + миграции). БД — **отдельный инстанс PostgreSQL**
+> (свой на snowflake), и она обновляется **импортом свежих дампов** из папки
+> `../townhouse-app/backend/backups` (рабочая копия с основного ПК; каталог
+> `backend/backups/` в git не коммитится, поэтому дампы передаются не через git).
+
+**Схема потоков:**
+
+```mermaid
+graph LR
+    subgraph Local["snowflake — нативные процессы"]
+        F["frontend<br/>Vite dev :5173 (git pull)"]
+        B["backend<br/>uvicorn :8000, venv (git pull)"]
+        DB[("PostgreSQL — свой инстанс<br/>вне Docker")]
+        F -->|"/api"| B
+        B -->|"DATABASE_URL/POSTGRES_* из .env"| DB
+    end
+    GIT["git pull<br/>(код + миграции схемы)"] --> F
+    GIT --> B
+    IMP["../townhouse-app/backend/backups<br/>(дампы с основного ПК)"] -->|restore_townhouse.sh| DB
+```
+
+**Настройка доступа на snowflake:**
+
+- В корневом `.env` — подключение к **своей** БД: `POSTGRES_HOST=127.0.0.1`,
+  `POSTGRES_PORT=5432`, свои `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`,
+  плюс `AUTH_SECRET_KEY`/`CORS_ORIGINS`. База и роль создаются один раз
+  в локальном Postgres на snowflake.
+- Локальный запуск — как в §5/`scripts/dev.sh` (alembic + справочники + админ + uvicorn
+  `--reload`); фронт — `cd frontend && npm run dev`.
+- `scripts/restore_townhouse.sh` сам выбирает способ подключения: если compose-контейнера
+  нет — работает через локальный `psql` (нужен установленный клиент).
+
+**Ручное обновление БД из бэкапов (рекомендуемый порядок):**
+
+```bash
+# из корня проекта на snowflake; дампы берутся из рабочей копии основного ПК:
+LATEST=$(ls -t ../townhouse-app/backend/backups/townhouse_*.sql | head -1)
+ROLES=$(ls -t ../townhouse-app/backend/backups/townhouse_roles_*.sql | head -1)
+./scripts/restore_townhouse.sh all --fresh "$LATEST" "$ROLES"
+cd backend
+alembic upgrade head    # если код новее дампа — догнать схему до head
+python init_data.py      # справочники (идемпотентно)
+python create_user.py    # админ (идемпотентно)
+```
+
+**Автоматизация «после git pull» (snowflake: Fedora, дампы через Synology Drive):**
+
+1. В корневом `.env` на snowflake добавить включение зеркального режима:
+
+   ```bash
+   # Каталог с дампами основной копии (синхронизируется Synology Drive).
+   DB_MIRROR_BACKUPS=../townhouse-app/backend/backups
+   ```
+
+2. Один раз установить git-hook:
+
+   ```bash
+   ./scripts/install_post_merge_hook.sh   # удалить: --remove
+   ```
+
+3. Теперь после каждого обычного `git pull` (merge) автоматически выполняется
+   `scripts/update_db_after_pull.sh`:
+   - всегда — догон схемы/справочников/админа (`alembic upgrade head` +
+     `init_data.py` + `create_user.py`);
+   - если в источнике появился дамп **новее** применённого (маркер
+     `.git/db_refresh.state`) — полная пересборка БД из дампа
+     (`restore_townhouse.sh all --fresh --yes`) с последующим догоном схемы.
+
+   Лог запусков — `.git/post-merge.log`. Вручную можно запустить
+   `./scripts/refresh_from_backups.sh [--yes|--dry-run]`.
+
+Примечания:
+- Машина без `DB_MIRROR_BACKUPS` в `.env` — не зеркальная: скрипты молча ничего
+  не делают (например, VPS или corsus без симметричного режима §7.4).
+- Автоимпорт **деструктивен** (drop/create БД) и поэтому включается только
+  явной переменной `DB_MIRROR_BACKUPS` и только при появлении дампа новее маркера.
+- `git pull --rebase` hook **не** запускает — используйте обычный `git pull`.
+
+### 7.4 Симметричный режим: corsus ↔ snowflake (разработка по очереди)
+
+> Идея: разрабатывать можно на любом из двух ПК, но одновременно пишет в БД
+> только один — «активный». Второй ПК работает зеркалом: код догоняет из git,
+> данные — импортом свежих дампов (однонаправленно в момент переключения).
+
+**Подготовка обеих машин (по одному разу):**
+
+- corsus (docker-стек): в корневом `.env` включить зеркальный режим и поставить hook:
+
+  ```bash
+  # .env на corsus
+  DB_MIRROR_BACKUPS=backend/backups
+  ```
+
+  ```bash
+  ./scripts/install_post_merge_hook.sh
+  ```
+
+- snowflake — как в §7.3 (`DB_MIRROR_BACKUPS=../townhouse-app/backend/backups` + тот же hook).
+
+**Цикл работы (по очереди):**
+
+1. Активный ПК в конце сеанса выгружает состояние БД:
+   `./scripts/dump_to_sync.sh` — кладёт `townhouse_<stamp>.sql` (+ роли) в
+   синхронизируемую папку (Synology Drive) и ставит маркер `.git/db_refresh.state`
+   («локальная БД уже соответствует этому дампу» — свой дамп повторно не импортируется).
+2. Synology Drive доставляет дамп на второй ПК.
+3. Второй ПК делает обычный `git pull` → hook запускает `update_db_after_pull.sh`:
+   догон схемы (на corsus — в backend-контейнере, на snowflake — через `.venv`),
+   затем импорт дампа (`restore_townhouse.sh all --fresh --yes`) и повторный догон схемы.
+
+Импорт срабатывает, когда самый свежий дамп **отличается от маркера**; одинаковый —
+пропускается. Автоимпорт деструктивен (drop/create БД) — на зеркале это норма, но перед
+переключением не забудьте выгрузить свой дамп (`dump_to_sync.sh`).
+
+### 7.5 Пошаговая подготовка машины к автообновлению БД
+
+**Общие предусловия (обе машины):**
+
+- один git-клон проекта (remote `git@github.com:Asagat/townhouse-app.git`), обновление —
+  только обычным `git pull` (hook не срабатывает на `git pull --rebase`);
+- корневой `.env` с секретами и `POSTGRES_*`;
+- в `.env` задана `DB_MIRROR_BACKUPS` — папка, синхронизируемая Synology Drive в обе стороны;
+- установлен hook `post-merge`;
+- в момент `git pull` целевая БД доступна.
+
+**Шаг 1. Общее (выполнить на обеих машинах):**
+
+```bash
+# .env — добавить строку (значение — см. Шаг 2/3 для своей машины)
+# DB_MIRROR_BACKUPS=...
+
+# hook — один раз в каждом клоне
+./scripts/install_post_merge_hook.sh
+```
+
+**Шаг 2. corsus (docker-стек):**
+
+```bash
+# .env
+DB_MIRROR_BACKUPS=backend/backups
+
+# контейнеры должны быть подняты в момент pull (импорт идёт через docker):
+docker compose up -d postgres backend
+```
+
+Больше ничего не нужно: схема гоняется в backend-контейнере, импорт — через
+`townhouse-postgres`; локальный psql не требуется.
+
+**Шаг 3. snowflake (Fedora, нативный запуск):**
+
+```bash
+# 3.1 системные пакеты и PostgreSQL
+sudo dnf install -y git python3 python3-pip nodejs npm postgresql-server postgresql
+sudo postgresql-setup --initdb          # только при первом запуске
+sudo systemctl enable --now postgresql
+
+# 3.2 раскладка папок: рабочий git-клон НЕ должен совпадать с синхронизируемой папкой.
+#     Пример: ~/projects/townhouse-app — синхронизируемая папка (Synology Drive, дампы),
+#     ~/projects/townhouse-dev — рабочий клон. Тогда ../townhouse-app/backend/backups
+#     из клона указывает на синхронизируемую папку.
+git clone git@github.com:Asagat/townhouse-app.git ~/projects/townhouse-dev
+cd ~/projects/townhouse-dev
+
+# 3.3 роль и БД (имена/пароль — как в .env)
+sudo -u postgres psql -c "CREATE ROLE townhouse_user LOGIN PASSWORD '...' CREATEDB SUPERUSER;"
+sudo -u postgres psql -c "CREATE DATABASE townhouse OWNER townhouse_user;"
+
+# 3.4 окружение бэкенда
+python3 -m venv .venv
+.venv/bin/pip install -r backend/requirements.txt
+
+# 3.5 .env: cp .env.example .env и заполнить (POSTGRES_HOST=127.0.0.1, POSTGRES_PORT=5432,
+#     свои POSTGRES_USER/PASSWORD/DB, ADMIN_*, AUTH_SECRET_KEY, CORS_ORIGINS) + строка:
+#     DB_MIRROR_BACKUPS=../townhouse-app/backend/backups
+
+# 3.6 hook
+./scripts/install_post_merge_hook.sh
+```
+
+Права роли: `CREATEDB` обязателен (`restore --fresh` делает drop/create БД); `SUPERUSER`
+нужен только чтобы выгружать роли (`pg_dumpall --roles-only`) — без него роли просто не
+снимутся, это не критично (на docker-БД пользователь и так создаётся из `.env`).
+
+**Шаг 4. Первый импорт (сразу из дампа, не «пустая БД»):**
+
+```bash
+./scripts/update_db_after_pull.sh      # или вручную: ./scripts/refresh_from_backups.sh --yes
+```
+
+Если дампы ещё не досинхронизировались — скрипт молча подождёт (это нормально).
+
+**Шаг 5. Проверка (на любой машине):**
+
+```bash
+./scripts/update_db_after_pull.sh
+```
+
+Ожидания: `alembic upgrade head` без изменений, `init_data`/`create_user` отработали,
+refresh сообщает «дамп уже применён / новых нет» либо импортирует новый дамп.
+Лог каждого запуска hook — `.git/post-merge.log`.
+
+**Частые проблемы:**
+
+| Симптом | Причина / решение |
+|---|---|
+| «Нет .venv и нет backend-контейнера…» | На corsus подняты не все контейнеры: `docker compose up -d postgres backend`. На snowflake нет venv: `python3 -m venv .venv` + pip install |
+| «Каталог дампов не найден…» | Synology Drive ещё не синхронизировал папку — проверить клиент/папку, повторить pull |
+| «Новых дампов нет» при свежем дампе на другом ПК | Дамп ещё не досинхронизировался или вы уже применяли его; подождать/проверить `ls` папки |
+| Автоимпорт не запускается после `git pull --rebase` | Использовать обычный `git pull` |
+| После pull БД «откатилась» на старый дамп | Активный ПК не сделал `dump_to_sync.sh` перед переключением — см. §7.4 |
 
 ---
 
@@ -452,4 +700,8 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 | `./scripts/dev.sh` | Локальное развёртывание + запуск uvicorn (`--full` — pip install) |
 | `./scripts/setup_vps.sh` | Полная установка на НОВОМ VPS (пакеты, clone, .env, БД, systemd, build) |
 | `./scripts/deploy_vps.sh` | Обновление VPS (pull, alembic, справочники, админ, restart) |
-| `./scripts/restore_townhouse.sh` | Восстановление БД из дампов (см. §8.2): `data [--fresh] <файл.sql>`, `roles [--force] <файл.sql>`, `all ...` |
+| `./scripts/restore_townhouse.sh` | Восстановление БД из дампов (см. §8.2): `data [--fresh] <файл.sql>`, `roles [--force] <файл.sql>`, `all ...`; `--yes` — без запроса (для автоматизации) |
+| `./scripts/refresh_from_backups.sh [--yes]` | Зеркальный ПК: импорт свежих дампов из `DB_MIRROR_BACKUPS` + догон схемы (маркер `.git/db_refresh.state`) |
+| `./scripts/update_db_after_pull.sh` | После `git pull`: догон схемы + зеркальные дампы (вызывается hook-ом post-merge) |
+| `./scripts/dump_to_sync.sh` | Активный ПК: выгрузить дамп БД в синхронизируемую папку (`DB_MIRROR_BACKUPS`) и обновить маркер |
+| `./scripts/install_post_merge_hook.sh` | Установить/удалить git-hook `post-merge` (автозапуск после pull) |
