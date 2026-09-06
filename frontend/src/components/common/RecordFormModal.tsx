@@ -120,7 +120,12 @@ export const RecordFormModal = ({
             destroyOnClose
             width={800}
         >
-            <Form form={form} layout="vertical" disabled={readonly}>
+            <Form
+                form={form}
+                layout="vertical"
+                disabled={readonly}
+                className={readonly ? "form-view-mode" : undefined}
+            >
                 {sortedFields.map((field) => {
                     const fieldReadonly = readonly || isReadonlyField(field);
 

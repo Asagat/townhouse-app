@@ -66,3 +66,24 @@ a {
   color: #666666;
   font-weight: 700;
 }
+
+/* --- Режим просмотра формы: текст в disabled-полях остаётся контрастным --- */
+.form-view-mode .ant-input[disabled],
+.form-view-mode .ant-input-number-disabled .ant-input-number-input,
+.form-view-mode .ant-picker.ant-picker-disabled .ant-picker-input > input,
+.form-view-mode .ant-select-disabled .ant-select-selection-item,
+.form-view-mode .ant-cascader-picker-disabled .ant-cascader-input {
+  color: #262626;
+  -webkit-text-fill-color: #262626;
+}
+.form-view-mode .ant-input[disabled],
+.form-view-mode .ant-input-number-disabled,
+.form-view-mode .ant-picker.ant-picker-disabled,
+.form-view-mode .ant-select-disabled .ant-select-selector {
+  background: #fafafa;
+}
+.form-view-mode .ant-input[disabled]::placeholder,
+.form-view-mode .ant-picker.ant-picker-disabled .ant-picker-input > input::placeholder {
+  color: #bfbfbf;
+  -webkit-text-fill-color: #bfbfbf;
+}
