@@ -38,10 +38,7 @@ import {
 } from "../config/filters";
 import { RecordFormModal } from "../components/common/RecordFormModal";
 import { ReferenceFilterSelect } from "../components/common/ReferenceFilterSelect";
-import {
-    ColumnDragTitle,
-    SortableColumns,
-} from "../components/common/SortableColumns";
+import { ColumnHeader, SortableColumns } from "../components/common/SortableColumns";
 import {
     DndContext,
     PointerSensor,
@@ -311,11 +308,12 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     // Вариант A + C (п. 2.10): видимость и ПОРЯДОК колонок списка, сохранение в
     // localStorage по (ресурс, роль). Перестановка — drag&drop заголовков таблицы
     // или в панели «Колонки».
-    const { orderedAll, hiddenKeys, toggle, move, moveKey } = useColumnSettings(
-        resourceName,
-        role,
-        columns.map((c) => c.key),
-    );
+    const { orderedAll, hiddenKeys, widths, toggle, move, moveKey, setWidth } =
+        useColumnSettings(
+            resourceName,
+            role,
+            columns.map((c) => c.key),
+        );
     const columnByKey = new Map(columns.map((c) => [c.key, c]));
     const displayColumns = orderedAll
         .filter((k) => !hiddenKeys.has(k))
@@ -551,10 +549,10 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
 
     const tableColumns = [
         {
-            title: "ID",
+            title: <ColumnHeader columnKey="id" label="ID" draggable={false} onResize={setWidth} />,
             dataIndex: "id",
             key: "id",
-            width: 70,
+            width: widths["id"] ?? 70,
             sorter: true,
             sortOrder: getColumnSortOrder('id'),
             // Сортировка по умолчанию — на «Периоде» (см. выше); стрелку на ID не ставим.
@@ -564,9 +562,12 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             const sortable = isSortableField(col.key);
             const isNested = col.key.includes('.');
             return {
-                title: <ColumnDragTitle columnKey={col.key}>{col.label}</ColumnDragTitle>,
+                title: (
+                    <ColumnHeader columnKey={col.key} label={col.label} onResize={setWidth} />
+                ),
                 dataIndex: col.key,
                 key: col.key,
+                width: widths[col.key],
                 render: (value: any, record: any) => {
                     try {
                         const val = isNested ? getValueByPath(record, col.key) : value;

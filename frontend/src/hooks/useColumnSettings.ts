@@ -1,10 +1,12 @@
 // frontend/src/hooks/useColumnSettings.ts
-// Настройка отображаемых колонок списка (роадмап 2.10): видимость (вариант A)
-// и ПОРЯДОК колонок (вариант C) с сохранением в localStorage по (ресурс, роль).
+// Настройка отображаемых колонок списка (роадмап 2.10/2.1): видимость (вариант A),
+// ПОРЯДОК колонок (вариант C) и ШИРИНЫ (ресайз, 2.1) с сохранением в localStorage
+// по (ресурс, роль).
 //
-// Храним объект { order, hidden }:
-//   - order  — порядок ВСЕХ ключей колонок (перетаскивание в панели «Колонки»);
-//   - hidden — скрытые ключи.
+// Храним объект { order, hidden, widths }:
+//   - order  — порядок ВСЕХ ключей колонок (перетаскивание заголовков/в панели «Колонки»);
+//   - hidden — скрытые ключи;
+//   - widths — заданные пользователем ширины колонок (ключ -> px).
 // Новые колонки, добавленные в конфиг позже сохранения, по умолчанию видимы и
 // дописываются в конец порядка (не «теряются»).
 //
@@ -18,7 +20,10 @@ const STORAGE_PREFIX = "townhouse_visible_columns";
 export interface StoredColumnSettings {
     order: string[];
     hidden: string[];
+    widths: Record<string, number>;
 }
+
+const EMPTY_WIDTHS: Record<string, number> = {};
 
 const storageKey = (resource: string, role: string) =>
     `${STORAGE_PREFIX}:${resource}:${role}`;
@@ -31,7 +36,11 @@ const load = (key: string, allKeys: string[]): StoredColumnSettings | null => {
         if (Array.isArray(parsed)) {
             // Старый формат (2.10-A): массив видимых ключей. Скрытые — остальные.
             const visible = new Set(parsed as string[]);
-            return { order: allKeys, hidden: allKeys.filter((k) => !visible.has(k)) };
+            return {
+                order: allKeys,
+                hidden: allKeys.filter((k) => !visible.has(k)),
+                widths: EMPTY_WIDTHS,
+            };
         }
         if (
             parsed &&
@@ -42,6 +51,8 @@ const load = (key: string, allKeys: string[]): StoredColumnSettings | null => {
             return {
                 order: p.order,
                 hidden: Array.isArray(p.hidden) ? p.hidden : [],
+                widths:
+                    p.widths && typeof p.widths === "object" ? p.widths : EMPTY_WIDTHS,
             };
         }
         return null;
@@ -54,8 +65,10 @@ const load = (key: string, allKeys: string[]): StoredColumnSettings | null => {
  * Настройки колонок списка для (resource, role).
  * - `orderedAll` — все ключи колонок в текущем порядке (сохранённый либо исходный).
  * - `hiddenKeys` — множество скрытых ключей.
+ * - `widths` — заданные пользователем ширины колонок (пусто — автоширина).
  * - `toggle(key, checked)` — показать/скрыть колонку.
- * - `move(fromIndex, toIndex)` — переставить колонку (drag&drop).
+ * - `move(fromIndex, toIndex)` / `moveKey(fromKey, toKey)` — переставить колонку.
+ * - `setWidth(key, px)` — установить ширину колонки (ресайз).
  */
 export const useColumnSettings = (
     resource: string,
@@ -84,6 +97,8 @@ export const useColumnSettings = (
         [settings],
     );
 
+    const widths = settings?.widths ?? EMPTY_WIDTHS;
+
     const save = useCallback(
         (next: StoredColumnSettings) => {
             localStorage.setItem(key, JSON.stringify(next));
@@ -100,9 +115,9 @@ export const useColumnSettings = (
             } else {
                 hidden.add(columnKey);
             }
-            save({ order: orderedAll, hidden: [...hidden] });
+            save({ order: orderedAll, hidden: [...hidden], widths });
         },
-        [settings, orderedAll, save],
+        [settings, orderedAll, widths, save],
     );
 
     const move = useCallback(
@@ -111,9 +126,9 @@ export const useColumnSettings = (
             const order = [...orderedAll];
             const [moved] = order.splice(fromIndex, 1);
             order.splice(toIndex, 0, moved);
-            save({ order, hidden: settings?.hidden ?? [] });
+            save({ order, hidden: settings?.hidden ?? [], widths });
         },
-        [orderedAll, settings, save],
+        [orderedAll, settings, widths, save],
     );
 
     // Перестановка по ключам (используется при drag&drop заголовков колонок, где
@@ -127,10 +142,22 @@ export const useColumnSettings = (
             if (fromIdx < 0 || toIdx < 0) return;
             order.splice(fromIdx, 1);
             order.splice(order.indexOf(toKey), 0, fromKey);
-            save({ order, hidden: settings?.hidden ?? [] });
+            save({ order, hidden: settings?.hidden ?? [], widths });
         },
-        [orderedAll, settings, save],
+        [orderedAll, settings, widths, save],
     );
 
-    return { orderedAll, hiddenKeys, toggle, move, moveKey };
+    const setWidth = useCallback(
+        (columnKey: string, px: number) => {
+            const nextWidths = { ...widths, [columnKey]: Math.max(40, Math.round(px)) };
+            save({
+                order: orderedAll,
+                hidden: settings?.hidden ?? [],
+                widths: nextWidths,
+            });
+        },
+        [orderedAll, settings, widths, save],
+    );
+
+    return { orderedAll, hiddenKeys, widths, toggle, move, moveKey, setWidth };
 };
