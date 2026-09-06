@@ -482,6 +482,15 @@ def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
         textColor=colors.HexColor(rc.COLOR_TEXT_HEAD),
     )
 
+    # Таблица: на кегль меньше, чем раньше (8 -> 7), чтобы длинные значения
+    # («Электричество охраны», «Итого», «Долг») помещались в ячейки.
+    table_font_size = max(6, rc.TABLE_SIZE - 1)
+    svc_cell_style = ParagraphStyle(
+        "SvcCell", parent=styles["Normal"], fontSize=table_font_size,
+        leading=table_font_size + 2, fontName=FONT,
+        textColor=colors.HexColor(rc.COLOR_TEXT_CELL),
+    )
+
     month_names = [
         "январь", "февраль", "март", "апрель", "май", "июнь",
         "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
@@ -560,7 +569,7 @@ def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
     ]
     for it in sorted(receipt.items, key=lambda x: (x.services_type_id is None, x.id)):
         data.append([
-            it.service_name,
+            Paragraph(it.service_name or "", svc_cell_style),
             _fmt_reading(it.reading_prev),   # Пред.
             _fmt_reading(it.reading_curr),   # Послед.
             _fmt_amount2(it.quantity) if it.quantity is not None else "-",
@@ -571,13 +580,25 @@ def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
             _fmt_amount2(it.payable),
         ])
     data.append([
-        rc.COL_Итого, "", "", "", "", _fmt_amount2(receipt.total_amount),
+        Paragraph(rc.COL_Итого, svc_cell_style), "", "", "", "",
+        _fmt_amount2(receipt.total_amount),
         _fmt_amount2(receipt.debt) if receipt.debt else "0,00",
         _fmt_amount2(receipt.overpayment) if receipt.overpayment else "0,00",
         _fmt_amount2(receipt.payable_amount),
     ])
 
-    col_widths = rc.COL_WIDTHS
+    # Ширины: числовые/служебные колонки — по содержимому, остаток листа — «Услуге»
+    # (значения подогнаны так, чтобы суммы/долги не переносились).
+    value_widths = {
+        "prev": 30, "curr": 30, "qty": 40, "tariff": 52,
+        "amount": 60, "debt": 46, "overpay": 50, "payable": 56,
+    }
+    usable = A4[0] - rc.PAGE_LEFT_MARGIN - rc.PAGE_RIGHT_MARGIN
+    fixed = sum(value_widths.values())
+    svc_w = max(60, usable - fixed)
+    col_widths = [svc_w, value_widths["prev"], value_widths["curr"],
+                  value_widths["qty"], value_widths["tariff"], value_widths["amount"],
+                  value_widths["debt"], value_widths["overpay"], value_widths["payable"]]
     table = Table(data, colWidths=col_widths, repeatRows=2)
     gray = colors.HexColor(rc.COLOR_TABLE_GRID)          # серые границы
     even = colors.HexColor(rc.COLOR_ROW_EVEN)            # чётная строка
@@ -594,13 +615,16 @@ def build_receipt_pdf(receipt: ReceiptDocument) -> bytes:
         ("TEXTCOLOR", (0, 2), (-1, -2), colors.HexColor(rc.COLOR_TEXT_CELL)),
         ("TEXTCOLOR", (0, -1), (-1, -1), colors.HexColor(rc.COLOR_TEXT_TOTAL)),
         ("FONTNAME", (0, 0), (-1, -1), FONT),
-        ("FONTSIZE", (0, 0), (-1, -1), rc.TABLE_SIZE),
+        ("FONTSIZE", (0, 0), (-1, -1), table_font_size),
         ("FONTNAME", (0, 0), (-1, 1), FONT_B),
         ("ALIGN", (1, 2), (-1, -1), "RIGHT"),
         ("ALIGN", (1, 0), (-1, 1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), rc.CELL_TOP_PADDING),
         ("BOTTOMPADDING", (0, 0), (-1, -1), rc.CELL_BOTTOM_PADDING),
+        # Меньше боковых отступов — значения не вылезают за границы ячеек.
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
         # Объединение ячеек шапки (строка 0 и 1)
         ("SPAN", (1, 0), (2, 0)),
         ("SPAN", (0, 0), (0, 1)),
