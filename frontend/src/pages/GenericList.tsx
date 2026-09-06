@@ -1,6 +1,7 @@
 // src/pages/GenericList.tsx
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import dayjs from "dayjs";
 import {
     Table,
     Button,
@@ -24,7 +25,16 @@ import {
     useGetIdentity,
 } from "@refinedev/core";
 import type { FieldMeta, ModalState } from "../types";
-import type { CrudFilter } from "@refinedev/core";
+import type { CrudFilter, CrudSort } from "@refinedev/core";
+import {
+    fetchServerPrefs,
+    pushServerPref,
+    readPrefsCache,
+    writePrefsCache,
+    type ListSettings,
+    type PrefsMap,
+    type StoredColumnSettings,
+} from "../auth/preferences";
 import { getColumnsForResource } from "../config/columns";
 import { allResources } from "../config/menu";
 import {
@@ -182,19 +192,99 @@ const getValueByPath = (obj: any, path: string): any => {
     return result;
 };
 
+/** Вид фильтра по колонке (глобальная карта + ресурсо-зависимые select-поля). */
+const kindForColumn = (resourceName: string, key: string) =>
+    isResourceSelectFilter(resourceName, key) ? "select" : getFilterKind(key);
+
+/**
+ * Восстанавливает черновик панели «Фильтры» из применённого CrudFilter-списка
+ * (для показа активных фильтров после перезагрузки/сохранённых настроек).
+ */
+const draftFromCrudFilters = (resourceName: string, filters: CrudFilter[]) => {
+    const draft: Record<string, any> = {};
+    for (const f of filters) {
+        if (!f.field) continue;
+        const kind = kindForColumn(resourceName, String(f.field));
+        const prev = draft[f.field] ?? {};
+        if (f.operator === "contains") {
+            draft[f.field] = { ...prev, text: String(f.value ?? "") };
+        } else if (f.operator === "eq") {
+            if (kind === "bool") {
+                draft[f.field] = { ...prev, bool: !!f.value };
+            } else {
+                draft[f.field] = { ...prev, sel: f.value };
+            }
+        } else if (f.operator === "gte" || f.operator === "lte") {
+            if (kind === "date" || kind === "datetime") {
+                const d = dayjs(String(f.value));
+                const range = [...(prev.range ?? [null, null])] as [any, any];
+                if (f.operator === "gte") range[0] = d;
+                else range[1] = d;
+                draft[f.field] = { ...prev, range };
+            } else {
+                const num = Number(f.value);
+                if (f.operator === "gte") draft[f.field] = { ...prev, from: num };
+                else draft[f.field] = { ...prev, to: num };
+            }
+        }
+    }
+    return draft;
+};
+
 export const GenericList = ({ resourceName }: GenericListProps) => {
     const apiUrl = useApiUrl();
 
     const { data: identity } = useGetIdentity<any>();
+
+    // --- Настройки пользователя (2.13): сервер + локальный кэш по (пользователь, ресурс) ---
+    const username = identity?.username ?? "";
+    const [prefs, setPrefs] = useState<PrefsMap>(() => readPrefsCache(username));
+    const savedPrefs = prefs[resourceName];
+    const pushTimerRef = useRef<number | null>(null);
+
+    const prefsFingerprint = (b: ListSettings | undefined) =>
+        JSON.stringify([b?.sorters ?? null, b?.filters ?? null, b?.pageSize ?? null]);
+    const appliedFpRef = useRef<string>(prefsFingerprint(savedPrefs));
+
+    const schedulePrefPush = useCallback((resource: string, data: ListSettings) => {
+        if (pushTimerRef.current !== null) window.clearTimeout(pushTimerRef.current);
+        pushTimerRef.current = window.setTimeout(() => {
+            pushTimerRef.current = null;
+            void pushServerPref(resource, data);
+        }, 1200);
+    }, []);
+
+    const patchPrefs = useCallback(
+        (partial: Partial<ListSettings>) => {
+            setPrefs((prev) => {
+                const bundle = { ...(prev[resourceName] ?? {}), ...partial };
+                const next = { ...prev, [resourceName]: bundle };
+                writePrefsCache(username, next);
+                schedulePrefPush(resourceName, bundle);
+                return next;
+            });
+        },
+        [username, resourceName, schedulePrefPush],
+    );
 
     // Регистр начислений: свежие периоды сверху (иначе первыми идут «входящие остатки»
     // стартовых долгов — они добавлены позже всех и стоят в конце по id).
     const defaultSortDescPeriod = resourceName === "accruals_register";
     const initialSortField = defaultSortDescPeriod ? "accrual_date" : "id";
 
-    // Фильтры по умолчанию для раздела (например «Тарифы» — только «Действующие»).
+    // Фильтры по умолчанию для раздела (например «Тарифы» — только «Действующие»),
+    // если у пользователя нет сохранённых настроек этого раздела.
     const resourceDefaults = getDefaultResourceFilters(resourceName);
-    const initialCrudFilters = (resourceDefaults?.applied ?? []) as CrudFilter[];
+    const defaultCrudFilters = (resourceDefaults?.applied ?? []) as CrudFilter[];
+
+    const initialSorters = (savedPrefs?.sorters?.length
+        ? savedPrefs.sorters
+        : [{ field: initialSortField, order: "desc" }]) as CrudSort[];
+    const initialFilters =
+        savedPrefs?.filters !== undefined
+            ? (savedPrefs.filters as CrudFilter[])
+            : defaultCrudFilters;
+    const initialPageSize = savedPrefs?.pageSize ?? 10;
 
     const {
         tableQuery,
@@ -204,23 +294,19 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         setPageSize,
         sorters,
         setSorters,
+        filters,
         setFilters,
     } = useTable({
         resource: resourceName,
         pagination: {
             current: 1,
-            pageSize: 10,
+            pageSize: initialPageSize,
         },
         sorters: {
-            initial: [
-                {
-                    field: initialSortField,
-                    order: "desc",
-                },
-            ],
+            initial: initialSorters,
         },
         filters: {
-            initial: initialCrudFilters,
+            initial: initialFilters,
         },
     });
 
@@ -242,24 +328,31 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const [modalState, setModalState] = useState<ModalState | null>(null);
 
     // Защита от «протёкших» фильтров: если компонент всё же переиспользован для другого
-    // ресурса (роуты обычно дают key, но страхуемся), сбрасываем локальное состояние
-    // и возвращаем фильтры по умолчанию для раздела (если они есть).
+    // ресурса (роуты обычно дают key, но страхуемся), сбрасываем локальное состояние.
+    // Применение сохранённых настроек нового раздела выполняет fingerprint-эффект.
     useEffect(() => {
-        const def = getDefaultResourceFilters(resourceName);
-        setDraftFilters(def?.draft ?? {});
-        setAppliedCount(def ? def.applied.length : 0);
-        setFilters(def ? (def.applied as CrudFilter[]) : [], "replace");
+        appliedFpRef.current = "";
+        setDraftFilters({});
+        setAppliedCount(0);
+        setFilters([], "replace");
     }, [resourceName]);
 
     // --- Общий механизм фильтрации (Б10) ---
     // Черновик фильтров по колонкам списка; применяется серверно через setFilters.
     const [filtersOpen, setFiltersOpen] = useState(false);
-    const [draftFilters, setDraftFilters] = useState<Record<string, any>>(
-        () => getDefaultResourceFilters(resourceName)?.draft ?? {},
-    );
-    const [appliedCount, setAppliedCount] = useState(
-        () => getDefaultResourceFilters(resourceName)?.applied.length ?? 0,
-    );
+    const [draftFilters, setDraftFilters] = useState<Record<string, any>>(() => {
+        const saved = prefs[resourceName];
+        if (saved?.filters !== undefined) {
+            return draftFromCrudFilters(resourceName, saved.filters as CrudFilter[]);
+        }
+        return getDefaultResourceFilters(resourceName)?.draft ?? {};
+    });
+    const [appliedCount, setAppliedCount] = useState(() => {
+        const saved = prefs[resourceName];
+        const def = getDefaultResourceFilters(resourceName);
+        const crud = saved?.filters !== undefined ? saved.filters : def?.applied ?? [];
+        return crud.length;
+    });
     const [bulkModalOpen, setBulkModalOpen] = useState(false);
     const [editingMeterReadingDocumentId, setEditingMeterReadingDocumentId] = useState<number | undefined>(undefined);
     const [accrualsModalOpen, setAccrualsModalOpen] = useState(false);
@@ -312,14 +405,13 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const columns = getColumnsForResource(resourceName);
     const meta = allResources.find((r) => r.key === resourceName);
 
-    // Вариант A + C (п. 2.10): видимость и ПОРЯДОК колонок списка, сохранение в
-    // localStorage по (ресурс, роль). Перестановка — drag&drop заголовков таблицы
-    // или в панели «Колонки».
+    // Вариант A + C (п. 2.10) + ширины (2.1): видимость/порядок/ширины колонок.
+    // Настройки хранятся на сервере + в локальном кэше (2.13), применяются сразу.
     const { orderedAll, hiddenKeys, widths, toggle, move, moveKey, setWidth } =
         useColumnSettings(
-            resourceName,
-            role,
             columns.map((c) => c.key),
+            savedPrefs?.columns ?? null,
+            (next: StoredColumnSettings) => patchPrefs({ columns: next }),
         );
     const columnByKey = new Map(columns.map((c) => [c.key, c]));
     const displayColumns = orderedAll
@@ -337,6 +429,61 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         if (!over || active.id === over.id) return;
         moveKey(String(active.id), String(over.id));
     };
+
+    // --- Синхронизация настроек пользователя (2.13) ---
+    // При появлении пользователя читаем локальный кэш и тянем настройки с сервера
+    // (сервер — источник правды: настройки переживают смену устройства).
+    const prefsReadyRef = useRef(false);
+    useEffect(() => {
+        if (!username) return;
+        prefsReadyRef.current = false;
+        setPrefs(readPrefsCache(username));
+        let cancelled = false;
+        fetchServerPrefs().then((server) => {
+            if (cancelled) return;
+            setPrefs((prev) => {
+                const next = { ...prev, ...server };
+                writePrefsCache(username, next);
+                return next;
+            });
+            prefsReadyRef.current = true;
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [username]);
+
+    // Применяем сохранённые настройки раздела к таблице (если они изменились,
+    // например пришли с сервера или сменился пользователь/раздел).
+    useEffect(() => {
+        const bundle = prefs[resourceName];
+        const fp = prefsFingerprint(bundle);
+        if (appliedFpRef.current === fp) return;
+        appliedFpRef.current = fp;
+        if (!bundle) return;
+        if (bundle.sorters !== undefined) {
+            setSorters(bundle.sorters as CrudSort[]);
+        }
+        if (bundle.filters !== undefined) {
+            setFilters(bundle.filters as CrudFilter[], "replace");
+            setAppliedCount(bundle.filters.length);
+            setDraftFilters(draftFromCrudFilters(resourceName, bundle.filters as CrudFilter[]));
+        }
+        if (bundle.pageSize) setPageSize(bundle.pageSize);
+    }, [prefs, resourceName]);
+
+    // Персистим изменения сортировки/фильтров/размера страницы (на сервер — с debounce).
+    useEffect(() => {
+        if (!username || !prefsReadyRef.current) return;
+        patchPrefs({
+            sorters: (sorters ?? []) as ListSettings["sorters"],
+            filters: (filters ?? []) as ListSettings["filters"],
+            pageSize,
+        });
+        // patchPrefs намеренно не в зависимостях — он стабилен для (username, resourceName)
+        // и пересоздаётся только при их смене (тогда сработает эффект [username]/сброс).
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [sorters, filters, pageSize]);
 
     const getColumnSortOrder = (dataIndex: string): SortOrder | undefined => {
         if (!isSortableField(dataIndex)) return undefined;

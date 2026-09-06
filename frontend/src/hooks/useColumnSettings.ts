@@ -1,21 +1,13 @@
 // frontend/src/hooks/useColumnSettings.ts
-// Настройка отображаемых колонок списка (роадмап 2.10/2.1): видимость (вариант A),
-// ПОРЯДОК колонок (вариант C) и ШИРИНЫ (ресайз, 2.1) с сохранением в localStorage
-// по (ресурс, роль).
+// Логика настроек колонок списка (роадмап 2.10/2.1): видимость (вариант A),
+// ПОРЯДОК колонок (вариант C) и ШИРИНЫ (ресайз, 2.1).
 //
-// Храним объект { order, hidden, widths }:
-//   - order  — порядок ВСЕХ ключей колонок (перетаскивание заголовков/в панели «Колонки»);
-//   - hidden — скрытые ключи;
-//   - widths — заданные пользователем ширины колонок (ключ -> px).
-// Новые колонки, добавленные в конфиг позже сохранения, по умолчанию видимы и
-// дописываются в конец порядка (не «теряются»).
-//
-// Обратная совместимость: старый формат (массив видимых ключей) при чтении
-// мигрируется в { order: исходный порядок, hidden: все остальные }.
+// Хранилище (localStorage-кэш + сервер per-user, роадмап 2.13) находится СНАРУЖИ:
+// хук получает текущие настройки (`settings: {order, hidden, widths}`) и колбэк
+// `onChange(next)` для сохранения. Новые колонки, добавленные в конфиг позже,
+// по умолчанию видимы и дописываются в конец порядка (не «теряются»).
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-
-const STORAGE_PREFIX = "townhouse_visible_columns";
+import { useCallback, useMemo } from "react";
 
 export interface StoredColumnSettings {
     order: string[];
@@ -23,46 +15,8 @@ export interface StoredColumnSettings {
     widths: Record<string, number>;
 }
 
-const EMPTY_WIDTHS: Record<string, number> = {};
-
-const storageKey = (resource: string, role: string) =>
-    `${STORAGE_PREFIX}:${resource}:${role}`;
-
-const load = (key: string, allKeys: string[]): StoredColumnSettings | null => {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    try {
-        const parsed = JSON.parse(raw) as unknown;
-        if (Array.isArray(parsed)) {
-            // Старый формат (2.10-A): массив видимых ключей. Скрытые — остальные.
-            const visible = new Set(parsed as string[]);
-            return {
-                order: allKeys,
-                hidden: allKeys.filter((k) => !visible.has(k)),
-                widths: EMPTY_WIDTHS,
-            };
-        }
-        if (
-            parsed &&
-            typeof parsed === "object" &&
-            Array.isArray((parsed as StoredColumnSettings).order)
-        ) {
-            const p = parsed as StoredColumnSettings;
-            return {
-                order: p.order,
-                hidden: Array.isArray(p.hidden) ? p.hidden : [],
-                widths:
-                    p.widths && typeof p.widths === "object" ? p.widths : EMPTY_WIDTHS,
-            };
-        }
-        return null;
-    } catch {
-        return null;
-    }
-};
-
 /**
- * Настройки колонок списка для (resource, role).
+ * Логика настроек колонок для (resource, role).
  * - `orderedAll` — все ключи колонок в текущем порядке (сохранённый либо исходный).
  * - `hiddenKeys` — множество скрытых ключей.
  * - `widths` — заданные пользователем ширины колонок (пусто — автоширина).
@@ -71,20 +25,10 @@ const load = (key: string, allKeys: string[]): StoredColumnSettings | null => {
  * - `setWidth(key, px)` — установить ширину колонки (ресайз).
  */
 export const useColumnSettings = (
-    resource: string,
-    role: string,
     allKeys: string[],
+    settings: StoredColumnSettings | null,
+    onChange: (next: StoredColumnSettings) => void,
 ) => {
-    const key = storageKey(resource, role);
-    const [settings, setSettings] = useState<StoredColumnSettings | null>(() =>
-        load(key, allKeys),
-    );
-
-    useEffect(() => {
-        // При смене ресурса/роли перечитываем сохранённое значение.
-        setSettings(load(key, allKeys));
-    }, [key, allKeys]);
-
     const orderedAll = useMemo(() => {
         const known = (settings?.order ?? []).filter((k) => allKeys.includes(k));
         // Новые колонки (появились после сохранения) — видимы, дописываются в конец.
@@ -92,19 +36,19 @@ export const useColumnSettings = (
         return [...known, ...missing];
     }, [settings, allKeys]);
 
-    const hiddenKeys = useMemo(
-        () => new Set(settings?.hidden ?? []),
-        [settings],
-    );
+    const hiddenKeys = useMemo(() => new Set(settings?.hidden ?? []), [settings]);
 
-    const widths = settings?.widths ?? EMPTY_WIDTHS;
+    const widths = settings?.widths ?? {};
 
     const save = useCallback(
-        (next: StoredColumnSettings) => {
-            localStorage.setItem(key, JSON.stringify(next));
-            setSettings(next);
+        (patch: Partial<StoredColumnSettings>) => {
+            onChange({
+                order: patch.order ?? orderedAll,
+                hidden: patch.hidden ?? settings?.hidden ?? [],
+                widths: patch.widths ?? settings?.widths ?? {},
+            });
         },
-        [key],
+        [onChange, orderedAll, settings],
     );
 
     const toggle = useCallback(
@@ -115,9 +59,9 @@ export const useColumnSettings = (
             } else {
                 hidden.add(columnKey);
             }
-            save({ order: orderedAll, hidden: [...hidden], widths });
+            save({ hidden: [...hidden] });
         },
-        [settings, orderedAll, widths, save],
+        [settings, save],
     );
 
     const move = useCallback(
@@ -126,13 +70,13 @@ export const useColumnSettings = (
             const order = [...orderedAll];
             const [moved] = order.splice(fromIndex, 1);
             order.splice(toIndex, 0, moved);
-            save({ order, hidden: settings?.hidden ?? [], widths });
+            save({ order });
         },
-        [orderedAll, settings, widths, save],
+        [orderedAll, save],
     );
 
-    // Перестановка по ключам (используется при drag&drop заголовков колонок, где
-    // видимые колонки соседствуют в orderedAll со скрытыми).
+    // Перестановка по ключам (drag&drop заголовков колонок, где видимые колонки
+    // соседствуют в orderedAll со скрытыми).
     const moveKey = useCallback(
         (fromKey: string, toKey: string) => {
             if (fromKey === toKey) return;
@@ -142,21 +86,18 @@ export const useColumnSettings = (
             if (fromIdx < 0 || toIdx < 0) return;
             order.splice(fromIdx, 1);
             order.splice(order.indexOf(toKey), 0, fromKey);
-            save({ order, hidden: settings?.hidden ?? [], widths });
+            save({ order });
         },
-        [orderedAll, settings, widths, save],
+        [orderedAll, save],
     );
 
     const setWidth = useCallback(
         (columnKey: string, px: number) => {
-            const nextWidths = { ...widths, [columnKey]: Math.max(40, Math.round(px)) };
             save({
-                order: orderedAll,
-                hidden: settings?.hidden ?? [],
-                widths: nextWidths,
+                widths: { ...widths, [columnKey]: Math.max(40, Math.round(px)) },
             });
         },
-        [orderedAll, settings, widths, save],
+        [widths, save],
     );
 
     return { orderedAll, hiddenKeys, widths, toggle, move, moveKey, setWidth };

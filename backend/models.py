@@ -12,9 +12,11 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -67,6 +69,28 @@ class User(Base):
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
     account = relationship("Account", back_populates="users")
+
+
+class UserPreference(Base):
+    """Серверные настройки интерфейса пользователя (роадмап 2.13).
+
+    Одна строка на (пользователь, ресурс списка); `data` — JSON с настройками
+    этого раздела: порядок/видимость/ширины колонок, сортировка, применённые
+    фильтры, число строк на странице. Настройки переживают перезагрузку и смену
+    устройства (синхронизируются с браузера через /api/preferences).
+    """
+
+    __tablename__ = "user_preferences"
+    __table_args__ = (
+        UniqueConstraint("user_id", "resource", name="uq_user_preferences_user_resource"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    resource = Column(String(100), nullable=False)
+    data = Column(JSON, nullable=False)
 
 
 # --- СПРАВОЧНИКИ ---
