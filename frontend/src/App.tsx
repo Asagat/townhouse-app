@@ -102,9 +102,11 @@ const App = () => {
                     },
                     Table: {
                         rowHoverBg: "rgba(34,174,46,0.08)",
-                        headerBg: "#e3f3e6",
+                        // Фон заголовков: неактивные — серый, активный (сортировка) — светло-зелёный.
+                        headerBg: "#f0f0f0",
                         headerColor: "#0f4d38",
-                        headerSortActiveBg: "#d5eedb",
+                        headerSortHoverBg: "#e3f3e6",
+                        headerSortActiveBg: "#d9f2df",
                     },
                 },
             }}
