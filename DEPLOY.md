@@ -493,12 +493,22 @@ python create_user.py    # админ (идемпотентно)
 
 - snowflake — как в §7.3 (`DB_MIRROR_BACKUPS=../townhouse-app/backend/backups` + тот же hook).
 
+Дополнительно на обеих машинах ставится hook **автодампа перед push** (кто пушит —
+тот и выгружает дамп):
+
+```bash
+./scripts/install_pre_push_hook.sh   # удалить: --remove
+```
+
 **Цикл работы (по очереди):**
 
-1. Активный ПК в конце сеанса выгружает состояние БД:
+1. Активный ПК в конце сеанса выгружает состояние БД. Автоматически — при
+   `git push` (hook `pre-push` запускает `dump_to_sync.sh`), либо вручную, если
+   менялись только данные и пуша не будет:
    `./scripts/dump_to_sync.sh` — кладёт `townhouse_<stamp>.sql` (+ роли) в
    синхронизируемую папку (Synology Drive) и ставит маркер `.git/db_refresh.state`
    («локальная БД уже соответствует этому дампу» — свой дамп повторно не импортируется).
+   Сбой дампа push НЕ блокирует (только предупреждение в `.git/pre-push.log`).
 2. Synology Drive доставляет дамп на второй ПК.
 3. Второй ПК делает обычный `git pull` → hook запускает `update_db_after_pull.sh`:
    догон схемы (на corsus — в backend-контейнере, на snowflake — через `.venv`),
@@ -527,6 +537,8 @@ python create_user.py    # админ (идемпотентно)
 
 # hook — один раз в каждом клоне
 ./scripts/install_post_merge_hook.sh
+# автодамп БД перед push (кто пушит — тот выгружает дамп)
+./scripts/install_pre_push_hook.sh
 ```
 
 **Шаг 2. corsus (docker-стек):**
@@ -705,3 +717,4 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 | `./scripts/update_db_after_pull.sh` | После `git pull`: догон схемы + зеркальные дампы (вызывается hook-ом post-merge) |
 | `./scripts/dump_to_sync.sh` | Активный ПК: выгрузить дамп БД в синхронизируемую папку (`DB_MIRROR_BACKUPS`) и обновить маркер |
 | `./scripts/install_post_merge_hook.sh` | Установить/удалить git-hook `post-merge` (автозапуск после pull) |
+| `./scripts/install_pre_push_hook.sh` | Установить/удалить git-hook `pre-push` (автодамп БД перед push) |
