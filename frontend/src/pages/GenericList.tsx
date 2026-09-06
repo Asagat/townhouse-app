@@ -1,6 +1,6 @@
 // src/pages/GenericList.tsx
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
     Table,
     Button,
@@ -206,6 +206,14 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const { mutate: deleteRecord } = useDelete();
 
     const [modalState, setModalState] = useState<ModalState | null>(null);
+
+    // Защита от «протёкших» фильтров: если компонент всё же переиспользован для другого
+    // ресурса (роуты обычно дают key, но страхуемся), сбрасываем локальное состояние.
+    useEffect(() => {
+        setDraftFilters({});
+        setAppliedCount(0);
+        setFilters([]);
+    }, [resourceName]);
 
     // --- Общий механизм фильтрации (Б10) ---
     // Черновик фильтров по колонкам списка; применяется серверно через setFilters.

@@ -40,7 +40,9 @@ const resourceForRoute = (key: string) => {
     if (key === "expense_report") return <ExpenseReport />;
     if (key === "debtors_report") return <DebtorsReport />;
     if (key === "statement_report") return <StatementReport />;
-    return <GenericList resourceName={key} />;
+    // key — отдельный экземпляр на каждый ресурс: внутреннее состояние (фильтры и пр.)
+    // не должно «перетекать» между списками при переходах по меню.
+    return <GenericList key={key} resourceName={key} />;
 };
 
 // Обёртка защищённых страниц: если нет авторизации — на /login.
