@@ -998,10 +998,10 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                             )}
                             {recordActions && (
                                 <>
-                                    <span style={{ color: "#888", fontSize: 12, marginLeft: 4 }}>
-                                        Запись № {selectedRecord?.id ?? ""}:
-                                    </span>
                                     {recordActions}
+                                    <span style={{ color: "#888", fontSize: 12, marginLeft: 4 }}>
+                                        Запись № {selectedRecord?.id ?? ""}
+                                    </span>
                                 </>
                             )}
                         </div>
