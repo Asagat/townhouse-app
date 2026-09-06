@@ -241,6 +241,30 @@ def generate_receipts(
     return {"year": year, "month": month, "created": rows}
 
 
+@router.get("/receipt_documents/periods")
+def receipt_periods(
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Границы периодов квитанций — для фильтра «Год» в журнале «Квитанции».
+
+    min_year — самый ранний год, за который есть квитанции или начисления
+    (входящие остатки внесены первичными строками начислений), max_year — текущий год.
+    """
+    min_year = db.execute(text(
+        "SELECT MIN(y) FROM ("
+        " SELECT period_year AS y FROM receipt_documents"
+        " UNION"
+        " SELECT EXTRACT(YEAR FROM accrual_date)::int AS y FROM accruals_register"
+        ") t"
+    )).scalar()
+    current_year = date.today().year
+    return {
+        "min_year": int(min_year) if min_year is not None else current_year,
+        "max_year": current_year,
+    }
+
+
 def _raise_for_resident_other(user: User | None, own_account_id: int, receipt: ReceiptDocument) -> None:
     """resident может видеть только свои квитанции (по привязке users.account_id)."""
     if (

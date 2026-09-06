@@ -67,7 +67,9 @@ a {
   font-weight: 700;
 }
 
-/* --- Режим просмотра формы: текст в disabled-полях остаётся контрастным --- */
+/* --- Режим просмотра формы: текст в disabled-полях остаётся контрастным, а фон
+   ячеек — как у обычных недоступных к редактированию полей (серый, как в
+   «Просмотре документа показаний»), а не белый. --- */
 .form-view-mode .ant-input[disabled],
 .form-view-mode textarea.ant-input[disabled],
 .form-view-mode .ant-input-number-disabled .ant-input-number-input,
@@ -85,7 +87,7 @@ a {
 .form-view-mode .ant-input-number-disabled .ant-input-number-input,
 .form-view-mode .ant-picker.ant-picker-disabled,
 .form-view-mode .ant-select-disabled .ant-select-selector {
-  background: #ffffff;
+  background: #f5f5f5;
 }
 .form-view-mode .ant-input[disabled]::placeholder,
 .form-view-mode .ant-picker.ant-picker-disabled .ant-picker-input > input::placeholder {

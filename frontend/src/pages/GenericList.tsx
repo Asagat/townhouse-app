@@ -1,6 +1,6 @@
 // src/pages/GenericList.tsx
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dayjs from "dayjs";
 import {
     Table,
@@ -57,7 +57,8 @@ import {
     getReferenceSource,
     getResourceSelectOptions,
     getSelectOptions,
-    isReferenceFilter,
+    isResourceDynamicSelect,
+    isResourceReferenceFilter,
     isResourceSelectFilter,
 } from "../config/filters";
 import { RecordFormModal } from "../components/common/RecordFormModal";
@@ -90,7 +91,7 @@ import type { SortOrder } from "antd/es/table/interface";
 import { BRAND } from "../config/colors";
 import { canCreate, canEdit, canDelete } from "../auth/can";
 import { useColumnSettings } from "../hooks/useColumnSettings";
-import { openAuthorizedPdf } from "../auth/http";
+import { openAuthorizedPdf, authedFetch } from "../auth/http";
 
 interface GenericListProps {
     resourceName: string;
@@ -208,7 +209,11 @@ const getValueByPath = (obj: any, path: string): any => {
 
 /** Вид фильтра по колонке (глобальная карта + ресурсо-зависимые select-поля). */
 const kindForColumn = (resourceName: string, key: string) =>
-    isResourceSelectFilter(resourceName, key) ? "select" : getFilterKind(key);
+    isResourceSelectFilter(resourceName, key) ||
+    isResourceDynamicSelect(resourceName, key) ||
+    isResourceReferenceFilter(resourceName, key)
+        ? "select"
+        : getFilterKind(key);
 
 /**
  * Восстанавливает черновик панели «Фильтры» из применённого CrudFilter-списка
@@ -378,6 +383,31 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const [receiptViewId, setReceiptViewId] = useState<number | undefined>(undefined);
     const [writeOffsModalOpen, setWriteOffsModalOpen] = useState(false);
     const [writeoffViewId, setWriteoffViewId] = useState<number | undefined>(undefined);
+
+    // Границы годов фильтра «Год» списка квитанций (сервер: /receipt_documents/periods):
+    // от самого раннего года записей (квитанции или входящие остатки начислений)
+    // до текущего года. Пока не пришли — доступен только текущий год.
+    const [receiptYearRange, setReceiptYearRange] = useState<{
+        min_year: number;
+        max_year: number;
+    } | null>(null);
+    useEffect(() => {
+        if (resourceName !== "receipt_documents") return;
+        let cancelled = false;
+        authedFetch(`${apiUrl}/receipt_documents/periods`)
+            .then((resp) => (resp.ok ? resp.json() : null))
+            .then((data) => {
+                if (!cancelled && data && Number.isFinite(data.min_year) && Number.isFinite(data.max_year)) {
+                    setReceiptYearRange(data);
+                }
+            })
+            .catch(() => {
+                // Некритично: остаётся диапазон по умолчанию (текущий год).
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [resourceName, apiUrl]);
 
     const isAccrualsRegister = resourceName === "accruals_register";
     const isAccrualDocuments = resourceName === "accrual_documents";
@@ -560,9 +590,15 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         setDraftFilters((prev) => ({ ...prev, [key]: { ...(prev[key] ?? {}), ...patch } }));
 
     // Вид фильтра по колонке: глобальная карта + ресурсо-зависимые select-поля
-    // (например «Статус» у тарифов — Действующий/Архивный).
+    // (например «Статус» у тарифов — Действующий/Архивный, «Год» квитанций —
+    // динамический select от первого года записей до текущего, «Автор» и «Лицевой
+    // счёт» квитанций — справочные select).
     const getColumnKind = (key: string) =>
-        isResourceSelectFilter(resourceName, key) ? "select" : getFilterKind(key);
+        isResourceSelectFilter(resourceName, key) ||
+        isResourceDynamicSelect(resourceName, key) ||
+        isResourceReferenceFilter(resourceName, key)
+            ? "select"
+            : getFilterKind(key);
 
     const buildCrudFilters = (): CrudFilter[] => {
         const list: CrudFilter[] = [];
@@ -609,6 +645,16 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         setCurrent(1);
         setFiltersOpen(false);
     };
+
+    // Варианты фильтра «Год»: от первого года с записями до текущего (свежие сверху).
+    const yearOptions = useMemo(() => {
+        const nowYear = new Date().getFullYear();
+        const minY = receiptYearRange?.min_year ?? nowYear;
+        const maxY = Math.max(receiptYearRange?.max_year ?? nowYear, nowYear);
+        const opts: Array<{ value: number; label: string }> = [];
+        for (let y = maxY; y >= minY; y -= 1) opts.push({ value: y, label: String(y) });
+        return opts;
+    }, [receiptYearRange]);
 
     const resetFilters = () => {
         setDraftFilters({});
@@ -676,28 +722,33 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             );
         }
         if (kind === "select") {
+            // Справочный фильтр (значения из того же справочника, что и колонка):
+            // «Автор» — из пользователей, «Лицевой счёт» квитанций — из счетов и т.п.
+            const refSource = getReferenceSource(resourceName, col.key);
+            if (refSource) {
+                return (
+                    <ReferenceFilterSelect
+                        source={refSource}
+                        value={d.sel}
+                        onChange={(v: any) => setDraft(col.key, { sel: v })}
+                    />
+                );
+            }
+            // «Год» квитанций: динамический диапазон (первый год записей … текущий).
+            const dynamicOptions =
+                isResourceDynamicSelect(resourceName, col.key) && col.key === "period_year"
+                    ? yearOptions
+                    : [];
             const resourceOptions = getResourceSelectOptions(resourceName, col.key);
             const options =
-                resourceOptions.length > 0
-                    ? resourceOptions
-                    : isReferenceFilter(col.key)
-                      ? []
+                dynamicOptions.length > 0
+                    ? dynamicOptions
+                    : resourceOptions.length > 0
+                      ? resourceOptions
                       : getSelectOptions(col.key).map((o) => ({
                             value: o.value,
                             label: o.label,
                         }));
-            if (isReferenceFilter(col.key)) {
-                const refSource = getReferenceSource(col.key);
-                if (refSource) {
-                    return (
-                        <ReferenceFilterSelect
-                            source={refSource}
-                            value={d.sel}
-                            onChange={(v: any) => setDraft(col.key, { sel: v })}
-                        />
-                    );
-                }
-            }
             return (
                 <Select
                     allowClear
@@ -747,7 +798,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     };
 
     // --- Панель действий выбранной записи (2.12): кнопки-иконки с tooltip (Б7) ---
-    // Стиль как у «Удалить»: белый фон + цветной акцент (у каждой кнопки свой цвет).
+    // Стиль как у «Удалить»: белый фон + цветной акцент. «Просмотр» и «Редактировать»
+    // — в одном цвете (зелёный акцент, по решению владельца), «Удалить» — красный.
     const iconButton = (
         key: string,
         label: string,
@@ -782,7 +834,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         if (isWriteoffDocuments) {
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setWriteoffViewId(record.id), "#1677ff")}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setWriteoffViewId(record.id), "#22ae2e")}
                     {roleCanEdit && record.status === "new" && (
                         <Tooltip key="cancel" title="Отменить документ">
                             <Popconfirm
@@ -801,7 +853,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         if (isReceiptDocuments) {
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setReceiptViewId(record.id), "#1677ff")}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setReceiptViewId(record.id), "#22ae2e")}
                     {iconButton("pdf", "PDF", <FilePdfOutlined />, () =>
                         openAuthorizedPdf(
                             `${apiUrl}/receipt_documents/${record.id}/pdf`,
@@ -831,7 +883,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             };
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => openDoc(true), "#1677ff")}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => openDoc(true), "#22ae2e")}
                     {roleCanEdit &&
                         iconButton("edit", "Редактировать", <EditOutlined />, () => openDoc(false), "#22ae2e")}
                     {roleCanDelete &&
@@ -858,7 +910,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             };
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => openDoc(true), "#1677ff")}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => openDoc(true), "#22ae2e")}
                     {roleCanEdit &&
                         iconButton("edit", "Редактировать", <EditOutlined />, () => openDoc(false), "#22ae2e")}
                     {roleCanDelete &&
@@ -880,7 +932,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         if (!isReadOnly) {
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setModalState({ mode: "view", record }), "#1677ff")}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setModalState({ mode: "view", record }), "#22ae2e")}
                     {roleCanEdit &&
                         iconButton("edit", "Редактировать", <EditOutlined />, () => setModalState({ mode: "edit", record }), "#22ae2e")}
                     {roleCanDelete &&
@@ -927,6 +979,9 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             width: widths["id"] ?? 70,
             sorter: true,
             sortOrder: getColumnSortOrder('id'),
+            // Без всплывающей подсказки сортировки: оверлей antd над заголовком
+            // перекрывает кнопки панели записи (например «Просмотр») над таблицей.
+            showSorterTooltip: false,
             onHeaderCell: () => headerResizeProps("id", setWidth),
             // Сортировка по умолчанию — на «Периоде» (см. выше); стрелку на ID не ставим.
             ...(defaultSortDescPeriod ? {} : { defaultSortOrder: 'descend' as const }),
@@ -949,11 +1004,12 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 },
                 sorter: sortable,
                 sortOrder: getColumnSortOrder(col.key),
+                // Без всплывающей подсказки сортировки: оверлей antd над заголовком
+                // перекрывает кнопки панели записи над таблицей.
+                showSorterTooltip: false,
                 onHeaderCell: () => ({
                     ...headerResizeProps(col.key, setWidth),
-                    ...(sortable
-                        ? { style: { cursor: 'pointer' }, title: 'Кликните для сортировки' }
-                        : {}),
+                    ...(sortable ? { style: { cursor: 'pointer' } } : {}),
                 }),
                 // Подсветка сортировки по умолчанию для регистра начислений.
                 ...(defaultSortDescPeriod && col.key === 'accrual_date'

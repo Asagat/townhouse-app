@@ -1,11 +1,18 @@
 // src/components/common/renderFieldControl.tsx
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Input, InputNumber, DatePicker, Select, Switch, Form } from "antd";
 import type { FormInstance } from "antd";
 import type { FieldMeta } from "../../types";
 import { ReferenceSelect } from "./ReferenceSelect";
-import { DATE_FORMAT } from "../../config/formatters";
+import {
+    DATE_FORMAT,
+    formatPhoneInput,
+    isMoneyFieldName,
+    moneyInputFormatter,
+    moneyInputParser,
+    normalizePhone,
+} from "../../config/formatters";
 
 // Типы операций «Приход/Расход» — и по метке (value из /meta), и по имени члена enum.
 // Надёжно определяем приход/расход независимо от того, в каком виде пришло значение.
@@ -14,6 +21,46 @@ const EXPENSE_KEYS = ["Расход из кассы", "Расход из бан�
 
 const isIncomeType = (t?: string) => !!t && INCOME_KEYS.includes(t);
 const isExpenseType = (t?: string) => !!t && EXPENSE_KEYS.includes(t);
+
+/**
+ * Телефон: контроль ввода (только цифры, не более 10 локальных, «8»/«+7» в начале
+ * отбрасываются). Во время набора показываются цифры без маски (иначе переформатирование
+ * на каждом символе ломает позицию курсора и переставляет цифры); маска
+ * «+7(XXX)XXX-XX-XX» отображается при выходе из поля. Хранимое значение — локальные цифры.
+ */
+const PhoneInput = ({
+    value,
+    onChange,
+}: {
+    value?: string;
+    onChange?: (value: string) => void;
+}) => {
+    const [focused, setFocused] = useState(false);
+    const digits = normalizePhone(value);
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const next = normalizePhone(e.target.value);
+        if (next !== digits) {
+            onChange?.(next);
+        }
+    };
+
+    return (
+        <Input
+            style={{ width: "100%" }}
+            inputMode="numeric"
+            placeholder="+7 (___) ___-__-__"
+            maxLength={11}
+            value={focused ? digits : formatPhoneInput(digits)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => {
+                setFocused(false);
+                onChange?.(normalizePhone(digits));
+            }}
+            onChange={handleChange}
+        />
+    );
+};
 
 /**
  * Выбор статьи аналитики для документа «Приход/Расход».
@@ -76,9 +123,27 @@ export const renderFieldControl = (field: FieldMeta, form?: FormInstance, resour
     switch (field.type) {
         case "text":
             return <Input.TextArea rows={3} />;
+        case "string":
+            // Телефон: ввод только цифр с маской «+7(XXX)XXX-XX-XX».
+            if (field.name === "phone") {
+                return <PhoneInput />;
+            }
+            return <Input />;
         case "integer":
             return <InputNumber style={{ width: "100%" }} precision={0} />;
         case "decimal":
+            // Денежные поля (Сумма, Цена и т.п.) — с разделителями разрядов и 2 знаками.
+            if (isMoneyFieldName(field.name)) {
+                return (
+                    <InputNumber
+                        style={{ width: "100%" }}
+                        step={0.01}
+                        precision={2}
+                        formatter={moneyInputFormatter}
+                        parser={moneyInputParser}
+                    />
+                );
+            }
             return <InputNumber style={{ width: "100%" }} step={0.01} />;
         case "boolean":
             return <Switch />;

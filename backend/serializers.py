@@ -46,6 +46,17 @@ def _user_serializer(user: User) -> dict:
     }
 
 
+def _creator_name(user: User | None) -> str | None:
+    """Имя автора для колонки «Автор»: ФИО, а если не заполнено — логин.
+
+    У части сотрудников full_name не заполнен — иначе колонка «Автор» в журналах
+    документов остаётся пустой и её нельзя отфильтровать по пользователю.
+    """
+    if user is None:
+        return None
+    return user.full_name or user.username
+
+
 def make_serializer(fields: list[str]):
     def serialize(item: Any) -> dict:
         result = {}
@@ -153,7 +164,7 @@ def transaction_serializer(item: Transaction) -> dict:
         "updated_by": item.updated_by,
         "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         "change_description": item.change_description,
-        "created_by_name": item.creator.full_name if item.creator else None,
+        "created_by_name": _creator_name(item.creator),
         "updated_by_name": item.updater.full_name if item.updater else None,
     }
 
@@ -274,7 +285,7 @@ def meter_reading_document_serializer(item: MeterReadingDocument) -> dict:
         "updated_by": item.updated_by,
         "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         "change_description": item.change_description,
-        "created_by_name": item.creator.full_name if item.creator else None,
+        "created_by_name": _creator_name(item.creator),
         "updated_by_name": item.updater.full_name if item.updater else None,
     }
 
@@ -412,7 +423,7 @@ def accrual_document_serializer(item: AccrualDocument) -> dict:
         "updated_by": item.updated_by,
         "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         "change_description": item.change_description,
-        "created_by_name": item.creator.full_name if item.creator else None,
+        "created_by_name": _creator_name(item.creator),
         "updated_by_name": item.updater.full_name if item.updater else None,
     }
 
@@ -568,7 +579,7 @@ def receipt_document_serializer(item: ReceiptDocument) -> dict:
         "updated_by": item.updated_by,
         "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         "change_description": item.change_description,
-        "created_by_name": item.creator.full_name if item.creator else None,
+        "created_by_name": _creator_name(item.creator),
         "updated_by_name": item.updater.full_name if item.updater else None,
     }
 
@@ -598,7 +609,7 @@ def writeoff_document_serializer(item: WriteoffDocument) -> dict:
         "updated_by": item.updated_by,
         "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         "change_description": item.change_description,
-        "created_by_name": item.creator.full_name if item.creator else None,
+        "created_by_name": _creator_name(item.creator),
         "updated_by_name": item.updater.full_name if item.updater else None,
         "items_count": len(item.items) if item.items else 0,
         "total_allocated": total_allocated,

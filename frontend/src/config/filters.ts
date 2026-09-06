@@ -14,7 +14,7 @@
 
 export type FilterKind = "text" | "number" | "date" | "datetime" | "bool" | "select";
 
-export type SelectOption = { value: string; label: string };
+export type SelectOption = { value: string | number; label: string };
 
 const TEXT_KEYS: string[] = [
     "full_name",
@@ -169,6 +169,14 @@ const REFERENCE_SOURCES: Record<string, ReferenceFilterSource> = {
         valueOf: (i: any) => i.name ?? "",
         labelOf: (i: any) => i.name ?? `#${i.id}`,
     },
+    // «Автор» в журналах документов: список зарегистрированных пользователей
+    // (эндпоинт /creators; жители не создают документы). Значение — как показывается
+    // в колонке «Автор» (ФИО, а если не заполнено — логин).
+    creators: {
+        resource: "creators",
+        valueOf: (i: any) => (i.full_name ?? i.username ?? "").toString(),
+        labelOf: (i: any) => i.full_name ?? i.username ?? `#${i.id}`,
+    },
 };
 
 // Какие display-колонки списков фильтровать как справочник (select), а не «содержит».
@@ -183,27 +191,57 @@ export const FILTER_REFERENCE_COLUMNS: Record<string, string> = {
     "services_type.services_type": "services_type",
     "meter.serial_number": "meters",
     "tariff_type.name": "tariff_types",
+    "created_by_name": "creators",
 };
 
-export const isReferenceFilter = (columnKey: string): boolean =>
-    columnKey in FILTER_REFERENCE_COLUMNS;
+// Ресурсо-зависимые справочные колонки: колонка с одним и тем же именем в разных
+// списках фильтруется по-разному. Например «Лицевой счёт» (account_number) в списке
+// квитанций — выбором из справочника лицевых счетов, а не текстом «содержит».
+const RESOURCE_REFERENCE_COLUMNS: Record<string, Record<string, string>> = {
+    receipt_documents: { account_number: "accounts" },
+};
+
+export const isResourceReferenceFilter = (resourceName: string, columnKey: string): boolean =>
+    columnKey in FILTER_REFERENCE_COLUMNS || !!RESOURCE_REFERENCE_COLUMNS[resourceName]?.[columnKey];
 
 export const getReferenceSource = (
+    resourceName: string,
     columnKey: string,
 ): ReferenceFilterSource | undefined => {
-    const resource = FILTER_REFERENCE_COLUMNS[columnKey];
+    const resource =
+        RESOURCE_REFERENCE_COLUMNS[resourceName]?.[columnKey] ?? FILTER_REFERENCE_COLUMNS[columnKey];
     return resource ? REFERENCE_SOURCES[resource] : undefined;
 };
 
 // --- Ресурсо-зависимые select-фильтры ---
 // Отдельные поля одного имени в разных списках фильтруются по-разному. Например
 // колонка «Статус»: у тарифов это «Действующий/Архивный», а не текстовый «содержит».
+
+/** Варианты «Месяц» списка квитанций (значение — номер месяца). */
+const MONTH_SELECT_OPTIONS: SelectOption[] = [
+    { value: 1, label: "Январь" },
+    { value: 2, label: "Февраль" },
+    { value: 3, label: "Март" },
+    { value: 4, label: "Апрель" },
+    { value: 5, label: "Май" },
+    { value: 6, label: "Июнь" },
+    { value: 7, label: "Июль" },
+    { value: 8, label: "Август" },
+    { value: 9, label: "Сентябрь" },
+    { value: 10, label: "Октябрь" },
+    { value: 11, label: "Ноябрь" },
+    { value: 12, label: "Декабрь" },
+];
+
 const RESOURCE_SELECT_OPTIONS: Record<string, Record<string, SelectOption[]>> = {
     tariffs: {
         status: [
             { value: "active", label: "Действующий" },
             { value: "archived", label: "Архивный" },
         ],
+    },
+    receipt_documents: {
+        period_month: MONTH_SELECT_OPTIONS,
     },
 };
 
@@ -214,6 +252,16 @@ export const getResourceSelectOptions = (
     resourceName: string,
     columnKey: string,
 ): SelectOption[] => RESOURCE_SELECT_OPTIONS[resourceName]?.[columnKey] ?? [];
+
+// --- Select-фильтры, значения которых подтягиваются с сервера (диапазон данных) ---
+// «Год» в списке квитанций: от самого раннего года записей (квитанции/начисления —
+// входящие остатки) до текущего года; значения берутся из /receipt_documents/periods.
+const RESOURCE_DYNAMIC_SELECT_FIELDS: Record<string, string[]> = {
+    receipt_documents: ["period_year"],
+};
+
+export const isResourceDynamicSelect = (resourceName: string, columnKey: string): boolean =>
+    !!RESOURCE_DYNAMIC_SELECT_FIELDS[resourceName]?.includes(columnKey);
 
 // --- Фильтры по умолчанию для списка ---
 // Применяются при открытии раздела (например «Тарифы» по умолчанию показывают только

@@ -38,6 +38,14 @@ const getDefaultTitle = (date: Dayjs, serviceName?: string): string => {
 
 const DEFAULT_SERVICE_TYPE_LABEL = "Электричество";
 
+/** Показание в режиме просмотра: разделители разрядов, без дробной части. */
+const formatReading = (v?: number | string): string => {
+    if (v === undefined || v === null || v === "") return "";
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "";
+    return n.toLocaleString("ru-RU", { maximumFractionDigits: 0 });
+};
+
 /**
  * Модальное окно для массового ввода показаний счетчиков.
  * Без documentId — режим создания: название документа генерируется автоматически,
@@ -221,6 +229,7 @@ export const BulkReadingsModal = ({
                         style={{ width: "100%" }}
                         step={0.001}
                         disabled={readonly}
+                        {...(readonly ? { formatter: formatReading } : {})}
                         value={
                             readings[record.id] !== undefined && readings[record.id] !== ""
                                 ? Number(readings[record.id])

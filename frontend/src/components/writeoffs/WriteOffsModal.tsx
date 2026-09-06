@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Modal, Button, message, Typography, Table } from "antd";
 import { useApiUrl, useCustomMutation } from "@refinedev/core";
-import { formatNumber } from "../../config/formatters";
+import { formatMoney } from "../../config/formatters";
 
 interface WriteOffsModalProps {
     open: boolean;
@@ -71,7 +71,7 @@ export const WriteOffsModal = ({ open, onClose, onSaved }: WriteOffsModalProps) 
                     const total = rows.reduce((s, r) => s + (r.written_off ?? 0), 0);
                     message.success(
                         total > 0
-                            ? `Списание выполнено (документ №${data.document?.id ?? 0}): распределено ${formatNumber(total)} по ${rows.length} счетам`
+                            ? `Списание выполнено (документ №${data.document?.id ?? 0}): распределено ${formatMoney(total)} по ${rows.length} счетам`
                             : "Списание выполнено: нет задолженности для распределения",
                     );
                     onSaved();
@@ -88,9 +88,9 @@ export const WriteOffsModal = ({ open, onClose, onSaved }: WriteOffsModalProps) 
 
     const columns = [
         { title: "№ счёта", dataIndex: "account_id", key: "account_id" },
-        { title: "Начислено", dataIndex: "accrued", key: "accrued", render: formatNumber },
-        { title: "Доступно", dataIndex: "available", key: "available", render: formatNumber },
-        { title: "Списано", dataIndex: "written_off", key: "written_off", render: formatNumber },
+        { title: "Начислено", dataIndex: "accrued", key: "accrued", render: formatMoney },
+        { title: "Доступно", dataIndex: "available", key: "available", render: formatMoney },
+        { title: "Списано", dataIndex: "written_off", key: "written_off", render: formatMoney },
     ];
 
     const totalWritten = (result ?? []).reduce((s, r) => s + (r.written_off ?? 0), 0);
@@ -131,7 +131,7 @@ export const WriteOffsModal = ({ open, onClose, onSaved }: WriteOffsModalProps) 
                 <div style={{ marginBottom: 16 }}>
                     <Typography.Text strong>
                         {doc && doc.id ? `Документ «Списание задолженностей» №${doc.id} (${doc.status}). ` : ""}
-                        Итог: списано {formatNumber(totalWritten)} по {totalAccounts} счетам.
+                        Итог: списано {formatMoney(totalWritten)} по {totalAccounts} счетам.
                         Переплата (если есть) остаётся отрицательным остатком счёта.
                     </Typography.Text>
                 </div>

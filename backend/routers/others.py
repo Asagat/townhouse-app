@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from models import Account, User
+from models import Account, User, UserRole
 from services import _service_name
 
 
@@ -193,3 +193,24 @@ def get_my_statement(
         return build_account_statement(db, account_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Лицевой счёт не найден")
+
+
+@router.get("/creators")
+def list_creators(
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Пользователи для фильтра «Автор» в журналах документов.
+
+    Жители исключены — документы они не создают. Значение фильтра (и колонка
+    «Автор») — full_name, а если ФИО не заполнено — логин (см. serializers._creator_name).
+    """
+    users = (
+        db.query(User)
+        .filter(User.role != UserRole.resident)
+        .order_by(User.full_name.asc(), User.username.asc())
+        .all()
+    )
+    return [
+        {"id": u.id, "username": u.username, "full_name": u.full_name} for u in users
+    ]

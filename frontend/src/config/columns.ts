@@ -1,7 +1,7 @@
 // src/config/columns.ts
 
 import type { Column, FieldMeta } from '../types';
-import { formatDate, formatDateTime, formatNumber, formatBool, formatPeriod } from './formatters';
+import { formatDate, formatDateTime, formatNumber, formatBool, formatPeriod, formatMonth, formatMoney } from './formatters';
 
 /**
  * Базовые колонки по умолчанию, если для ресурса не задана своя конфигурация
@@ -55,7 +55,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'contractor.full_name', label: 'Контрагент' },
         { key: 'owner.full_name', label: 'Собственник' },
         { key: 'transaction_type', label: 'Тип операции' },
-        { key: 'amount', label: 'Сумма', format: formatNumber },
+        { key: 'amount', label: 'Сумма', format: formatMoney },
         { key: 'notes', label: 'Примечание' },
         { key: 'created_by_name', label: 'Автор' },
     ],
@@ -72,7 +72,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'contractor.full_name', label: 'Контрагент' },
         { key: 'owner.full_name', label: 'Собственник' },
         { key: 'transaction_type', label: 'Тип операции' },
-        { key: 'amount', label: 'Сумма', format: formatNumber },
+        { key: 'amount', label: 'Сумма', format: formatMoney },
         { key: 'notes', label: 'Примечание' },
         { key: 'created_by_name', label: 'Автор' },
     ],
@@ -87,7 +87,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'comment', label: 'Примечание' },
         { key: 'accrual_date', label: 'Период', format: formatPeriod },
         { key: 'accruals_count', label: 'Количество записей' },
-        { key: 'total_amount', label: 'Общая сумма', format: formatNumber },
+        { key: 'total_amount', label: 'Общая сумма', format: formatMoney },
         { key: 'created_at', label: 'Дата создания', format: formatDateTime },
         { key: 'created_by_name', label: 'Автор' },
     ],
@@ -105,10 +105,10 @@ export const columnsConfig: Record<string, Column[]> = {
             label: 'Тариф',
             format: (v: any) =>
                 v && v.price != null
-                    ? `${formatNumber(v.price)} ₸${v.unit ? ' / ' + v.unit : ''}`
+                    ? `${formatMoney(v.price)} ₸${v.unit ? ' / ' + v.unit : ''}`
                     : '—',
         },
-        { key: 'amount', label: 'Сумма', format: formatNumber },
+        { key: 'amount', label: 'Сумма', format: formatMoney },
         { key: 'document_title', label: 'Документ' },
         { key: 'notes', label: 'Примечание' },
     ],
@@ -118,9 +118,9 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'account.account_number', label: 'Лицевой счёт' },
         { key: 'services_type.services_type', label: 'Вид услуги' },
         { key: 'operation_date', label: 'Дата операции', format: formatDateTime },
-        { key: 'income', label: 'Приход', format: formatNumber },
-        { key: 'expense', label: 'Расход', format: formatNumber },
-        { key: 'balance_after', label: 'Баланс', format: formatNumber },
+        { key: 'income', label: 'Приход', format: formatMoney },
+        { key: 'expense', label: 'Расход', format: formatMoney },
+        { key: 'balance_after', label: 'Баланс', format: formatMoney },
         { key: 'document_title', label: 'Документ' },
         { key: 'notes', label: 'Примечание' },
     ],
@@ -132,9 +132,9 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'article.name', label: 'Статья' },
         { key: 'contractor.full_name', label: 'Контрагент' },
         { key: 'operation_date', label: 'Дата операции', format: formatDateTime },
-        { key: 'income', label: 'Приход', format: formatNumber },
-        { key: 'expense', label: 'Расход', format: formatNumber },
-        { key: 'balance_after', label: 'Баланс', format: formatNumber },
+        { key: 'income', label: 'Приход', format: formatMoney },
+        { key: 'expense', label: 'Расход', format: formatMoney },
+        { key: 'balance_after', label: 'Баланс', format: formatMoney },
         { key: 'document_title', label: 'Документ' },
         { key: 'notes', label: 'Примечание' },
     ],
@@ -151,7 +151,7 @@ export const columnsConfig: Record<string, Column[]> = {
     ],
 
     tariffs: [
-        { key: 'price', label: 'Цена', format: formatNumber },
+        { key: 'price', label: 'Цена', format: formatMoney },
         { key: 'unit', label: 'Ед. изм.' },
         { key: 'valid_from', label: 'Действует с', format: formatDate },
         {
@@ -202,12 +202,12 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'account_number', label: 'Лицевой счёт' },
         { key: 'issued_at', label: 'Дата документа', format: formatDateTime },
         { key: 'created_at', label: 'Дата создания', format: formatDateTime },
-        { key: 'period_month', label: 'Месяц' },
+        { key: 'period_month', label: 'Месяц', format: formatMonth },
         { key: 'period_year', label: 'Год' },
-        { key: 'total_amount', label: 'Начислено', format: formatNumber },
-        { key: 'debt', label: 'Долг', format: formatNumber },
-        { key: 'overpayment', label: 'Переплата', format: formatNumber },
-        { key: 'payable_amount', label: 'К оплате', format: formatNumber },
+        { key: 'total_amount', label: 'Начислено', format: formatMoney },
+        { key: 'debt', label: 'Долг', format: formatMoney },
+        { key: 'overpayment', label: 'Переплата', format: formatMoney },
+        { key: 'payable_amount', label: 'К оплате', format: formatMoney },
         { key: 'created_by_name', label: 'Автор' },
     ],
 
@@ -215,7 +215,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'writeoff_date', label: 'Дата', format: formatDate },
         { key: 'status', label: 'Статус' },
         { key: 'items_count', label: 'Записей' },
-        { key: 'total_allocated', label: 'Распределено', format: formatNumber },
+        { key: 'total_allocated', label: 'Распределено', format: formatMoney },
         { key: 'title', label: 'Название' },
         { key: 'created_at', label: 'Дата создания', format: formatDateTime },
         { key: 'created_by_name', label: 'Автор' },

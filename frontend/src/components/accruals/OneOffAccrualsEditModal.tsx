@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Modal, Button, Table, Input, InputNumber, Space, message, Typography } from "antd";
 import { useApiUrl, useCustom, useCustomMutation } from "@refinedev/core";
-import { formatNumber } from "../../config/formatters";
+import { formatMoney, moneyInputFormatter, moneyInputParser } from "../../config/formatters";
 
 interface CopyRow {
     id: number;
@@ -116,6 +116,8 @@ export const OneOffAccrualsEditModal = ({
                     precision={2}
                     style={{ width: "100%" }}
                     disabled={readonly}
+                    formatter={moneyInputFormatter}
+                    parser={moneyInputParser}
                     value={rec.amount}
                     onChange={(v) => setAmount(rec.id, typeof v === "number" ? v : null)}
                 />
@@ -185,7 +187,7 @@ export const OneOffAccrualsEditModal = ({
             </div>
             <Space style={{ marginTop: 8 }} size="small">
                 <span>
-                    Итог: <b>{formatNumber(totalAmount)}</b> ₸
+                    Итог: <b>{formatMoney(totalAmount)}</b> ₸
                 </span>
             </Space>
         </Modal>

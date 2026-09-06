@@ -5,7 +5,7 @@ import { Modal, Button, Space, Select, InputNumber, Table, Checkbox, Input, mess
 import dayjs from "dayjs";
 import { useApiUrl, useCustom, useCustomMutation } from "@refinedev/core";
 import type { AccrualPreviewRow } from "../../types";
-import { formatNumber } from "../../config/formatters";
+import { formatMoney, formatNumber } from "../../config/formatters";
 
 interface AccrualsCalculationModalProps {
     open: boolean;
@@ -303,7 +303,7 @@ export const AccrualsCalculationModal = ({
             title: "Сумма",
             dataIndex: "amount",
             key: "amount",
-            render: formatNumber,
+            render: formatMoney,
         },
     ];
 

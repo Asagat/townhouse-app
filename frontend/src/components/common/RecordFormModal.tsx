@@ -6,6 +6,7 @@ import dayjs from "dayjs";
 import type { FieldMeta } from "../../types";
 import { renderFieldControl } from "./renderFieldControl";
 import { sortFieldsForForm } from "../../config/columns";
+import { formatDate, formatDateTime, formatMoney, formatPhone, isMoneyFieldName } from "../../config/formatters";
 
 interface RecordFormModalProps {
     open: boolean;
@@ -46,6 +47,19 @@ export const RecordFormModal = ({
     const isReadonlyField = (field: FieldMeta): boolean => {
         const readonlyFields = ['id', 'created_at', 'accruals_count', 'total_amount', 'title'];
         return readonlyFields.includes(field.name);
+    };
+
+    // Текстовое представление поля в режиме просмотра: дата — «DD.MM.YYYY»,
+    // телефон — «+7(XXX)XXX-XX-XX», деньги — с разделителями и 2 знаками,
+    // булево — «Да/Нет».
+    const fieldViewText = (field: FieldMeta): string => {
+        const raw = initialValues?.[field.name];
+        if (field.type === "date") return formatDate(raw);
+        if (field.type === "datetime") return formatDateTime(raw);
+        if (field.type === "boolean") return raw ? "Да" : "Нет";
+        if (isMoneyFieldName(field.name)) return formatMoney(raw);
+        if (field.name === "phone") return formatPhone(raw);
+        return String(raw ?? "—");
     };
 
     useEffect(() => {
@@ -129,26 +143,33 @@ export const RecordFormModal = ({
                 {sortedFields.map((field) => {
                     const fieldReadonly = readonly || isReadonlyField(field);
 
+                    // В режиме просмотра поле НЕ привязываем к хранилищу формы (без name):
+                    // иначе Form.Item подменяет наш отформатированный текст значением из
+                    // формы (dayjs для дат, число для цены и т.п.).
+                    const itemProps: Record<string, any> = { label: field.label };
+                    if (!fieldReadonly) {
+                        itemProps.name = field.name;
+                        itemProps.valuePropName =
+                            field.type === "boolean" ? "checked" : "value";
+                        if (
+                            field.type === "reference" &&
+                            field.reference === "analytic_articles"
+                        ) {
+                            itemProps.dependencies = ["transaction_type"];
+                        }
+                        if (field.required) {
+                            itemProps.rules = [
+                                { required: true, message: `Поле «${field.label}» обязательно` },
+                            ];
+                        }
+                    }
+
                     return (
-                        <Form.Item
-                            key={field.name}
-                            name={field.name}
-                            label={field.label}
-                            valuePropName={field.type === "boolean" ? "checked" : "value"}
-                            dependencies={
-                                field.type === "reference" && field.reference === "analytic_articles"
-                                    ? ["transaction_type"]
-                                    : undefined
-                            }
-                            rules={
-                                !fieldReadonly && field.required
-                                    ? [{ required: true, message: `Поле «${field.label}» обязательно` }]
-                                    : []
-                            }
-                        >
+                        <Form.Item key={field.name} {...itemProps}>
                             {fieldReadonly ? (
-                                // Для readonly полей показываем просто текст, приводим к строке
-                                <Input disabled value={String(initialValues?.[field.name] ?? "—")} />
+                                // Для readonly полей показываем просто текст;
+                                // булево — «Да/Нет», дата — прописью, деньги — с разделителями.
+                                <Input disabled value={fieldViewText(field)} />
                             ) : (
                                 renderFieldControl(field, form, resourceName)
                             )}
