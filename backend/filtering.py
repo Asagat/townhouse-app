@@ -20,6 +20,7 @@ from datetime import date, datetime, time
 
 from sqlalchemy import String, cast
 from sqlalchemy import types as satypes
+from sqlalchemy import Enum as SAEnum
 
 from sorting import SORT_FIELDS, _build_descriptor
 
@@ -86,16 +87,16 @@ def _descriptor_kind(base_model, descriptor: dict) -> str:
 
 
 def _resolve_field(resource: str, model, field: str):
-    """Возвращает {"expr": <Column/скалярный подзапрос>, "kind": ...} либо None."""
+    """Возвращает {"expr": …, "kind": …, "col": …} либо None."""
     descriptor = SORT_FIELDS.get((resource, field))
     if descriptor is not None:
         expr = _build_descriptor(model, descriptor)
         if expr is None:
             return None
-        return {"expr": expr, "kind": _descriptor_kind(model, descriptor)}
+        return {"expr": expr, "kind": _descriptor_kind(model, descriptor), "col": None}
     col = _direct_column(model, field)
     if col is not None:
-        return {"expr": col, "kind": _kind_of_column(col) or "str"}
+        return {"expr": col, "kind": _kind_of_column(col) or "str", "col": col}
     return None
 
 
@@ -128,7 +129,7 @@ def _escape_like(value: str) -> str:
     return (value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_"))
 
 
-def _make_condition(expr, kind: str, op: str, value: str):
+def _make_condition(expr, kind: str, op: str, value: str, col=None):
     """Строит SQL-условие по (выражение, вид, оператор, значение). None — не применимо."""
     if kind == "bool":
         b = _to_bool(value)
@@ -187,8 +188,25 @@ def _make_condition(expr, kind: str, op: str, value: str):
             return expr <= base
         return None
 
-    # Строки и прочие типы (в т.ч. enum-значения).
+    # Строки и прочие типы. Для нативных PG-enum (например, transactions.transaction_type
+    # хранит ИМЯ члена in_cash/out_cash, а не русское значение) приводим значение к члену
+    # enum — иначе сравнение enum-колонки с произвольной строкой некорректно/ошибочно.
     v = value.strip()
+    if col is not None and isinstance(col.type, SAEnum) and getattr(col.type, "enum_class", None):
+        enum_cls = col.type.enum_class
+        member = None
+        try:
+            member = enum_cls[v]  # по имени члена (так хранится в БД)
+        except KeyError:
+            try:
+                member = enum_cls(v)  # запасной вариант: по значению
+            except ValueError:
+                member = None
+        if member is not None:
+            if op == "eq":
+                return expr == member
+            if op == "ne":
+                return expr != member
     if op == "like":
         return cast(expr, String).ilike(f"%{_escape_like(v)}%", escape="\\")
     if op == "eq":
@@ -222,7 +240,7 @@ def build_filter_clauses(resource: str, model, params) -> list:
         info = _resolve_field(resource, model, field)
         if info is None:
             continue
-        cond = _make_condition(info["expr"], info["kind"], op, value)
+        cond = _make_condition(info["expr"], info["kind"], op, value, col=info.get("col"))
         if cond is not None:
             clauses.append(cond)
     return clauses

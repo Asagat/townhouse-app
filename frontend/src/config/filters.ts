@@ -89,11 +89,15 @@ const DATETIME_KEYS: string[] = [
 
 const BOOL_KEYS: string[] = ["is_active", "is_oneoff"];
 
-// Значения выбора для enum-колонок. value — как хранится в БД, label — как в UI.
+// Значения выбора для enum-колонок. value — как ХРАНИТСЯ в БД (для нативных
+// PG-enum это имя члена: in_cash/out_cash/…), label — как показывается в UI
+// (сериализатор отдаёт русское значение enum: «Приход в кассу» и т.п.).
 export const FILTER_SELECT_OPTIONS: Record<string, { value: string; label: string }[]> = {
     transaction_type: [
-        { value: "Доход", label: "Доход" },
-        { value: "Расход", label: "Расход" },
+        { value: "in_cash", label: "Приход в кассу" },
+        { value: "out_cash", label: "Расход из кассы" },
+        { value: "in_bank", label: "Приход в банк" },
+        { value: "out_bank", label: "Расход из банка" },
     ],
     doc_kind: [
         { value: "monthly", label: "Регулярные" },

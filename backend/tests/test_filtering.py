@@ -8,11 +8,14 @@
   - неразрешимые/неприменимые параметры молча игнорируются (200, без ошибки).
 """
 
+from datetime import datetime
+from decimal import Decimal
+
 from fastapi.testclient import TestClient
 
 from app import app
 from auth import create_access_token
-from models import UserRole
+from models import Transaction, TransactionTypeEnum, UserRole
 
 
 def _headers(admin):
@@ -63,6 +66,32 @@ def test_filter_apartments_numeric_range(db, user_factory, account_factory):
     resp = client.get("/api/apartments?_start=0&_end=100&square_lte=0", headers=h)
     assert resp.status_code == 200
     assert resp.headers["X-Total-Count"] == "0"
+
+
+def test_filter_transactions_by_enum(db, user_factory, account_factory):
+    """Фильтр по enum-колонке (transaction_type): значение — имя члена PG-enum."""
+    admin = user_factory("filenum", UserRole.admin)
+    a = account_factory("benum1")
+    b = account_factory("benum2")
+    for acc, tt_name in ((a, "in_cash"), (b, "out_cash")):
+        db.add(Transaction(
+            account_id=acc["account_id"],
+            cash_point_id=acc["cash_point_id"],
+            transaction_type=TransactionTypeEnum[tt_name],
+            amount=Decimal("100"),
+            transaction_date=datetime(2026, 9, 1, 10, 0),
+        ))
+    db.commit()
+    client = TestClient(app)
+    h = _headers(admin)
+
+    resp = client.get("/api/payments?_start=0&_end=50&transaction_type=in_cash", headers=h)
+    assert resp.status_code == 200
+    assert resp.headers["X-Total-Count"] == "1"
+
+    resp = client.get("/api/payments?_start=0&_end=50&transaction_type=out_cash", headers=h)
+    assert resp.status_code == 200
+    assert resp.headers["X-Total-Count"] == "1"
 
 
 def test_filter_unknown_and_bad_params_ignored(db, user_factory, account_factory):
