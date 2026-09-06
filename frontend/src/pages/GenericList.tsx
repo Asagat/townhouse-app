@@ -8,6 +8,10 @@ import {
     Popconfirm,
     Popover,
     Checkbox,
+    Input,
+    InputNumber,
+    Select,
+    DatePicker,
     message,
 } from "antd";
 import {
@@ -21,6 +25,11 @@ import {
     useGetIdentity,
 } from "@refinedev/core";
 import type { FieldMeta, ModalState } from "../types";
+import type { CrudFilter } from "@refinedev/core";
+import {
+    getFilterKind,
+    getSelectOptions,
+} from "../config/filters";
 import { getColumnsForResource } from "../config/columns";
 import { allResources } from "../config/menu";
 import { RecordFormModal } from "../components/common/RecordFormModal";
@@ -164,6 +173,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         setPageSize,
         sorters,
         setSorters,
+        setFilters,
     } = useTable({
         resource: resourceName,
         pagination: {
@@ -196,6 +206,12 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const { mutate: deleteRecord } = useDelete();
 
     const [modalState, setModalState] = useState<ModalState | null>(null);
+
+    // --- Общий механизм фильтрации (Б10) ---
+    // Черновик фильтров по колонкам списка; применяется серверно через setFilters.
+    const [filtersOpen, setFiltersOpen] = useState(false);
+    const [draftFilters, setDraftFilters] = useState<Record<string, any>>({});
+    const [appliedCount, setAppliedCount] = useState(0);
     const [bulkModalOpen, setBulkModalOpen] = useState(false);
     const [editingMeterReadingDocumentId, setEditingMeterReadingDocumentId] = useState<number | undefined>(undefined);
     const [accrualsModalOpen, setAccrualsModalOpen] = useState(false);
@@ -275,6 +291,139 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             field: sortField,
             order: order,
         }]);
+    };
+
+    // --- Фильтрация (Б10): черновик -> серверные фильтры (формат simple-rest) ---
+    const setDraft = (key: string, patch: any) =>
+        setDraftFilters((prev) => ({ ...prev, [key]: { ...(prev[key] ?? {}), ...patch } }));
+
+    const buildCrudFilters = (): CrudFilter[] => {
+        const list: CrudFilter[] = [];
+        for (const col of displayColumns) {
+            if (!isSortableField(col.key)) continue;
+            const d = draftFilters[col.key];
+            if (!d) continue;
+            const kind = getFilterKind(col.key);
+            if (kind === "text") {
+                const v = (d.text ?? "").toString().trim();
+                if (v) list.push({ field: col.key, operator: "contains", value: v });
+            } else if (kind === "number") {
+                if (d.from !== undefined && d.from !== null && d.from !== "") {
+                    list.push({ field: col.key, operator: "gte", value: Number(d.from) });
+                }
+                if (d.to !== undefined && d.to !== null && d.to !== "") {
+                    list.push({ field: col.key, operator: "lte", value: Number(d.to) });
+                }
+            } else if (kind === "date" || kind === "datetime") {
+                const range = d.range;
+                if (range && range[0]) {
+                    list.push({ field: col.key, operator: "gte", value: range[0].format("YYYY-MM-DD") });
+                }
+                if (range && range[1]) {
+                    list.push({ field: col.key, operator: "lte", value: range[1].format("YYYY-MM-DD") });
+                }
+            } else if (kind === "bool") {
+                if (d.bool !== undefined && d.bool !== null) {
+                    list.push({ field: col.key, operator: "eq", value: d.bool });
+                }
+            } else if (kind === "select") {
+                if (d.sel !== undefined && d.sel !== null && d.sel !== "") {
+                    list.push({ field: col.key, operator: "eq", value: d.sel });
+                }
+            }
+        }
+        return list;
+    };
+
+    const applyFilters = () => {
+        const list = buildCrudFilters();
+        setFilters(list, "replace");
+        setAppliedCount(list.length);
+        setCurrent(1);
+        setFiltersOpen(false);
+    };
+
+    const resetFilters = () => {
+        setDraftFilters({});
+        setFilters([], "replace");
+        setAppliedCount(0);
+        setCurrent(1);
+        setFiltersOpen(false);
+    };
+
+    const renderFilterControl = (col: { key: string; label: string }) => {
+        const kind = getFilterKind(col.key);
+        const d = draftFilters[col.key] ?? {};
+        if (kind === "text") {
+            return (
+                <Input
+                    allowClear
+                    placeholder="Содержит…"
+                    value={d.text}
+                    onChange={(e) => setDraft(col.key, { text: e.target.value })}
+                    onPressEnter={applyFilters}
+                />
+            );
+        }
+        if (kind === "number") {
+            return (
+                <Space.Compact style={{ width: "100%" }}>
+                    <InputNumber
+                        style={{ width: "50%" }}
+                        placeholder="от"
+                        value={d.from}
+                        onChange={(v) => setDraft(col.key, { from: v })}
+                    />
+                    <InputNumber
+                        style={{ width: "50%" }}
+                        placeholder="до"
+                        value={d.to}
+                        onChange={(v) => setDraft(col.key, { to: v })}
+                    />
+                </Space.Compact>
+            );
+        }
+        if (kind === "date" || kind === "datetime") {
+            return (
+                <DatePicker.RangePicker
+                    style={{ width: "100%" }}
+                    format="DD.MM.YYYY"
+                    value={d.range}
+                    onChange={(range: any) => setDraft(col.key, { range })}
+                />
+            );
+        }
+        if (kind === "bool") {
+            return (
+                <Select
+                    allowClear
+                    placeholder="Все"
+                    style={{ width: "100%" }}
+                    value={d.bool}
+                    onChange={(v) => setDraft(col.key, { bool: v })}
+                    options={[
+                        { value: true, label: "Да" },
+                        { value: false, label: "Нет" },
+                    ]}
+                />
+            );
+        }
+        if (kind === "select") {
+            return (
+                <Select
+                    allowClear
+                    placeholder="Выбрать…"
+                    style={{ width: "100%" }}
+                    value={d.sel}
+                    onChange={(v) => setDraft(col.key, { sel: v })}
+                    options={getSelectOptions(col.key).map((o) => ({
+                        value: o.value,
+                        label: o.label,
+                    }))}
+                />
+            );
+        }
+        return null;
     };
 
     const handleSubmit = (values: Record<string, any>) => {
@@ -590,6 +739,53 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     {meta?.label ?? resourceName}
                 </h1>
                 <Space>
+                    <Popover
+                        trigger="click"
+                        open={filtersOpen}
+                        onOpenChange={(open) => setFiltersOpen(open)}
+                        placement="bottomRight"
+                        content={
+                            <div style={{ width: 320 }}>
+                                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: "#666" }}>
+                                    Фильтры
+                                </div>
+                                <div style={{ maxHeight: 360, overflow: "auto" }}>
+                                    {displayColumns
+                                        .filter((col) => isSortableField(col.key))
+                                        .map((col) => (
+                                            <div
+                                                key={col.key}
+                                                style={{
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    gap: 8,
+                                                    marginBottom: 8,
+                                                }}
+                                            >
+                                                <div style={{ width: 130, flexShrink: 0, fontSize: 13 }}>
+                                                    {col.label}
+                                                </div>
+                                                <div style={{ flex: 1 }}>
+                                                    {renderFilterControl(col)}
+                                                </div>
+                                            </div>
+                                        ))}
+                                </div>
+                                <Space style={{ marginTop: 8, width: "100%", justifyContent: "flex-end" }}>
+                                    <Button size="small" onClick={resetFilters}>
+                                        Сбросить
+                                    </Button>
+                                    <Button size="small" type="primary" onClick={applyFilters}>
+                                        Применить
+                                    </Button>
+                                </Space>
+                            </div>
+                        }
+                    >
+                        <Button>
+                            Фильтры{appliedCount > 0 ? ` (${appliedCount})` : ""}
+                        </Button>
+                    </Popover>
                     {columns.length > 0 && (
                         <Popover
                             trigger="click"

@@ -77,6 +77,7 @@ from writeoffs import (
 from permissions import require_resource_access
 from field_config import FIELD_CONFIG, MODEL_MAP, coerce_field_value
 from sorting import build_order_clause
+from filtering import build_filter_clauses
 from serializers import SERIALIZERS, _user_serializer
 from services import (build_accrual_register_items, build_transaction_title, calculate_accrual_for_account_service, calculate_accruals_preview, create_accounts_register_entries_for_accruals, resolve_meter_reading_values, resolve_meter_reading_document_values, resolve_transaction_values, set_transaction_title, audit_document_create, audit_document_update, validate_meter_service_type)
 
@@ -371,6 +372,14 @@ def get_list(
         query = query.options(
             joinedload(ServiceType.tariff_type),
         )
+
+    # Общий механизм фильтрации списков (Б10): параметры вида
+    # <field>[_{like|ne|gte|lte}]=<value> (формат @refinedev/simple-rest).
+    # Разрешение полей — как у сортировки (прямые столбцы, вложенные поля, агрегаты,
+    # автор); неизвестные/неприменимые параметры молча пропускаются.
+    if request is not None and request.query_params:
+        for clause in build_filter_clauses(resource, model, request.query_params.multi_items()):
+            query = query.filter(clause)
 
     if _sort:
         order_func = desc if (_order or "").lower() == "desc" else asc
