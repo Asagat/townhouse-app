@@ -38,7 +38,14 @@ import {
 } from "../config/filters";
 import { RecordFormModal } from "../components/common/RecordFormModal";
 import { ReferenceFilterSelect } from "../components/common/ReferenceFilterSelect";
-import { ColumnHeader, SortableColumns } from "../components/common/SortableColumns";
+import {
+    ColumnDragTitle,
+    SortableColumns,
+} from "../components/common/SortableColumns";
+import {
+    headerResizeProps,
+    tableHeaderComponents,
+} from "../components/common/ResizableHeader";
 import {
     DndContext,
     PointerSensor,
@@ -549,12 +556,13 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
 
     const tableColumns = [
         {
-            title: <ColumnHeader columnKey="id" label="ID" draggable={false} onResize={setWidth} />,
+            title: "ID",
             dataIndex: "id",
             key: "id",
             width: widths["id"] ?? 70,
             sorter: true,
             sortOrder: getColumnSortOrder('id'),
+            onHeaderCell: () => headerResizeProps("id", setWidth),
             // Сортировка по умолчанию — на «Периоде» (см. выше); стрелку на ID не ставим.
             ...(defaultSortDescPeriod ? {} : { defaultSortOrder: 'descend' as const }),
         },
@@ -562,9 +570,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             const sortable = isSortableField(col.key);
             const isNested = col.key.includes('.');
             return {
-                title: (
-                    <ColumnHeader columnKey={col.key} label={col.label} onResize={setWidth} />
-                ),
+                title: <ColumnDragTitle columnKey={col.key}>{col.label}</ColumnDragTitle>,
                 dataIndex: col.key,
                 key: col.key,
                 width: widths[col.key],
@@ -578,11 +584,11 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 },
                 sorter: sortable,
                 sortOrder: getColumnSortOrder(col.key),
-                ...(sortable && {
-                    onHeaderCell: () => ({
-                        style: { cursor: 'pointer' },
-                        title: 'Кликните для сортировки',
-                    }),
+                onHeaderCell: () => ({
+                    ...headerResizeProps(col.key, setWidth),
+                    ...(sortable
+                        ? { style: { cursor: 'pointer' }, title: 'Кликните для сортировки' }
+                        : {}),
                 }),
                 // Подсветка сортировки по умолчанию для регистра начислений.
                 ...(defaultSortDescPeriod && col.key === 'accrual_date'
@@ -979,6 +985,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         rowKey="id"
                         dataSource={data}
                         columns={tableColumns}
+                        components={tableHeaderComponents}
                         loading={tableQuery.isLoading}
                         onChange={handleTableChange}
                         pagination={{

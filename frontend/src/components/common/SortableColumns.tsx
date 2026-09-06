@@ -1,8 +1,9 @@
 // src/components/common/SortableColumns.tsx
-// Настройка колонок списка: панель «Отображаемые колонки» (чек-боксы видимости +
-// drag&drop порядка, роадмап 2.10-C) и заголовки таблицы — drag&drop для порядка
-// и ручка ресайза ширины (роадмап 2.1). Сохраняется в localStorage по (ресурс, роль)
-// — см. hooks/useColumnSettings.
+// Настройка колонок списка (роадмап 2.10): панель «Отображаемые колонки» —
+// чек-боксы видимости + drag&drop порядка, и заголовки таблицы, которые можно
+// перетаскивать для смены порядка. Сохраняется в localStorage по (ресурс, роль)
+// — см. hooks/useColumnSettings. Ресайз ширины колонок (2.1) — см.
+// components/common/ResizableHeader.tsx (ручка на правом краю <th>).
 
 import {
     DndContext,
@@ -20,7 +21,6 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Checkbox } from "antd";
 import { HolderOutlined } from "@ant-design/icons";
-import { useRef } from "react";
 
 export interface SortableColumnItem {
     key: string;
@@ -104,99 +104,6 @@ export const ColumnDragTitle = ({
             title="Перетащите, чтобы изменить порядок колонок"
         >
             {children}
-        </span>
-    );
-};
-
-/**
- * Ручка ресайза ширины колонки на правом краю заголовка (роадмап 2.1).
- * Ширина считается дельтой движения указателя от стартовой ширины заголовка
- * (`th.getBoundingClientRect().width`) — работает при любом scroll таблицы,
- * включая `scroll={{ x: 'max-content' }}`.
- * pointer-события ручки не запускают ни drag колонки (dnd-kit), ни сортировку по клику.
- */
-const ColumnResizeHandle = ({
-    columnKey,
-    onResize,
-}: {
-    columnKey: string;
-    onResize: (columnKey: string, px: number) => void;
-}) => {
-    const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
-
-    const handlePointerDown = (e: React.PointerEvent<HTMLSpanElement>) => {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const th = (e.currentTarget as HTMLElement).closest("th");
-        const startWidth = th ? th.getBoundingClientRect().width : 120;
-        dragState.current = { startX: e.clientX, startWidth };
-        e.currentTarget.setPointerCapture(e.pointerId);
-    };
-
-    const handlePointerMove = (e: React.PointerEvent<HTMLSpanElement>) => {
-        const st = dragState.current;
-        if (!st) return;
-        const next = st.startWidth + (e.clientX - st.startX);
-        onResize(columnKey, Math.max(50, next));
-    };
-
-    const finish = () => {
-        dragState.current = null;
-    };
-
-    return (
-        <span
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={finish}
-            onPointerCancel={finish}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-                flex: "0 0 auto",
-                width: 10,
-                height: "100%",
-                cursor: "col-resize",
-                touchAction: "none",
-                userSelect: "none",
-                alignSelf: "stretch",
-                marginLeft: 2,
-            }}
-            title="Изменить ширину колонки"
-        />
-    );
-};
-
-/**
- * Заголовок колонки таблицы: перетаскивание (drag&drop порядка) + ресайз ширины.
- * Для «закреплённых» колонок (`draggable=false`, напр. ID) — только ресайз.
- * Должен находиться внутри SortableContext, оборачивающего таблицу (см. GenericList).
- */
-export const ColumnHeader = ({
-    columnKey,
-    label,
-    draggable = true,
-    onResize,
-}: {
-    columnKey: string;
-    label: React.ReactNode;
-    draggable?: boolean;
-    onResize?: (columnKey: string, px: number) => void;
-}) => {
-    return (
-        <span
-            style={{
-                display: "inline-flex",
-                alignItems: "center",
-                width: "100%",
-            }}
-        >
-            {draggable ? (
-                <ColumnDragTitle columnKey={columnKey}>{label}</ColumnDragTitle>
-            ) : (
-                <span style={{ userSelect: "none" }}>{label}</span>
-            )}
-            {onResize && <ColumnResizeHandle columnKey={columnKey} onResize={onResize} />}
         </span>
     );
 };
