@@ -729,14 +729,14 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     // --- Панель действий выбранной записи (2.12): кнопки-иконки с tooltip (Б7) ---
     const iconButton = (key: string, label: string, icon: React.ReactNode, onClick?: () => void, danger?: boolean) => (
         <Tooltip key={key} title={label}>
-            <Button size="small" danger={danger} icon={icon} onClick={onClick} />
+            <Button danger={danger} icon={icon} onClick={onClick} />
         </Tooltip>
     );
 
     const deleteButton = (key: string, label: string, confirmTitle: string, onOk: () => void) => (
         <Tooltip key={key} title={label}>
             <Popconfirm title={confirmTitle} okText="Удалить" cancelText="Отмена" onConfirm={onOk}>
-                <Button size="small" danger icon={<DeleteOutlined />} />
+                <Button danger icon={<DeleteOutlined />} />
             </Popconfirm>
         </Tooltip>
     );
@@ -756,7 +756,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                 cancelText="Закрыть"
                                 onConfirm={() => cancelWriteoffDoc(record.id)}
                             >
-                                <Button size="small" danger icon={<UndoOutlined />} />
+                                <Button danger icon={<UndoOutlined />} />
                             </Popconfirm>
                         </Tooltip>
                     )}
@@ -839,6 +839,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         if (!isReadOnly) {
             return (
                 <Space>
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setModalState({ mode: "view", record }))}
                     {roleCanEdit &&
                         iconButton("edit", "Редактировать", <EditOutlined />, () => setModalState({ mode: "edit", record }))}
                     {roleCanDelete &&
@@ -858,6 +859,17 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     };
 
     const recordActions = selectedRecord ? renderRecordActions(selectedRecord) : null;
+
+    // Кнопка создания новой записи выносится в левую панель действий записи.
+    const canCreateRecord =
+        roleCanCreate &&
+        !isReadOnly &&
+        !isAccrualsRegister &&
+        !isAccrualDocuments &&
+        !isMeterReadingDocuments &&
+        !isMeterReadings &&
+        !isReceiptDocuments &&
+        !isWriteoffDocuments;
 
     // Колонка выбора строки нужна только там, где для записи есть действия.
     const canUseSelection =
@@ -937,7 +949,10 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     <h1 style={{ color: "#14501d", margin: 0 }}>
                         {meta?.label ?? resourceName}
                     </h1>
-                    {recordActions && (
+                    {(recordActions ||
+                        canCreateRecord ||
+                        (isMeterReadingDocuments && roleCanCreate) ||
+                        isAccrualDocuments) && (
                         <div
                             style={{
                                 marginTop: 10,
@@ -947,10 +962,48 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                 flexWrap: "wrap",
                             }}
                         >
-                            <span style={{ color: "#888", fontSize: 12 }}>
-                                Запись № {selectedRecord?.id ?? ""}:
-                            </span>
-                            {recordActions}
+                            {canCreateRecord && (
+                                <Tooltip title="Добавить">
+                                    <Button
+                                        type="primary"
+                                        disabled={metaLoading}
+                                        icon={<PlusOutlined />}
+                                        onClick={() => setModalState({ mode: "create" })}
+                                    />
+                                </Tooltip>
+                            )}
+                            {isMeterReadingDocuments && roleCanCreate && (
+                                <Tooltip title="Массовый ввод показаний">
+                                    <Button
+                                        type="primary"
+                                        icon={<EditOutlined />}
+                                        onClick={() => {
+                                            setEditingMeterReadingDocumentId(undefined);
+                                            setBulkModalOpen(true);
+                                        }}
+                                    />
+                                </Tooltip>
+                            )}
+                            {isAccrualDocuments && (
+                                <Tooltip title="Новое начисление">
+                                    <Button
+                                        type="primary"
+                                        icon={<PlusOutlined />}
+                                        onClick={() => {
+                                            setEditingAccrualDocumentId(undefined);
+                                            setAccrualsModalOpen(true);
+                                        }}
+                                    />
+                                </Tooltip>
+                            )}
+                            {recordActions && (
+                                <>
+                                    <span style={{ color: "#888", fontSize: 12, marginLeft: 4 }}>
+                                        Запись № {selectedRecord?.id ?? ""}:
+                                    </span>
+                                    {recordActions}
+                                </>
+                            )}
                         </div>
                     )}
                 </div>
@@ -1073,19 +1126,6 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         </Popover>
                     )}
 
-                    {isMeterReadingDocuments && roleCanCreate && (
-                        <Tooltip title="Массовый ввод показаний">
-                            <Button
-                                type="primary"
-                                icon={<EditOutlined />}
-                                onClick={() => {
-                                    setEditingMeterReadingDocumentId(undefined);
-                                    setBulkModalOpen(true);
-                                }}
-                            />
-                        </Tooltip>
-                    )}
-
                     {isReceiptDocuments && (
                         <Tooltip title="Сформировать квитанции">
                             <Button
@@ -1096,36 +1136,12 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         </Tooltip>
                     )}
 
-                    {isAccrualDocuments && (
-                        <Tooltip title="Новое начисление">
-                            <Button
-                                type="primary"
-                                icon={<PlusOutlined />}
-                                onClick={() => {
-                                    setEditingAccrualDocumentId(undefined);
-                                    setAccrualsModalOpen(true);
-                                }}
-                            />
-                        </Tooltip>
-                    )}
-
                     {isWriteoffDocuments && (role === "admin" || role === "operator") && (
                         <Tooltip title="Выполнить списание">
                             <Button
                                 type="primary"
                                 icon={<AccountBookOutlined />}
                                 onClick={() => setWriteOffsModalOpen(true)}
-                            />
-                        </Tooltip>
-                    )}
-
-                    {roleCanCreate && !isReadOnly && !isAccrualsRegister && !isAccrualDocuments && !isMeterReadingDocuments && !isMeterReadings && !isReceiptDocuments && !isWriteoffDocuments && (
-                        <Tooltip title="Добавить">
-                            <Button
-                                type="primary"
-                                disabled={metaLoading}
-                                icon={<PlusOutlined />}
-                                onClick={() => setModalState({ mode: "create" })}
                             />
                         </Tooltip>
                     )}
@@ -1182,11 +1198,16 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 <RecordFormModal
                     open={!!modalState}
                     title={
-                        modalState.mode === "create" ? "Новая запись" : "Редактирование записи"
+                        modalState.mode === "create"
+                            ? "Новая запись"
+                            : modalState.mode === "view"
+                              ? "Просмотр записи"
+                              : "Редактирование записи"
                     }
                     fields={fields}
                     initialValues={modalState.record}
                     confirmLoading={creating || updating}
+                    readonly={modalState.mode === "view"}
                     onCancel={() => setModalState(null)}
                     onSubmit={handleSubmit}
                     resourceName={resourceName}

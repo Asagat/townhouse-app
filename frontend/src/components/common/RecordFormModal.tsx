@@ -1,7 +1,7 @@
 // src/components/common/RecordFormModal.tsx
 
 import { useEffect, useMemo } from "react";
-import { Modal, Form, Input } from "antd";
+import { Modal, Form, Input, Button } from "antd";
 import dayjs from "dayjs";
 import type { FieldMeta } from "../../types";
 import { renderFieldControl } from "./renderFieldControl";
@@ -16,6 +16,8 @@ interface RecordFormModalProps {
     onCancel: () => void;
     onSubmit: (values: Record<string, any>) => void;
     resourceName?: string;
+    /** Режим «только просмотр»: поля отключены, сохранение недоступно. */
+    readonly?: boolean;
 }
 
 /**
@@ -31,6 +33,7 @@ export const RecordFormModal = ({
     onCancel,
     onSubmit,
     resourceName,
+    readonly = false,
 }: RecordFormModalProps) => {
     const [form] = Form.useForm();
 
@@ -101,16 +104,25 @@ export const RecordFormModal = ({
             title={title}
             open={open}
             onCancel={onCancel}
-            onOk={handleOk}
+            onOk={readonly ? undefined : handleOk}
             confirmLoading={confirmLoading}
-            okText="Сохранить"
+            okText={readonly ? "Закрыть" : "Сохранить"}
             cancelText="Отмена"
+            footer={
+                readonly
+                    ? [
+                          <Button key="close" type="primary" onClick={onCancel}>
+                              Закрыть
+                          </Button>,
+                      ]
+                    : undefined
+            }
             destroyOnClose
             width={800}
         >
-            <Form form={form} layout="vertical">
+            <Form form={form} layout="vertical" disabled={readonly}>
                 {sortedFields.map((field) => {
-                    const readonly = isReadonlyField(field);
+                    const fieldReadonly = readonly || isReadonlyField(field);
 
                     return (
                         <Form.Item
@@ -124,12 +136,12 @@ export const RecordFormModal = ({
                                     : undefined
                             }
                             rules={
-                                !readonly && field.required
+                                !fieldReadonly && field.required
                                     ? [{ required: true, message: `Поле «${field.label}» обязательно` }]
                                     : []
                             }
                         >
-                            {readonly ? (
+                            {fieldReadonly ? (
                                 // Для readonly полей показываем просто текст, приводим к строке
                                 <Input disabled value={String(initialValues?.[field.name] ?? "—")} />
                             ) : (

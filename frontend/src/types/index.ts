@@ -32,10 +32,10 @@ export type FieldMeta = {
 };
 
 /**
- * Состояние модального окна для создания/редактирования записи
+ * Состояние модального окна для создания/редактирования/просмотра записи
  */
 export type ModalState = {
-    mode: 'create' | 'edit';
+    mode: 'create' | 'edit' | 'view';
     record?: Record<string, any>;
 };
 
