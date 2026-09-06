@@ -282,16 +282,13 @@ export const CabinetView = ({
                 >
                     {movementMetrics && (
                         <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
-                            <Col span={6}>
+                            <Col span={8}>
                                 <Card size="small"><Statistic title="Начислено" value={movementMetrics.accrued} precision={2} valueStyle={{ fontSize: 15 }} /></Card>
                             </Col>
-                            <Col span={6}>
-                                <Card size="small"><Statistic title="Внесено на счёт" value={movementMetrics.available} precision={2} valueStyle={{ fontSize: 15 }} /></Card>
-                            </Col>
-                            <Col span={6}>
+                            <Col span={8}>
                                 <Card size="small"><Statistic title="Списано" value={movementMetrics.paid} precision={2} valueStyle={{ fontSize: 15 }} /></Card>
                             </Col>
-                            <Col span={6}>
+                            <Col span={8}>
                                 <Card size="small"><Statistic title="Долг" value={movementMetrics.debt} precision={2} valueStyle={{ fontSize: 15, color: movementMetrics.debt > 0 ? "#cf1322" : "#3f8600" }} /></Card>
                             </Col>
                         </Row>
@@ -319,15 +316,21 @@ export const CabinetView = ({
                                 key: "amount",
                                 align: "right" as const,
                                 width: 110,
-                                render: (v: number, r: MovementRow) => (
-                                    <Typography.Text
-                                        style={{
-                                            color: r.amount > 0 ? "#cf1322" : r.amount < 0 ? "#3f8600" : undefined,
-                                        }}
-                                    >
-                                        {fmtSigned(r.amount)}
-                                    </Typography.Text>
-                                ),
+                                // Для наглядности жителю знак инвертирован (только отображение):
+                                // начисление — «−» (растёт долг), приход/оплата — «+».
+                                render: (v: number, r: MovementRow) => {
+                                    const shown = -r.amount;
+                                    return (
+                                        <Typography.Text
+                                            style={{
+                                                color:
+                                                    shown > 0 ? "#3f8600" : shown < 0 ? "#cf1322" : undefined,
+                                            }}
+                                        >
+                                            {fmtSigned(shown)}
+                                        </Typography.Text>
+                                    );
+                                },
                             },
                             {
                                 title: "Баланс после",
