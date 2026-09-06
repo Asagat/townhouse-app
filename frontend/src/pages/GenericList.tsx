@@ -371,6 +371,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const [editingMeterReadingDocumentId, setEditingMeterReadingDocumentId] = useState<number | undefined>(undefined);
     const [accrualsModalOpen, setAccrualsModalOpen] = useState(false);
     const [editingAccrualDocumentId, setEditingAccrualDocumentId] = useState<number | undefined>(undefined);
+    // true — модалки документов открыты в режиме «просмотр» (read-only).
+    const [docReadOnly, setDocReadOnly] = useState(false);
     const [oneOffAccrualsOpen, setOneOffAccrualsOpen] = useState(false);
     const [receiptsModalOpen, setReceiptsModalOpen] = useState(false);
     const [receiptViewId, setReceiptViewId] = useState<number | undefined>(undefined);
@@ -788,14 +790,17 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         }
         if (isAccrualDocuments) {
             const isOneOff = record.doc_kind === "oneoff";
+            const openDoc = (readOnly: boolean) => {
+                setDocReadOnly(readOnly);
+                setEditingAccrualDocumentId(record.id);
+                if (isOneOff) setOneOffAccrualsOpen(true);
+                else setAccrualsModalOpen(true);
+            };
             return (
                 <Space>
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => openDoc(true))}
                     {roleCanEdit &&
-                        iconButton("edit", "Редактировать", <EditOutlined />, () => {
-                            setEditingAccrualDocumentId(record.id);
-                            if (isOneOff) setOneOffAccrualsOpen(true);
-                            else setAccrualsModalOpen(true);
-                        })}
+                        iconButton("edit", "Редактировать", <EditOutlined />, () => openDoc(false))}
                     {roleCanDelete &&
                         deleteButton("del", "Удалить", "Удалить документ начислений? Все связанные записи регистра будут удалены.", () =>
                             deleteRecord(
@@ -813,13 +818,16 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             );
         }
         if (isMeterReadingDocuments) {
+            const openDoc = (readOnly: boolean) => {
+                setDocReadOnly(readOnly);
+                setEditingMeterReadingDocumentId(record.id);
+                setBulkModalOpen(true);
+            };
             return (
                 <Space>
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => openDoc(true))}
                     {roleCanEdit &&
-                        iconButton("edit", "Редактировать", <EditOutlined />, () => {
-                            setEditingMeterReadingDocumentId(record.id);
-                            setBulkModalOpen(true);
-                        })}
+                        iconButton("edit", "Редактировать", <EditOutlined />, () => openDoc(false))}
                     {roleCanDelete &&
                         deleteButton("del", "Удалить", "Удалить документ показаний? Все связанные показания будут удалены.", () =>
                             deleteRecord(
@@ -978,6 +986,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                         type="primary"
                                         icon={<EditOutlined />}
                                         onClick={() => {
+                                            setDocReadOnly(false);
                                             setEditingMeterReadingDocumentId(undefined);
                                             setBulkModalOpen(true);
                                         }}
@@ -990,6 +999,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                         type="primary"
                                         icon={<PlusOutlined />}
                                         onClick={() => {
+                                            setDocReadOnly(false);
                                             setEditingAccrualDocumentId(undefined);
                                             setAccrualsModalOpen(true);
                                         }}
@@ -1218,9 +1228,11 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 <BulkReadingsModal
                     open={bulkModalOpen}
                     documentId={editingMeterReadingDocumentId}
+                    readonly={docReadOnly}
                     onClose={() => {
                         setBulkModalOpen(false);
                         setEditingMeterReadingDocumentId(undefined);
+                        setDocReadOnly(false);
                     }}
                     onSaved={() => tableQuery.refetch()}
                 />
@@ -1231,18 +1243,22 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     <AccrualsCalculationModal
                         open={accrualsModalOpen}
                         documentId={editingAccrualDocumentId}
+                        readonly={docReadOnly}
                         onClose={() => {
                             setAccrualsModalOpen(false);
                             setEditingAccrualDocumentId(undefined);
+                            setDocReadOnly(false);
                         }}
                         onSaved={() => tableQuery.refetch()}
                     />
                     <OneOffAccrualsEditModal
                         open={oneOffAccrualsOpen}
                         documentId={editingAccrualDocumentId}
+                        readonly={docReadOnly}
                         onClose={() => {
                             setOneOffAccrualsOpen(false);
                             setEditingAccrualDocumentId(undefined);
+                            setDocReadOnly(false);
                         }}
                         onSaved={() => tableQuery.refetch()}
                     />

@@ -22,6 +22,8 @@ interface BulkReadingsModalProps {
     onSaved: () => void;
     /** Если передан, модалка работает в режиме редактирования существующего документа показаний */
     documentId?: number;
+    /** Режим «только просмотр»: изменение документа недоступно. */
+    readonly?: boolean;
 }
 
 const MONTH_NAMES_NOMINATIVE = [
@@ -48,6 +50,7 @@ export const BulkReadingsModal = ({
     onClose,
     onSaved,
     documentId,
+    readonly = false,
 }: BulkReadingsModalProps) => {
     const apiUrl = useApiUrl();
     const isEditMode = documentId !== undefined;
@@ -217,12 +220,13 @@ export const BulkReadingsModal = ({
                     <InputNumber
                         style={{ width: "100%" }}
                         step={0.001}
+                        disabled={readonly}
                         value={
                             readings[record.id] !== undefined && readings[record.id] !== ""
                                 ? Number(readings[record.id])
                                 : undefined
                         }
-                        status={rowErrors[record.id] ? "error" : undefined}
+                        status={!readonly && rowErrors[record.id] ? "error" : undefined}
                         onChange={(value) => {
                             setReadings((prev) => ({
                                 ...prev,
@@ -248,19 +252,33 @@ export const BulkReadingsModal = ({
 
     return (
         <Modal
-            title={isEditMode ? "Редактирование документа показаний" : "Массовый ввод показаний"}
+            title={
+                readonly
+                    ? "Просмотр документа показаний"
+                    : isEditMode
+                      ? "Редактирование документа показаний"
+                      : "Массовый ввод показаний"
+            }
             open={open}
             onCancel={onClose}
             width={800}
             destroyOnClose
-            footer={[
-                <Button key="cancel" onClick={onClose}>
-                    Отмена
-                </Button>,
-                <Button key="save" type="primary" loading={saving} onClick={handleSave}>
-                    Сохранить
-                </Button>,
-            ]}
+            footer={
+                readonly
+                    ? [
+                          <Button key="close" type="primary" onClick={onClose}>
+                              Закрыть
+                          </Button>,
+                      ]
+                    : [
+                          <Button key="cancel" onClick={onClose}>
+                              Отмена
+                          </Button>,
+                          <Button key="save" type="primary" loading={saving} onClick={handleSave}>
+                              Сохранить
+                          </Button>,
+                      ]
+            }
         >
             <Space style={{ marginBottom: 16 }} size="large" wrap>
                 <div>
@@ -277,6 +295,7 @@ export const BulkReadingsModal = ({
                         style={{ width: 220 }}
                         placeholder="Выберите вид услуги"
                         value={serviceTypeId}
+                        disabled={readonly}
                         onChange={setServiceTypeId}
                         options={serviceTypes.map((s: any) => ({
                             value: s.id,
@@ -289,6 +308,7 @@ export const BulkReadingsModal = ({
                     <DatePicker
                         value={readingDate}
                         format={DATE_FORMAT}
+                        disabled={readonly}
                         onChange={(value) => value && setReadingDate(value)}
                         allowClear={false}
                     />

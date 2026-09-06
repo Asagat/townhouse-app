@@ -13,6 +13,8 @@ interface AccrualsCalculationModalProps {
     onSaved: () => void;
     /** Если передан, модалка работает в режиме редактирования существующего документа */
     documentId?: number;
+    /** Режим «только просмотр»: изменение документа недоступно. */
+    readonly?: boolean;
 }
 
 const monthOptions = [
@@ -49,6 +51,7 @@ export const AccrualsCalculationModal = ({
     onClose,
     onSaved,
     documentId,
+    readonly = false,
 }: AccrualsCalculationModalProps) => {
     const apiUrl = useApiUrl();
     const isEditMode = documentId !== undefined;
@@ -231,33 +234,37 @@ export const AccrualsCalculationModal = ({
     const someSelected = selectedKeys.length > 0 && !allSelected;
 
     const columns = [
-        {
-            title: (
-                <Checkbox
-                    checked={allSelected}
-                    indeterminate={someSelected}
-                    onChange={(e) =>
-                        setSelectedKeys(
-                            e.target.checked ? rows.map((row) => row.row_number) : [],
-                        )
-                    }
-                />
-            ),
-            key: "select",
-            width: 50,
-            render: (_: unknown, record: AccrualPreviewRow) => (
-                <Checkbox
-                    checked={selectedKeys.includes(record.row_number)}
-                    onChange={(e) =>
-                        setSelectedKeys((prev) =>
-                            e.target.checked
-                                ? [...prev, record.row_number]
-                                : prev.filter((key) => key !== record.row_number),
-                        )
-                    }
-                />
-            ),
-        },
+        ...(!readonly
+            ? [
+                  {
+                      title: (
+                          <Checkbox
+                              checked={allSelected}
+                              indeterminate={someSelected}
+                              onChange={(e) =>
+                                  setSelectedKeys(
+                                      e.target.checked ? rows.map((row) => row.row_number) : [],
+                                  )
+                              }
+                          />
+                      ),
+                      key: "select",
+                      width: 50,
+                      render: (_: unknown, record: AccrualPreviewRow) => (
+                          <Checkbox
+                              checked={selectedKeys.includes(record.row_number)}
+                              onChange={(e) =>
+                                  setSelectedKeys((prev) =>
+                                      e.target.checked
+                                          ? [...prev, record.row_number]
+                                          : prev.filter((key) => key !== record.row_number),
+                                  )
+                              }
+                          />
+                      ),
+                  },
+              ]
+            : []),
         { title: "№", dataIndex: "row_number", key: "row_number", width: 60 },
         {
             title: "Квартира (Лицевой счёт)",
@@ -302,27 +309,41 @@ export const AccrualsCalculationModal = ({
 
     return (
         <Modal
-            title={isEditMode ? "Редактирование документа начислений" : "Начисление сумм по коммунальным услугам"}
+            title={
+                readonly
+                    ? "Просмотр документа начислений"
+                    : isEditMode
+                      ? "Редактирование документа начислений"
+                      : "Начисление сумм по коммунальным услугам"
+            }
             open={open}
             onCancel={onClose}
             width={1100}
             destroyOnClose
-            footer={[
-                <Button key="cancel" onClick={onClose}>
-                    Отмена
-                </Button>,
-                <Button
-                    key="save"
-                    type="primary"
-                    loading={saving || isSaving}
-                    disabled={selectedKeys.length === 0}
-                    onClick={handleSave}
-                >
-                    {isEditMode
-                        ? `Сохранить изменения (${selectedKeys.length})`
-                        : `Начислить выбранные (${selectedKeys.length})`}
-                </Button>,
-            ]}
+            footer={
+                readonly
+                    ? [
+                          <Button key="close" type="primary" onClick={onClose}>
+                              Закрыть
+                          </Button>,
+                      ]
+                    : [
+                          <Button key="cancel" onClick={onClose}>
+                              Отмена
+                          </Button>,
+                          <Button
+                              key="save"
+                              type="primary"
+                              loading={saving || isSaving}
+                              disabled={selectedKeys.length === 0}
+                              onClick={handleSave}
+                          >
+                              {isEditMode
+                                  ? `Сохранить изменения (${selectedKeys.length})`
+                                  : `Начислить выбранные (${selectedKeys.length})`}
+                          </Button>,
+                      ]
+            }
         >
             <Space style={{ marginBottom: 16 }} size="large" wrap>
                 <div>
@@ -338,6 +359,7 @@ export const AccrualsCalculationModal = ({
                     <Select
                         style={{ width: 160 }}
                         value={month}
+                        disabled={readonly}
                         onChange={setMonth}
                         options={monthOptions}
                     />
@@ -349,6 +371,7 @@ export const AccrualsCalculationModal = ({
                         value={year}
                         min={2000}
                         max={2100}
+                        disabled={readonly}
                         onChange={(value) => value && setYear(Number(value))}
                     />
                 </div>
@@ -360,6 +383,7 @@ export const AccrualsCalculationModal = ({
                     <Input.TextArea
                         rows={2}
                         value={comment}
+                        disabled={readonly}
                         onChange={(e) => setComment(e.target.value)}
                         placeholder="Комментарий бухгалтера (необязательно)"
                     />

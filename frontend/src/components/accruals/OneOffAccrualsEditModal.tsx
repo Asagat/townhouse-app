@@ -18,9 +18,17 @@ interface Props {
     documentId: number | undefined;
     onClose: () => void;
     onSaved: () => void;
+    /** Режим «только просмотр»: изменение строк недоступно. */
+    readonly?: boolean;
 }
 
-export const OneOffAccrualsEditModal = ({ open, documentId, onClose, onSaved }: Props) => {
+export const OneOffAccrualsEditModal = ({
+    open,
+    documentId,
+    onClose,
+    onSaved,
+    readonly = false,
+}: Props) => {
     const apiUrl = useApiUrl();
     const [comment, setComment] = useState("");
     const [rows, setRows] = useState<CopyRow[]>([]);
@@ -107,6 +115,7 @@ export const OneOffAccrualsEditModal = ({ open, documentId, onClose, onSaved }: 
                     min={0}
                     precision={2}
                     style={{ width: "100%" }}
+                    disabled={readonly}
                     value={rec.amount}
                     onChange={(v) => setAmount(rec.id, typeof v === "number" ? v : null)}
                 />
@@ -118,25 +127,37 @@ export const OneOffAccrualsEditModal = ({ open, documentId, onClose, onSaved }: 
 
     return (
         <Modal
-            title="Редактирование разовых/персональных начислений"
+            title={
+                readonly
+                    ? "Просмотр разовых/персональных начислений"
+                    : "Редактирование разовых/персональных начислений"
+            }
             open={open}
             onCancel={onClose}
             width={820}
             destroyOnClose
-            footer={[
-                <Button key="cancel" onClick={onClose}>
-                    Отмена
-                </Button>,
-                <Button
-                    key="save"
-                    type="primary"
-                    loading={saving}
-                    onClick={handleSave}
-                    disabled={rows.length === 0}
-                >
-                    Сохранить
-                </Button>,
-            ]}
+            footer={
+                readonly
+                    ? [
+                          <Button key="close" type="primary" onClick={onClose}>
+                              Закрыть
+                          </Button>,
+                      ]
+                    : [
+                          <Button key="cancel" onClick={onClose}>
+                              Отмена
+                          </Button>,
+                          <Button
+                              key="save"
+                              type="primary"
+                              loading={saving}
+                              onClick={handleSave}
+                              disabled={rows.length === 0}
+                          >
+                              Сохранить
+                          </Button>,
+                      ]
+            }
         >
             <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
                 Разовые сборы начисляются фиксированными суммами (без показаний/потребления) —
@@ -157,6 +178,7 @@ export const OneOffAccrualsEditModal = ({ open, documentId, onClose, onSaved }: 
                 <Input.TextArea
                     rows={2}
                     value={comment}
+                    disabled={readonly}
                     onChange={(e) => setComment(e.target.value)}
                     placeholder="Комментарий бухгалтера (необязательно)"
                 />
