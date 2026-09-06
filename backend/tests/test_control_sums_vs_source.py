@@ -39,6 +39,19 @@ _BACKEND_DIR = Path(__file__).resolve().parents[1]
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.fixture(autouse=True)
+def _require_imported_data(db):
+    """Сверка с файлом-источником имеет смысл только на БД с импортированной
+    историей (dev/pre-prod/stage). На пустой БД (свежая схема после alembic —
+    например disposable-БД в CI) сверять нечего: набор пропускается целиком,
+    чтобы CI оставался зелёным.
+    """
+    has_apartments = db.execute(text("SELECT EXISTS (SELECT 1 FROM apartments)")).scalar()
+    has_accruals = db.execute(text("SELECT EXISTS (SELECT 1 FROM accruals_register)")).scalar()
+    if not has_apartments and not has_accruals:
+        pytest.skip("БД без импортированных данных — сверка с файлом-источником не применима")
+
+
 def _source_path() -> Path | None:
     env = os.getenv("MIGRATION_SRC_XLSX")
     if env:

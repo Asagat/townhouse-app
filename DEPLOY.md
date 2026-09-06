@@ -294,6 +294,10 @@ cd ..
 > systemctl enable --now townhouse-backend
 > ```
 
+> **Автоматизация:** проверки и выкат настраиваются через GitHub Actions —
+> см. §10 (CI/CD: автопроверка и деплой). `scripts/deploy_vps.sh` дополнительно
+> умеет выкатывать конкретную ветку/тег/SHA и пересобирает фронтенд.
+
 ---
 
 ## 6. Тесты
@@ -711,10 +715,107 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 | `npm run dev` (в `frontend/`) | Dev-сервер Vite (автосоздаёт `frontend/.env`, проксирует `/api`) |
 | `./scripts/dev.sh` | Локальное развёртывание + запуск uvicorn (`--full` — pip install) |
 | `./scripts/setup_vps.sh` | Полная установка на НОВОМ VPS (пакеты, clone, .env, БД, systemd, build) |
-| `./scripts/deploy_vps.sh` | Обновление VPS (pull, alembic, справочники, админ, restart) |
+| `./scripts/deploy_vps.sh [ref]` | Обновление VPS (fetch, при `ref` — фиксация ветки/тега/SHA, alembic, справочники, админ, сборка фронтенда, restart). Без аргумента — авто-выкат `git pull` (main); вызывается из GitHub Actions (см. §10) |
 | `./scripts/restore_townhouse.sh` | Восстановление БД из дампов (см. §8.2): `data [--fresh] <файл.sql>`, `roles [--force] <файл.sql>`, `all ...`; `--yes` — без запроса (для автоматизации) |
 | `./scripts/refresh_from_backups.sh [--yes]` | Зеркальный ПК: импорт свежих дампов из `DB_MIRROR_BACKUPS` + догон схемы (маркер `.git/db_refresh.state`) |
 | `./scripts/update_db_after_pull.sh` | После `git pull`: догон схемы + зеркальные дампы (вызывается hook-ом post-merge) |
 | `./scripts/dump_to_sync.sh` | Активный ПК: выгрузить дамп БД в синхронизируемую папку (`DB_MIRROR_BACKUPS`) и обновить маркер |
 | `./scripts/install_post_merge_hook.sh` | Установить/удалить git-hook `post-merge` (автозапуск после pull) |
 | `./scripts/install_pre_push_hook.sh` | Установить/удалить git-hook `pre-push` (автодамп БД перед push) |
+
+---
+
+## 10. CI/CD: автопроверка и деплой (GitHub Actions)
+
+> Задача 3.3 роадмапа. Код, успешно прошедший все проверки, автоматически
+> подготавливается к релизу (docker-образы, релизный тег) или выкатывается на
+> сервер. Ветка main — git-центричная модель: прод = проверенный CI коммит в main.
+
+### 10.1 Что в репозитории
+
+| Файл | Что делает |
+|---|---|
+| `.github/workflows/ci.yml` | Автопроверка на push/PR в `main`. Job `backend`: disposable-сервис `postgres:16` → `alembic upgrade head` → `init_data.py` → `python -m pytest tests/ -q` (`DATABASE_URL` и `AUTH_SECRET_KEY` задаются на job). Job `frontend`: `npm ci` → `npm run build` (= tsc + vite).
+| `.github/workflows/docker-build.yml` | Авто-сборка и публикация docker-образов (`backend/Dockerfile`, `frontend/Dockerfile`) в `ghcr.io/asagat/townhouse-app-{backend,frontend}`: push в `main` → тег `main`; релизный тег `v*` → semver-теги (`v1.2.3`, `1.2`); можно запустить вручную. Образы — для docker-compose-установок (домашние ПК и т.п.).
+| `.github/workflows/deploy.yml` + `.github/actions/deploy/` | Выкат на сервер по SSH: вручную (окружение `staging`/`production` + ref) или автоматически по релизному тегу `v*` → `production`. На сервере выполняется `scripts/deploy_vps.sh <ref>`. Деплой разрешён только если для коммита есть **успешный** прогон CI (проверка в action).
+
+На сервере `scripts/deploy_vps.sh <ref>` делает: `git fetch` + фиксация кода на `ref` (workflow передаёт **SHA проверенного CI коммита**) → `alembic upgrade head` → `init_data.py` → `create_user.py` → **сборка фронтенда** (`npm ci`/`npm install` → `npm run build`; статика в `frontend/dist`, её отдаёт nginx) → перезапуск systemd-сервиса `townhouse-backend`.
+
+### 10.2 Настройка (один раз)
+
+1. **SSH-доступ с GitHub до сервера.** Сгенерируйте deploy-ключ (без passphrase):
+
+   ```bash
+   ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/townhouse_deploy -N ""
+   # публичную часть добавить на сервер в ~/.ssh/authorized_keys пользователя,
+   # под которым идёт деплой (обычно root):
+   #   ssh-copy-id -i ~/.ssh/townhouse_deploy.pub root@SERVER
+   ```
+
+2. **Секреты в GitHub** (Settings → Secrets and variables → Actions). Имена общие для
+   окружений (см. п. 3) — у каждого окружения свои значения:
+
+   | Секрет | Значение |
+   |---|---|
+   | `SSH_HOST` | домен/IP сервера |
+   | `SSH_USER` | пользователь SSH (обычно `root`) |
+   | `SSH_KEY` | приватный ключ `~/.ssh/townhouse_deploy` (целиком, с `-----BEGIN ...-----`) |
+   | `APP_DIR` | каталог проекта на сервере (по умолчанию `/opt/townhouse`, секрет можно не задавать) |
+
+3. **Окружения** (Settings → Environments): создайте `staging` и `production` и
+   положите в каждое свои секреты `SSH_HOST`/`SSH_USER`/`SSH_KEY` (один и тот же
+   сервер может использоваться и как staging). Для `production` можно включить
+   **required reviewers** — ручное подтверждение выката.
+
+4. **Branch protection** для `main`: отметьте job'ы CI (`CI / Backend …`,
+   `CI / Frontend …`) как required checks — тогда в main не попадёт код без зелёного CI.
+
+5. **Пакеты ghcr.io** публикуются токеном `GITHUB_TOKEN` — отдельной настройки не требуют.
+
+### 10.3 Сценарии
+
+**Выкат main на тестовый сервер (staging).** Actions → *Deploy* → *Run workflow*:
+`environment: staging`, `ref: main`. Сервер получит код main, CI для коммита зелёный
+(проверяется автоматически), БД мигрирует, фронтенд пересоберётся.
+
+**Релиз и выкат на прод.** На проверенном коммите main создайте релизный тег:
+
+```bash
+git tag v1.2.3 && git push origin v1.2.3
+```
+
+Тег запускает публикацию docker-образов с semver-тегами и **автоматический деплой на
+`production`**. Деплой-гейт проверяет, что для коммита тега есть успешный прогон CI —
+он был при пуше этого коммита в `main`. Если для окружения `production` настроены
+required reviewers — потребуется ручное подтверждение.
+
+**Ручной выкат на прод** (без тега): Actions → *Deploy* → `environment: production`,
+`ref: main`.
+
+> Чтобы временно выкатить на staging код без успешного CI (эксперименты), включите
+> `allow_untested` в форме запуска workflow — на `production` это не действует.
+
+### 10.4 Тестовый сервер для сверки данных
+
+Для сверки данных (импортированная история, контрольные суммы) поднимите **отдельный
+сервер/ПК** по инструкции §3 (`scripts/setup_vps.sh`): своя БД, свой домен/URL, свой
+`.env` с `CORS_ORIGINS`. Деплой на него — то же окружение `staging` (см. 10.3).
+Тест-сверка с файлом-источником (`backend/tests/test_control_sums_vs_source.py`,
+`templates/Миграция данных FTH.xlsx`) сработает именно на такой БД с импортированной
+историей; на пустой/свежей БД (в т.ч. disposable-БД CI) набор пропускается, чтобы
+CI оставался зелёным.
+
+### 10.5 Примечания
+
+- `scripts/deploy_vps.sh` без аргумента делает `git pull` (авто-выкат main). После
+  деплоя **по тегу/SHA** репозиторий на сервере остаётся в detached HEAD — вернитесь
+  на main: `git checkout -f main && ./scripts/deploy_vps.sh`. При выкате ветки вручную
+  (`./scripts/deploy_vps.sh <ветка>`) сервер переходит на неё и фиксируется на
+  `origin/<ветка>`. Workflow деплоя всегда выкатывает конкретный проверенный SHA
+  (не имя ветки), поэтому состояние сервера детерминировано.
+- Фронтенд пересобирается при **каждом** деплое (сборка в `dist.tmp` + атомарная
+  замена `dist`): раньше обновление через `deploy_vps.sh` не обновляло статику,
+  которую отдаёт nginx.
+- Тесты в CI идут против **отдельной disposable-БД** (`postgres:16`), никак не
+  связанной с живыми данными (см. `conftest.py`: автоочистка тестовых сущностей;
+  задачу ТД-3 роадмапа).
