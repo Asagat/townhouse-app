@@ -35,6 +35,7 @@ import type { SortOrder } from "antd/es/table/interface";
 import { BRAND } from "../config/colors";
 import { canCreate, canEdit, canDelete } from "../auth/can";
 import { useVisibleColumns, filterVisibleColumns } from "../hooks/useVisibleColumns";
+import { openAuthorizedPdf } from "../auth/http";
 
 interface GenericListProps {
     resourceName: string;
@@ -391,9 +392,9 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                       <Button
                                           size="small"
                                           onClick={() =>
-                                              window.open(
+                                              openAuthorizedPdf(
                                                   `${apiUrl}/receipt_documents/${record.id}/pdf`,
-                                                  "_blank",
+                                                  `receipt_${record.id}.pdf`,
                                               )
                                           }
                                       >

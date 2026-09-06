@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Modal, Button, Spin, Table } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useApiUrl } from "@refinedev/core";
-import { authedFetch } from "../../auth/http";
+import { authedFetch, openAuthorizedPdf } from "../../auth/http";
 
 interface ReceiptItemData {
     id: number;
@@ -297,9 +297,9 @@ export const ReceiptViewModal = ({
                     type="primary"
                     disabled={receiptId === undefined}
                     onClick={() =>
-                        window.open(
+                        openAuthorizedPdf(
                             `${apiUrl}/receipt_documents/${receiptId}/pdf`,
-                            "_blank",
+                            `receipt_${receiptId}.pdf`,
                         )
                     }
                 >

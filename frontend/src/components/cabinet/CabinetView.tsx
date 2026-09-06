@@ -8,6 +8,7 @@ import { useState } from "react";
 import { Button, Card, Space, Table, Typography } from "antd";
 import { EyeOutlined, FilePdfOutlined } from "@ant-design/icons";
 import { ReceiptViewModal } from "../receipts/ReceiptViewModal";
+import { openAuthorizedPdf } from "../../auth/http";
 
 export interface StatementMetrics {
     accrued_total: number;
@@ -97,7 +98,12 @@ export const CabinetView = ({
                     <Button
                         size="small"
                         type="primary"
-                        onClick={() => window.open(`${apiUrl}/receipt_documents/${r.id}/pdf`, "_blank")}
+                        onClick={() =>
+                            openAuthorizedPdf(
+                                `${apiUrl}/receipt_documents/${r.id}/pdf`,
+                                `receipt_${r.id}.pdf`,
+                            )
+                        }
                     >
                         <FilePdfOutlined /> PDF
                     </Button>
