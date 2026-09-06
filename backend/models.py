@@ -208,6 +208,13 @@ class Tariff(Base):
     # историю (строки начислений ссылаются на них) и в месячный пересчёт НЕ входят
     # (см. calculate_accrual_for_account_service).
     is_oneoff = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    # Статус тарифа: active (Действующий) / archived (Архивный). Действующий —
+    # последний по дате тариф в своей группе (вид услуги + признак разовости); при
+    # создании нового тарифа предыдущие помечаются архивными. Статус информационный:
+    # расчёт начислений идёт по valid_from/is_oneoff и архивные тарифы не «ломает».
+    status = Column(
+        String(20), nullable=False, default="active", server_default=text("'active'")
+    )
 
     services_type = relationship("ServiceType", back_populates="tariffs")
     accruals = relationship("AccrualsRegister", back_populates="tariff", passive_deletes=True)

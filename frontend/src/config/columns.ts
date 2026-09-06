@@ -154,6 +154,11 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'price', label: 'Цена', format: formatNumber },
         { key: 'unit', label: 'Ед. изм.' },
         { key: 'valid_from', label: 'Действует с', format: formatDate },
+        {
+            key: 'status',
+            label: 'Статус',
+            format: (v: any) => (v === 'archived' ? 'Архивный' : 'Действующий'),
+        },
         { key: 'services_type.services_type', label: 'Вид услуги' },
         { key: 'tariff_type.name', label: 'Тип тарифа' },
         {

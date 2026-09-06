@@ -29,10 +29,13 @@ import type { CrudFilter } from "@refinedev/core";
 import { getColumnsForResource } from "../config/columns";
 import { allResources } from "../config/menu";
 import {
+    getDefaultResourceFilters,
     getFilterKind,
     getReferenceSource,
+    getResourceSelectOptions,
     getSelectOptions,
     isReferenceFilter,
+    isResourceSelectFilter,
 } from "../config/filters";
 import { RecordFormModal } from "../components/common/RecordFormModal";
 import { ReferenceFilterSelect } from "../components/common/ReferenceFilterSelect";
@@ -173,6 +176,10 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const defaultSortDescPeriod = resourceName === "accruals_register";
     const initialSortField = defaultSortDescPeriod ? "accrual_date" : "id";
 
+    // Фильтры по умолчанию для раздела (например «Тарифы» — только «Действующие»).
+    const resourceDefaults = getDefaultResourceFilters(resourceName);
+    const initialCrudFilters = (resourceDefaults?.applied ?? []) as CrudFilter[];
+
     const {
         tableQuery,
         current,
@@ -196,6 +203,9 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 },
             ],
         },
+        filters: {
+            initial: initialCrudFilters,
+        },
     });
 
     const data = tableQuery?.data?.data ?? [];
@@ -216,18 +226,24 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const [modalState, setModalState] = useState<ModalState | null>(null);
 
     // Защита от «протёкших» фильтров: если компонент всё же переиспользован для другого
-    // ресурса (роуты обычно дают key, но страхуемся), сбрасываем локальное состояние.
+    // ресурса (роуты обычно дают key, но страхуемся), сбрасываем локальное состояние
+    // и возвращаем фильтры по умолчанию для раздела (если они есть).
     useEffect(() => {
-        setDraftFilters({});
-        setAppliedCount(0);
-        setFilters([]);
+        const def = getDefaultResourceFilters(resourceName);
+        setDraftFilters(def?.draft ?? {});
+        setAppliedCount(def ? def.applied.length : 0);
+        setFilters(def ? (def.applied as CrudFilter[]) : [], "replace");
     }, [resourceName]);
 
     // --- Общий механизм фильтрации (Б10) ---
     // Черновик фильтров по колонкам списка; применяется серверно через setFilters.
     const [filtersOpen, setFiltersOpen] = useState(false);
-    const [draftFilters, setDraftFilters] = useState<Record<string, any>>({});
-    const [appliedCount, setAppliedCount] = useState(0);
+    const [draftFilters, setDraftFilters] = useState<Record<string, any>>(
+        () => getDefaultResourceFilters(resourceName)?.draft ?? {},
+    );
+    const [appliedCount, setAppliedCount] = useState(
+        () => getDefaultResourceFilters(resourceName)?.applied.length ?? 0,
+    );
     const [bulkModalOpen, setBulkModalOpen] = useState(false);
     const [editingMeterReadingDocumentId, setEditingMeterReadingDocumentId] = useState<number | undefined>(undefined);
     const [accrualsModalOpen, setAccrualsModalOpen] = useState(false);
@@ -313,13 +329,18 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const setDraft = (key: string, patch: any) =>
         setDraftFilters((prev) => ({ ...prev, [key]: { ...(prev[key] ?? {}), ...patch } }));
 
+    // Вид фильтра по колонке: глобальная карта + ресурсо-зависимые select-поля
+    // (например «Статус» у тарифов — Действующий/Архивный).
+    const getColumnKind = (key: string) =>
+        isResourceSelectFilter(resourceName, key) ? "select" : getFilterKind(key);
+
     const buildCrudFilters = (): CrudFilter[] => {
         const list: CrudFilter[] = [];
         for (const col of displayColumns) {
             if (!isSortableField(col.key)) continue;
             const d = draftFilters[col.key];
             if (!d) continue;
-            const kind = getFilterKind(col.key);
+            const kind = getColumnKind(col.key);
             if (kind === "text") {
                 const v = (d.text ?? "").toString().trim();
                 if (v) list.push({ field: col.key, operator: "contains", value: v });
@@ -368,7 +389,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     };
 
     const renderFilterControl = (col: { key: string; label: string }) => {
-        const kind = getFilterKind(col.key);
+        const kind = getColumnKind(col.key);
         const d = draftFilters[col.key] ?? {};
         if (kind === "text") {
             return (
@@ -425,6 +446,16 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             );
         }
         if (kind === "select") {
+            const resourceOptions = getResourceSelectOptions(resourceName, col.key);
+            const options =
+                resourceOptions.length > 0
+                    ? resourceOptions
+                    : isReferenceFilter(col.key)
+                      ? []
+                      : getSelectOptions(col.key).map((o) => ({
+                            value: o.value,
+                            label: o.label,
+                        }));
             if (isReferenceFilter(col.key)) {
                 const refSource = getReferenceSource(col.key);
                 if (refSource) {
@@ -444,10 +475,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     style={{ width: "100%" }}
                     value={d.sel}
                     onChange={(v) => setDraft(col.key, { sel: v })}
-                    options={getSelectOptions(col.key).map((o) => ({
-                        value: o.value,
-                        label: o.label,
-                    }))}
+                    options={options}
                 />
             );
         }

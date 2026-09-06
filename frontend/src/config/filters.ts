@@ -14,6 +14,8 @@
 
 export type FilterKind = "text" | "number" | "date" | "datetime" | "bool" | "select";
 
+export type SelectOption = { value: string; label: string };
+
 const TEXT_KEYS: string[] = [
     "full_name",
     "address",
@@ -192,6 +194,45 @@ export const getReferenceSource = (
     const resource = FILTER_REFERENCE_COLUMNS[columnKey];
     return resource ? REFERENCE_SOURCES[resource] : undefined;
 };
+
+// --- Ресурсо-зависимые select-фильтры ---
+// Отдельные поля одного имени в разных списках фильтруются по-разному. Например
+// колонка «Статус»: у тарифов это «Действующий/Архивный», а не текстовый «содержит».
+const RESOURCE_SELECT_OPTIONS: Record<string, Record<string, SelectOption[]>> = {
+    tariffs: {
+        status: [
+            { value: "active", label: "Действующий" },
+            { value: "archived", label: "Архивный" },
+        ],
+    },
+};
+
+export const isResourceSelectFilter = (resourceName: string, columnKey: string): boolean =>
+    !!RESOURCE_SELECT_OPTIONS[resourceName]?.[columnKey];
+
+export const getResourceSelectOptions = (
+    resourceName: string,
+    columnKey: string,
+): SelectOption[] => RESOURCE_SELECT_OPTIONS[resourceName]?.[columnKey] ?? [];
+
+// --- Фильтры по умолчанию для списка ---
+// Применяются при открытии раздела (например «Тарифы» по умолчанию показывают только
+// Действующие). `draft` — значения для панели фильтров, `applied` — CrudFilter-запросы.
+export interface DefaultResourceFilters {
+    draft: Record<string, any>;
+    applied: Array<{ field: string; operator: "eq"; value: any }>;
+}
+
+const DEFAULT_RESOURCE_FILTERS: Record<string, DefaultResourceFilters> = {
+    tariffs: {
+        draft: { status: { sel: "active" } },
+        applied: [{ field: "status", operator: "eq", value: "active" }],
+    },
+};
+
+export const getDefaultResourceFilters = (
+    resourceName: string,
+): DefaultResourceFilters | undefined => DEFAULT_RESOURCE_FILTERS[resourceName];
 
 const KIND_MAP: Record<string, FilterKind> = {};
 for (const k of TEXT_KEYS) KIND_MAP[k] = "text";

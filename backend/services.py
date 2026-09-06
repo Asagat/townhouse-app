@@ -291,6 +291,40 @@ def validate_meter_service_type(db: Session, services_type_id) -> None:
         )
 
 
+TARIFF_STATUS_ACTIVE = "active"
+TARIFF_STATUS_ARCHIVED = "archived"
+
+
+def retire_tariff_predecessors(
+    db: Session, services_type_id: int, is_oneoff: bool, exclude_tariff_id: int
+) -> int:
+    """Помечает «Архивным» действующие тарифы той же группы, что и новый.
+
+    Группа = (вид услуги, признак разовости): новый регулярный тариф вытесняет
+    предыдущие регулярные того же вида (и аналогично для разовых), чтобы в группе
+    всегда был ровно один «Действующий» — последний по дате. Расчёт начислений
+    от статуса не зависит (он идёт по valid_from/is_oneoff), поэтому архивация
+    безопасна для уже созданных начислений и исторических периодов.
+
+    Возвращает количество помеченных тарифов.
+    """
+    archived = (
+        db.query(Tariff)
+        .filter(
+            Tariff.services_type_id == services_type_id,
+            Tariff.is_oneoff == is_oneoff,
+            Tariff.id != exclude_tariff_id,
+            Tariff.status == TARIFF_STATUS_ACTIVE,
+        )
+        .all()
+    )
+    for old in archived:
+        old.status = TARIFF_STATUS_ARCHIVED
+    if archived:
+        db.flush()
+    return len(archived)
+
+
 def resolve_meter_reading_document_values(
     db: Session, payload: dict[str, Any], exclude_id: int | None = None
 ) -> dict[str, Any]:

@@ -79,7 +79,7 @@ from field_config import FIELD_CONFIG, MODEL_MAP, coerce_field_value
 from sorting import build_order_clause
 from filtering import build_filter_clauses
 from serializers import SERIALIZERS, _user_serializer
-from services import (build_accrual_register_items, build_transaction_title, calculate_accrual_for_account_service, calculate_accruals_preview, create_accounts_register_entries_for_accruals, resolve_meter_reading_values, resolve_meter_reading_document_values, resolve_transaction_values, set_transaction_title, audit_document_create, audit_document_update, validate_meter_service_type)
+from services import (build_accrual_register_items, build_transaction_title, calculate_accrual_for_account_service, calculate_accruals_preview, create_accounts_register_entries_for_accruals, resolve_meter_reading_values, resolve_meter_reading_document_values, resolve_transaction_values, set_transaction_title, audit_document_create, audit_document_update, validate_meter_service_type, retire_tariff_predecessors, TARIFF_STATUS_ARCHIVED)
 
 
 # Инициализация основного приложения
@@ -548,6 +548,19 @@ async def create_resource_item(
         ) from exc
     db.refresh(item)
 
+    # Тарифы: новый тариф становится «Действующим» в своей группе (вид услуги +
+    # признак разовости), предыдущие действующие той же группы — «Архивными».
+    if resource == "tariffs":
+        if payload.get("status") == TARIFF_STATUS_ARCHIVED:
+            item.status = TARIFF_STATUS_ARCHIVED
+        else:
+            item.status = "active"
+            retire_tariff_predecessors(
+                db, item.services_type_id, bool(item.is_oneoff), exclude_tariff_id=item.id
+            )
+        db.commit()
+        db.refresh(item)
+
     # Для документов «Приход/Расход» после получения id и даты формируем название
     if resource in ["transactions", "payments"]:
         set_transaction_title(db, item)
@@ -605,6 +618,19 @@ async def update_resource_item(
     # чтобы правка других полей не падала на «историческом» счётчике.
     if resource == "meters" and "services_type_id" in payload:
         validate_meter_service_type(db, item.services_type_id)
+
+    # Тарифы: если тариф «Действующий» и меняется его группа (вид услуги/разовость) —
+    # вытесняем прежних действующих в новой группе (сам тариф остаётся действующим).
+    if resource == "tariffs":
+        raw_status = payload.get("status")
+        if raw_status == TARIFF_STATUS_ARCHIVED:
+            item.status = TARIFF_STATUS_ARCHIVED
+        elif item.status != TARIFF_STATUS_ARCHIVED and (
+            "services_type_id" in payload or "is_oneoff" in payload
+        ):
+            retire_tariff_predecessors(
+                db, item.services_type_id, bool(item.is_oneoff), exclude_tariff_id=item.id
+            )
 
     # Аудит: фиксируем автора последнего изменения (п. 2.9).
     audit_document_update(item, _auth.id)

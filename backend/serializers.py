@@ -229,6 +229,7 @@ def tariff_serializer(item: Tariff) -> dict:
         "valid_from": item.valid_from.isoformat() if item.valid_from else None,
         "unit": unit,
         "is_oneoff": item.is_oneoff,
+        "status": item.status,
         "comment": item.comment,
         "services_type": {"id": st.id, "services_type": st.services_type} if st else None,
         "tariff_type": {"id": tt.id, "name": tt.name} if tt else None,
