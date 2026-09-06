@@ -68,8 +68,39 @@ def test_filter_apartments_numeric_range(db, user_factory, account_factory):
     assert resp.headers["X-Total-Count"] == "0"
 
 
+def test_filter_nested_contains_and_eq(db, user_factory, account_factory):
+    """Фильтры по вложенным полям (путь по relationship): contains и eq.
+
+    Раньше падало с 500: для path-дескрипторов тип уже извлечён из столбца,
+    а классификатор повторно обращался к `.type` (AttributeError).
+    """
+    admin = user_factory("filnest", UserRole.admin)
+    account_factory("bnest1")
+    account_factory("bnest2")
+    client = TestClient(app)
+    h = _headers(admin)
+
+    # contains по вложенному полю (Квартиры -> Собственник.full_name).
+    resp = client.get("/api/apartments?_start=0&_end=50&owner.full_name_like=bnest", headers=h)
+    assert resp.status_code == 200
+    assert resp.headers["X-Total-Count"] == "2"
+
+    # eq по вложенному полю (Квартиры -> Собственник.full_name, полное имя).
+    resp = client.get("/api/apartments?_start=0&_end=50&owner.full_name=bnest1 T", headers=h)
+    assert resp.status_code == 200
+    assert resp.headers["X-Total-Count"] == "1"
+
+    # contains по вложенному полю на регистре начислений (л/с -> номер счёта).
+    resp = client.get(
+        "/api/accruals_register?_start=0&_end=50&account.account_number_like=bnest",
+        headers=h,
+    )
+    assert resp.status_code == 200
+    assert resp.headers["X-Total-Count"] == "0"
+
+
+# Фильтр по enum-колонке (transaction_type): значение — имя члена PG-enum.
 def test_filter_transactions_by_enum(db, user_factory, account_factory):
-    """Фильтр по enum-колонке (transaction_type): значение — имя члена PG-enum."""
     admin = user_factory("filenum", UserRole.admin)
     a = account_factory("benum1")
     b = account_factory("benum2")

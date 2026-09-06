@@ -26,13 +26,16 @@ import {
 } from "@refinedev/core";
 import type { FieldMeta, ModalState } from "../types";
 import type { CrudFilter } from "@refinedev/core";
-import {
-    getFilterKind,
-    getSelectOptions,
-} from "../config/filters";
 import { getColumnsForResource } from "../config/columns";
 import { allResources } from "../config/menu";
+import {
+    getFilterKind,
+    getReferenceSource,
+    getSelectOptions,
+    isReferenceFilter,
+} from "../config/filters";
 import { RecordFormModal } from "../components/common/RecordFormModal";
+import { ReferenceFilterSelect } from "../components/common/ReferenceFilterSelect";
 import { BulkReadingsModal } from "../components/meter-readings/BulkReadingsModal";
 import { AccrualsCalculationModal } from "../components/accruals/AccrualsCalculationModal";
 import { OneOffAccrualsEditModal } from "../components/accruals/OneOffAccrualsEditModal";
@@ -165,6 +168,11 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
 
     const { data: identity } = useGetIdentity<any>();
 
+    // Регистр начислений: свежие периоды сверху (иначе первыми идут «входящие остатки»
+    // стартовых долгов — они добавлены позже всех и стоят в конце по id).
+    const defaultSortDescPeriod = resourceName === "accruals_register";
+    const initialSortField = defaultSortDescPeriod ? "accrual_date" : "id";
+
     const {
         tableQuery,
         current,
@@ -183,7 +191,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         sorters: {
             initial: [
                 {
-                    field: "id",
+                    field: initialSortField,
                     order: "desc",
                 },
             ],
@@ -417,6 +425,18 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             );
         }
         if (kind === "select") {
+            if (isReferenceFilter(col.key)) {
+                const refSource = getReferenceSource(col.key);
+                if (refSource) {
+                    return (
+                        <ReferenceFilterSelect
+                            source={refSource}
+                            value={d.sel}
+                            onChange={(v: any) => setDraft(col.key, { sel: v })}
+                        />
+                    );
+                }
+            }
             return (
                 <Select
                     allowClear
@@ -476,7 +496,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             width: 70,
             sorter: true,
             sortOrder: getColumnSortOrder('id'),
-            defaultSortOrder: 'descend' as const,
+            // Сортировка по умолчанию — на «Периоде» (см. выше); стрелку на ID не ставим.
+            ...(defaultSortDescPeriod ? {} : { defaultSortOrder: 'descend' as const }),
         },
         ...displayColumns.map((col) => {
             const sortable = isSortableField(col.key);
@@ -501,6 +522,10 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         title: 'Кликните для сортировки',
                     }),
                 }),
+                // Подсветка сортировки по умолчанию для регистра начислений.
+                ...(defaultSortDescPeriod && col.key === 'accrual_date'
+                    ? { defaultSortOrder: 'descend' as const }
+                    : {}),
             };
         }),
         ...(isRegister || !roleCanWrite

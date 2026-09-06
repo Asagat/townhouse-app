@@ -32,9 +32,8 @@ _OPERATOR_SUFFIXES = (("_like", "like"), ("_ne", "ne"), ("_gte", "gte"), ("_lte"
 
 # --- Определение «вида» значения поля по типу столбца ---
 
-def _kind_of_column(column) -> str | None:
-    """Классификация типа столбца: str/int/num/date/datetime/bool."""
-    t = column.type
+def _kind_of_type(t) -> str | None:
+    """Классификация SQLAlchemy-типа столбца: str/int/num/date/datetime/bool."""
     if isinstance(t, satypes.Boolean):
         return "bool"
     if isinstance(t, (satypes.SmallInteger, satypes.Integer, satypes.BigInteger)):
@@ -46,6 +45,10 @@ def _kind_of_column(column) -> str | None:
     if isinstance(t, satypes.Date):
         return "date"
     return "str"
+
+
+def _kind_of_column(column) -> str | None:
+    return _kind_of_type(column.type)
 
 
 def _direct_column(model, field):
@@ -81,8 +84,9 @@ def _descriptor_kind(base_model, descriptor: dict) -> str:
         # В SORT_FIELDS coalesce используется только для текстовых названий документов.
         return "str"
     if "path" in descriptor:
+        # _path_leaf_type возвращает уже тип столбца (не Column) — классифицируем напрямую.
         t = _path_leaf_type(base_model, descriptor["path"], descriptor["col"])
-        return _kind_of_column(t) if t is not None else "str"
+        return _kind_of_type(t) if t is not None else "str"
     return "str"
 
 

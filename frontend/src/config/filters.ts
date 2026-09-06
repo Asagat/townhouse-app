@@ -105,6 +105,94 @@ export const FILTER_SELECT_OPTIONS: Record<string, { value: string; label: strin
     ],
 };
 
+// --- Справочные фильтры (select по справочнику) ---
+// Колонки, которые на формах заполняются из справочников (reference), в списках тоже
+// фильтруются выбором из того же справочника (а не свободным текстом «содержит»).
+// Значение фильтра — отображаемое значение записи (сервер: eq по display-полю),
+// label — расширенная подпись для выпадающего списка.
+export interface ReferenceFilterSource {
+    resource: string;
+    valueOf: (item: any) => string;
+    labelOf: (item: any) => string;
+}
+
+const _v = (x: any) => (x == null ? "" : String(x));
+
+const REFERENCE_SOURCES: Record<string, ReferenceFilterSource> = {
+    owners: {
+        resource: "owners",
+        valueOf: (i: any) => i.full_name ?? "",
+        labelOf: (i: any) => i.full_name ?? `#${i.id}`,
+    },
+    apartments: {
+        resource: "apartments",
+        valueOf: (i: any) => _v(i.apartment_number ?? i.apartment?.apartment_number),
+        labelOf: (i: any) => {
+            const apt = i.apartment_number ?? i.apartment?.apartment_number;
+            const owner = i.owner?.full_name;
+            return owner ? `№ ${apt} — ${owner}` : `№ ${apt}`;
+        },
+    },
+    accounts: {
+        resource: "accounts",
+        valueOf: (i: any) => i.account_number ?? "",
+        labelOf: (i: any) =>
+            `${i.account_number ?? ""}${i.account_name ? ` (${i.account_name})` : ""}`,
+    },
+    cash_points: {
+        resource: "cash_points",
+        valueOf: (i: any) => i.name ?? "",
+        labelOf: (i: any) => i.name ?? `#${i.id}`,
+    },
+    analytic_articles: {
+        resource: "analytic_articles",
+        valueOf: (i: any) => i.name ?? "",
+        labelOf: (i: any) =>
+            i.name
+                ? `${i.name}${i.kind ? ` (${i.kind === "Доход" ? "доход" : "расход"})` : ""}`
+                : `#${i.id}`,
+    },
+    services_type: {
+        resource: "services_type",
+        valueOf: (i: any) => i.services_type ?? "",
+        labelOf: (i: any) => i.services_type ?? `#${i.id}`,
+    },
+    meters: {
+        resource: "meters",
+        valueOf: (i: any) => i.serial_number ?? "",
+        labelOf: (i: any) => i.serial_number ?? `#${i.id}`,
+    },
+    tariff_types: {
+        resource: "tariff_types",
+        valueOf: (i: any) => i.name ?? "",
+        labelOf: (i: any) => i.name ?? `#${i.id}`,
+    },
+};
+
+// Какие display-колонки списков фильтровать как справочник (select), а не «содержит».
+export const FILTER_REFERENCE_COLUMNS: Record<string, string> = {
+    "cash_point.name": "cash_points",
+    "article.name": "analytic_articles",
+    "contractor.full_name": "owners",
+    "owner.full_name": "owners",
+    "apartment.owner.full_name": "owners",
+    "account.account_number": "accounts",
+    "apartment.apartment_number": "apartments",
+    "services_type.services_type": "services_type",
+    "meter.serial_number": "meters",
+    "tariff_type.name": "tariff_types",
+};
+
+export const isReferenceFilter = (columnKey: string): boolean =>
+    columnKey in FILTER_REFERENCE_COLUMNS;
+
+export const getReferenceSource = (
+    columnKey: string,
+): ReferenceFilterSource | undefined => {
+    const resource = FILTER_REFERENCE_COLUMNS[columnKey];
+    return resource ? REFERENCE_SOURCES[resource] : undefined;
+};
+
 const KIND_MAP: Record<string, FilterKind> = {};
 for (const k of TEXT_KEYS) KIND_MAP[k] = "text";
 for (const k of NUMBER_KEYS) KIND_MAP[k] = "number";
@@ -112,6 +200,7 @@ for (const k of DATE_KEYS) KIND_MAP[k] = "date";
 for (const k of DATETIME_KEYS) KIND_MAP[k] = "datetime";
 for (const k of BOOL_KEYS) KIND_MAP[k] = "bool";
 for (const k of Object.keys(FILTER_SELECT_OPTIONS)) KIND_MAP[k] = "select";
+for (const k of Object.keys(FILTER_REFERENCE_COLUMNS)) KIND_MAP[k] = "select";
 
 export const getFilterKind = (columnKey: string): FilterKind => KIND_MAP[columnKey] ?? "text";
 
