@@ -132,21 +132,13 @@ def main() -> int:
                 continue
             t = Tariff(
                 services_type_id=_FOND_ID,
-                tariff_type_id=None,  # проставится ниже по системному типу «Фиксированный»?
                 price=price,
                 valid_from=valid_from,
-                unit=None,
+                # Тип и ед. изм. на тарифе не хранятся (09.2026) — наследуются от
+                # вида услуги «Фонд развития» (тип «Фиксированный»).
                 comment=f"Разовый: историч. начисление «Прочие расходы» (перенос на «{FOND_NAME}», 09.2026)",
                 is_oneoff=True,
             )
-            # Тип тарифа — «Фиксированный» (разовый сбор, сумма = цена).
-            row = db.execute(
-                text("SELECT id FROM tariff_types WHERE name = 'Фиксированный' LIMIT 1")
-            ).scalar()
-            if row is None:
-                print("Тип тарифа «Фиксированный» не найден — останов.")
-                return 1
-            t.tariff_type_id = int(row)
             db.add(t)
             db.flush()
             new_tariffs[amount] = t.id

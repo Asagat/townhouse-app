@@ -103,7 +103,9 @@ SORT_FIELDS: dict[tuple[str, str], dict] = {
 
     # --- Тарифы ---
     ("tariffs", "services_type.services_type"): {"path": ["services_type"], "col": "services_type"},
-    ("tariffs", "tariff_type.name"): {"path": ["tariff_type"], "col": "name"},
+    ("tariffs", "tariff_type.name"): {"path": ["services_type", "tariff_type"], "col": "name"},
+    # Ед. изм. и тип наследуются от вида услуги (09.2026).
+    ("tariffs", "unit"): {"path": ["services_type"], "col": "unit"},
 
     # --- Счётчики ---
     ("meters", "apartment.apartment_number"): {"path": ["apartment"], "col": "apartment_number"},

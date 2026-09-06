@@ -134,14 +134,28 @@ def ensure_tariff_types(db):
 
 def ensure_services(db, path) -> dict:
     """Создаёт ServiceType из services.csv (code->имя) и возвращает mapping
-    code-str -> ServiceType."""
+    code-str -> ServiceType.
+
+    Тип тарифа задаётся на виде услуги (09.2026): для импортируемого набора кодов
+    услуга code=1 (электроэнергия) — «По счетчику», остальные — «Фиксированный»
+    (согласуется с правилом построения исторических тарифов migrate_synthetic).
+    """
+    tt_by_name = {tt.name: tt.id for tt in db.query(TariffType).all()}
+
+    def _type_id(code: str) -> int:
+        name = "По счетчику" if code == "1" else "Фиксированный"
+        tid = tt_by_name.get(name)
+        if tid is None:
+            raise RuntimeError(f"Тип тарифа «{name}» не найден — сначала ensure_tariff_types(db)")
+        return tid
+
     mapping = {}
     for row in _csv(path, "services"):
         code = row["code"].strip()
         name = row["name"].strip()
         svc = db.query(ServiceType).filter(ServiceType.services_type == name).first()
         if svc is None:
-            svc = ServiceType(services_type=name, priority=0)
+            svc = ServiceType(services_type=name, priority=0, tariff_type_id=_type_id(code))
             db.add(svc)
             db.flush()
         mapping[code] = svc

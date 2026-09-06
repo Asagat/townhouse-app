@@ -133,6 +133,8 @@ export const columnsConfig: Record<string, Column[]> = {
 
     services_type: [
         { key: 'services_type', label: 'Вид услуги' },
+        { key: 'tariff_type.name', label: 'Тип тарифа' },
+        { key: 'unit', label: 'Ед. изм.' },
         { key: 'priority', label: 'Приоритет списания' },
     ],
 
@@ -218,9 +220,9 @@ export const formFieldConfig: Record<string, string[]> = {
     transactions: ['transaction_date', 'cash_point_id', 'transaction_type', 'article_id', 'contractor_id', 'apartment_id', 'amount', 'notes'],
     accruals_register: ['accrual_date', 'account_id', 'services_type_id', 'past_reading_value', 'current_reading_value', 'consumption', 'amount'],
     accounts_register: ['account_id', 'services_type_id', 'income', 'expense', 'balance_after'],
-    services_type: ['services_type', 'priority'],
+    services_type: ['services_type', 'tariff_type_id', 'unit', 'priority'],
     tariff_types: ['name'],
-    tariffs: ['services_type_id', 'tariff_type_id', 'price', 'unit', 'valid_from', 'is_oneoff', 'comment'],
+    tariffs: ['services_type_id', 'price', 'valid_from', 'is_oneoff', 'comment'],
     meters: ['serial_number', 'apartment_id', 'services_type_id', 'installed_at'],
     meter_readings: ['apartment_id', 'services_type_id', 'reading', 'reading_date'],
     meter_reading_documents: ['title', 'reading_date', 'services_type_id'],

@@ -17,6 +17,7 @@ from models import (
     AccrualsRegister,
     CashRegister,
     ServiceType,
+    TariffType,
     Transaction,
     TransactionTypeEnum,
 )
@@ -31,8 +32,17 @@ from app import build_account_statement, create_accounts_register_entries_for_ac
 
 
 def _svc(db, name: str, priority: int) -> ServiceType:
-    """Создаёт вид услуги с нужным приоритетом списания (иначе тесты завязаны на ID существующих)."""
-    svc = ServiceType(services_type=name, priority=priority)
+    """Создаёт вид услуги с нужным приоритетом списания (иначе тесты завязаны на ID существующих).
+
+    Тип тарифа задаётся на виде услуги (09.2026) — берём «Фиксированный» (для тестов
+    списаний тип не важен, важна только обязательность поля).
+    """
+    tt = db.query(TariffType).filter(TariffType.name == "Фиксированный").first()
+    if tt is None:
+        tt = TariffType(name="Фиксированный")
+        db.add(tt)
+        db.flush()
+    svc = ServiceType(services_type=name, priority=priority, tariff_type_id=tt.id)
     db.add(svc)
     db.flush()
     return svc

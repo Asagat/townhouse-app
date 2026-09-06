@@ -69,17 +69,20 @@ METER_TARIFF_TYPE_NAME = "По счетчику"
 def service_type_serializer(item: ServiceType) -> dict:
     """Сериализатор вида услуг.
 
-    `has_meter_tariff` (п. 2.7 роадмапа): есть ли у услуги тариф «По счетчику».
-    По этому признаку фронт фильтрует выбор «Вид услуги» в форме «Счетчики».
+    Тип тарифа задан на виде услуги (09.2026) и наследуется тарифами. `has_meter_tariff`
+    (п. 2.7 роадмапа): тип услуги — «По счетчику». По этому признаку фронт фильтрует
+    выбор «Вид услуги» в форме «Счетчики».
     """
+    tt = item.tariff_type
+    unit = item.unit
     return {
         "id": item.id,
         "services_type": item.services_type,
         "priority": item.priority,
-        "has_meter_tariff": any(
-            t.tariff_type is not None and t.tariff_type.name == METER_TARIFF_TYPE_NAME
-            for t in item.tariffs
-        ),
+        "tariff_type_id": tt.id if tt else None,
+        "tariff_type": {"id": tt.id, "name": tt.name} if tt else None,
+        "unit": unit,
+        "has_meter_tariff": bool(tt and tt.name == METER_TARIFF_TYPE_NAME),
     }
 
 
@@ -215,14 +218,16 @@ def transaction_serializer(item: Transaction) -> dict:
 
 def tariff_serializer(item: Tariff) -> dict:
     st = item.services_type
-    tt = item.tariff_type
+    # Тип тарифа и ед. изм. наследуются от вида услуги (09.2026) — на тарифе не хранятся.
+    tt = st.tariff_type if st else None
+    unit = st.unit if st else None
     return {
         "id": item.id,
         "services_type_id": item.services_type_id,
-        "tariff_type_id": item.tariff_type_id,
+        "tariff_type_id": tt.id if tt else None,
         "price": float(item.price) if item.price is not None else 0.0,
         "valid_from": item.valid_from.isoformat() if item.valid_from else None,
-        "unit": item.unit,
+        "unit": unit,
         "is_oneoff": item.is_oneoff,
         "comment": item.comment,
         "services_type": {"id": st.id, "services_type": st.services_type} if st else None,
@@ -379,10 +384,12 @@ def accruals_register_serializer(item: AccrualsRegister) -> dict:
         result["services_type"] = None
 
     if item.tariff:
+        # Ед. изм. наследуется от вида услуги (09.2026) — на тарифе не хранится.
+        tariff_svc = item.tariff.services_type
         result["tariff"] = {
             "id": item.tariff.id,
             "price": float(item.tariff.price) if item.tariff.price else 0,
-            "unit": item.tariff.unit,
+            "unit": tariff_svc.unit if tariff_svc else None,
         }
     else:
         result["tariff"] = None

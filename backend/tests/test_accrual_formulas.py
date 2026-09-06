@@ -31,13 +31,16 @@ def _tariff_type(db, name: str) -> TariffType:
 
 
 def _make_service_with_tariff(db, name: str, tariff_type_name: str, price):
-    """Создаёт вид услуги и тариф к нему (самодостаточно, без привязки к ID)."""
-    svc = ServiceType(services_type=name, priority=0)
+    """Создаёт вид услуги с типом тарифа и тариф к нему (самодостаточно).
+
+    Ед. изм. задаётся на услуге (09.2026), в тарифе не хранится.
+    """
+    ttype = _tariff_type(db, tariff_type_name)
+    svc = ServiceType(services_type=name, priority=0, tariff_type_id=ttype.id)
     db.add(svc)
     db.flush()
-    ttype = _tariff_type(db, tariff_type_name)
-    t = Tariff(services_type_id=svc.id, tariff_type_id=ttype.id,
-               price=price, valid_from=date(2000, 1, 2), unit="u")
+    t = Tariff(services_type_id=svc.id,
+               price=price, valid_from=date(2000, 1, 2))
     db.add(t)
     db.flush()
     return svc, t
@@ -91,18 +94,18 @@ def test_oneoff_tariff_not_used_for_regular_accrual(db, account_factory):
     обычное начисление, даже если он «последний действующий ≤ дате» для своего вида
     услуги (ошибка: Фонд 121000@2018-04 → месячных 281; Охрана 6060@2020-12 → 1020)."""
     rec = account_factory("rof")
-    svc = ServiceType(services_type="__test_Однораз", priority=0)
+    ttype = _tariff_type(db, "Фиксированный")
+    svc = ServiceType(services_type="__test_Однораз", priority=0, tariff_type_id=ttype.id)
     db.add(svc)
     db.flush()
-    ttype = _tariff_type(db, "Фиксированный")
 
     # Регулярный тариф услуги (обычная месячная ставка).
-    regular = Tariff(services_type_id=svc.id, tariff_type_id=ttype.id,
+    regular = Tariff(services_type_id=svc.id,
                      price=100, valid_from=date(2000, 1, 1), is_oneoff=False)
     db.add(regular)
     # Разовый сбор той же услуги с более поздним valid_from — если бы он попал в
     # выбор «последний действующий <= дате», месячное начисление стало бы 5000.
-    db.add(Tariff(services_type_id=svc.id, tariff_type_id=ttype.id,
+    db.add(Tariff(services_type_id=svc.id,
                   price=5000, valid_from=date(2018, 4, 1), is_oneoff=True))
     db.commit()
     acc = db.get(Account, rec["account_id"])

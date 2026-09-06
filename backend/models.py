@@ -163,7 +163,17 @@ class ServiceType(Base):
     # Порядок списания задолженности: меньший номер списывается раньше.
     # NULL/0 — списание в последнюю очередь (после услуг с заданным приоритетом).
     priority = Column(Integer, default=0)
+    # Тип тарифа (09.2026, перенесён с тарифа на вид услуги): единая привязка на
+    # услугу исключает ошибку «не тот тип указан на тарифе» (начисление не проходило).
+    # Тарифы наследуют тип от своего вида услуги (см. calculate_accrual_*).
+    tariff_type_id = Column(
+        Integer, ForeignKey("tariff_types.id", ondelete="RESTRICT"), nullable=False
+    )
+    # Единица измерения услуги (09.2026, перенесена с тарифа): задаётся один раз на
+    # услуге, тарифы наследуют её (в самих тарифах ед. изм. не хранится).
+    unit = Column(String(50))
 
+    tariff_type = relationship("TariffType", back_populates="services")
     tariffs = relationship("Tariff", back_populates="services_type", passive_deletes=True)
     meters = relationship("Meter", back_populates="services_type", passive_deletes=True)
     meter_readings = relationship("MeterReading", back_populates="services_type", passive_deletes=True)
@@ -178,7 +188,7 @@ class TariffType(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
 
-    tariffs = relationship("Tariff", back_populates="tariff_type", passive_deletes=True)
+    services = relationship("ServiceType", back_populates="tariff_type", passive_deletes=True)
 
 
 class Tariff(Base):
@@ -187,12 +197,10 @@ class Tariff(Base):
     services_type_id = Column(
         Integer, ForeignKey("services_type.id", ondelete="RESTRICT"), nullable=False
     )
-    tariff_type_id = Column(
-        Integer, ForeignKey("tariff_types.id", ondelete="RESTRICT"), nullable=False
-    )
+    # Тип тарифа НЕ хранится на тарифе (09.2026): он задан на виде услуги
+    # (services_type.tariff_type_id) и наследуется всеми тарифами услуги.
     price = Column(Numeric(15, 2), nullable=False)
     valid_from = Column(Date, nullable=False)
-    unit = Column(String(50))
     # Примечание/комментарий к тарифу (пояснение, от чего зависит ставка и т.п.).
     comment = Column(String(500))
     # Признак «разового/одноразового» сбора. Регулярные (повторяемые) тарифы
@@ -202,7 +210,6 @@ class Tariff(Base):
     is_oneoff = Column(Boolean, nullable=False, default=False, server_default=text("false"))
 
     services_type = relationship("ServiceType", back_populates="tariffs")
-    tariff_type = relationship("TariffType", back_populates="tariffs")
     accruals = relationship("AccrualsRegister", back_populates="tariff", passive_deletes=True)
 
 

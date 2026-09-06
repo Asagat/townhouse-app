@@ -56,8 +56,6 @@ from models import (
     ReceiptDocument,
     ReceiptItem,
     ServiceType,
-    Tariff,
-    TariffType,
     Transaction,
     TransactionTypeEnum,
     User,
@@ -65,7 +63,7 @@ from models import (
     recalculate_account_balance,
 )
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, asc
 
 import receipt_config as rc
@@ -367,9 +365,10 @@ def get_list(
             joinedload(ReceiptDocument.items),
         )
     elif resource == "services_type":
-        # 2.7: тарифы подгружаем заранее — сериализатор отдаёт has_meter_tariff без N+1.
+        # Тип тарифа задан на виде услуги (09.2026): подгружаем заранее, чтобы
+        # сериализатор отдавал tariff_type/has_meter_tariff без N+1.
         query = query.options(
-            selectinload(ServiceType.tariffs).joinedload(Tariff.tariff_type),
+            joinedload(ServiceType.tariff_type),
         )
 
     if _sort:
@@ -469,9 +468,9 @@ async def get_resource_item(
             joinedload(ReceiptItem.receipt)
         ).filter(model.id == item_id).first()
     elif resource == "services_type":
-        # 2.7: тарифы подгружаем заранее — сериализатор отдаёт has_meter_tariff без N+1.
+        # Тип тарифа задан на виде услуги (09.2026): подгружаем заранее (без N+1).
         item = db.query(model).options(
-            selectinload(ServiceType.tariffs).joinedload(Tariff.tariff_type),
+            joinedload(ServiceType.tariff_type),
         ).filter(model.id == item_id).first()
     else:
         item = db.get(model, item_id)

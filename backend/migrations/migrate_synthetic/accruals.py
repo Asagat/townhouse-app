@@ -37,7 +37,6 @@ from models import (  # noqa: E402
     AccrualsRegister,
     ServiceType,
     Tariff,
-    TariffType,
     User,
 )
 
@@ -94,8 +93,7 @@ def main() -> int:
             if st is not None:
                 svc_by_code[code] = st
 
-        # тип тарифа «Фиксированный» (для отсутствующих/разовых периодов)
-        tt_fixed = db.query(TariffType).filter(TariffType.name == "Фиксированный").first()
+        # Тип тарифа на тарифе не хранится (09.2026) — задан на виде услуги.
 
         # tariff-интервалы услуги по коду (по уже построенной Tariff-таблице)
         code_of_svcid = {st.id: c for c, st in svc_by_code.items()}
@@ -151,9 +149,7 @@ def main() -> int:
                         tariff = t
                         break
                 if tariff is None:
-                    if tt_fixed is None:
-                        return
-                    tariff = Tariff(services_type_id=svc.id, tariff_type_id=tt_fixed.id,
+                    tariff = Tariff(services_type_id=svc.id,
                                     price=amt, valid_from=period, is_oneoff=True)
                     db.add(tariff)
                     db.flush()

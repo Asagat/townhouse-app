@@ -41,23 +41,24 @@ from models import AnalyticArticle, AnalyticKind, ServiceType, Tariff, TariffTyp
 # Типы тарифов (системные, имена зашиты в логику расчёта — не менять).
 _TARIFF_TYPES = ["По счетчику", "Фиксированный", "По площади", "На человека"]
 
-# Услуги по умолчанию: (название, приоритет списания). Ниже — вариант по умолчанию.
+# Услуги по умолчанию: (название, тип тарифа, приоритет списания). Ниже — вариант
+# по умолчанию. Тип тарифа задаётся на ВИДЕ УСЛУГИ (09.2026) и наследуется тарифами.
 # ВНИМАНИЕ (09.2026): «Электричество», «Холодная вода» и «Прочие расходы» здесь
 # НЕ заводятся — канонический набор услуг задаётся импортом истории (код 1..7,
 # см. migrations/migrate_prepare_sources.py SRC_SERVICE: Электроэнергия и т.д.),
 # а эти имена создавали дубли/лишние строки при запуске поверх импортированной БД.
 _SERVICES = [
-    ("Охрана", 3),
-    ("Обслуживание ТП", 4),
-    ("Фонд развития", 5),
+    ("Охрана", "Фиксированный", 3),
+    ("Обслуживание ТП", "По площади", 4),
+    ("Фонд развития", "Фиксированный", 5),
 ]
 
-# Дефолтные тарифы: (название_услуги, имя_типа, цена). Создаются, только если
-# у услуги вообще нет ни одного тарифа. Список синхронен с _SERVICES (см. выше).
+# Дефолтные тарифы: (название_услуги, цена). Тип берётся с услуги (см. _SERVICES).
+# Создаются, только если у услуги вообще нет ни одного тарифа.
 _DEFAULT_TARIFFS = [
-    ("Охрана", "Фиксированный", 2000.00),
-    ("Фонд развития", "Фиксированный", 5000.00),
-    ("Обслуживание ТП", "По площади", 10.00),
+    ("Охрана", 2000.00),
+    ("Фонд развития", 5000.00),
+    ("Обслуживание ТП", 10.00),
 ]
 
 # Эталонный справочник «Статьи доходов и расходов» (для документа «Приход/Расход»).
@@ -97,37 +98,40 @@ def _ensure_tariff_types(db) -> dict[str, TariffType]:
     return result
 
 
-def _ensure_services(db) -> dict[str, ServiceType]:
-    """Создаёт недостающие услуги по умолчанию, возвращает {название: объект}."""
+def _ensure_services(db, tariff_types: dict[str, TariffType]) -> dict[str, ServiceType]:
+    """Создаёт недостающие услуги по умолчанию, возвращает {название: объект}.
+
+    Тип тарифа задаётся на услуге (09.2026). Уже существующие услуги не трогаем
+    (их тип проставила миграция 0012 из фактических тарифов).
+    """
     result: dict[str, ServiceType] = {}
-    for sname, prio in _SERVICES:
+    for sname, ttype_name, prio in _SERVICES:
         svc = db.query(ServiceType).filter(ServiceType.services_type == sname).first()
         if not svc:
-            svc = ServiceType(services_type=sname, priority=prio)
+            tt = tariff_types[ttype_name]
+            svc = ServiceType(services_type=sname, priority=prio, tariff_type_id=tt.id)
             db.add(svc)
             db.flush()
-            print(f"  + услуга: {sname} (приоритет {prio})")
+            print(f"  + услуга: {sname} (приоритет {prio}, тип тарифа «{ttype_name}»)")
         result[sname] = svc
     return result
 
 
-def _ensure_tariffs(db, services: dict[str, ServiceType], tariff_types: dict[str, TariffType]) -> None:
-    """Создаёт дефолтные тарифы, если у услуги тарифов ещё нет."""
-    for sname, ttype_name, price in _DEFAULT_TARIFFS:
+def _ensure_tariffs(db, services: dict[str, ServiceType]) -> None:
+    """Создаёт дефолтные тарифы (тип наследуется от услуги), если у услуги их нет."""
+    for sname, price in _DEFAULT_TARIFFS:
         svc = services.get(sname)
         if svc is None:
             continue
         has_tariff = db.query(Tariff).filter(Tariff.services_type_id == svc.id).count() > 0
         if has_tariff:
             continue
-        tt = tariff_types[ttype_name]
         db.add(Tariff(
             services_type_id=svc.id,
-            tariff_type_id=tt.id,
             price=price,
             valid_from=date(2000, 1, 2),  # до всех реальных периодов — чтобы не мешать
         ))
-        print(f"  + тариф: {sname} ({ttype_name}) = {price}")
+        print(f"  + тариф: {sname} = {price}")
 
 
 def _ensure_analytic_articles(db) -> None:
@@ -150,8 +154,8 @@ def main() -> None:
     try:
         print("Инициализация системных справочников:")
         tariff_types = _ensure_tariff_types(db)
-        services = _ensure_services(db)
-        _ensure_tariffs(db, services, tariff_types)
+        services = _ensure_services(db, tariff_types)
+        _ensure_tariffs(db, services)
         _ensure_analytic_articles(db)
         db.commit()
         print("Готово.")

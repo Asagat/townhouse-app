@@ -198,10 +198,26 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
     ],
     "service_types": [
         {"name": "services_type", "label": "Вид услуги", "type": "string", "required": True},
+        {
+            "name": "tariff_type_id",
+            "label": "Тип тарифа",
+            "type": "reference",
+            "reference": "tariff_types",
+            "required": True,
+        },
+        {"name": "unit", "label": "Ед. изм.", "type": "string", "required": False},
         {"name": "priority", "label": "Приоритет списания", "type": "integer", "required": False},
     ],
     "services_type": [
         {"name": "services_type", "label": "Вид услуги", "type": "string", "required": True},
+        {
+            "name": "tariff_type_id",
+            "label": "Тип тарифа",
+            "type": "reference",
+            "reference": "tariff_types",
+            "required": True,
+        },
+        {"name": "unit", "label": "Ед. изм.", "type": "string", "required": False},
         {"name": "priority", "label": "Приоритет списания", "type": "integer", "required": False},
     ],
     "tariff_types": [
@@ -215,15 +231,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "reference": "services_type",
             "required": True,
         },
-        {
-            "name": "tariff_type_id",
-            "label": "Тип тарифа",
-            "type": "reference",
-            "reference": "tariff_types",
-            "required": True,
-        },
         {"name": "price", "label": "Цена", "type": "decimal", "required": True},
-        {"name": "unit", "label": "Ед. изм.", "type": "string"},
         {"name": "valid_from", "label": "Действует с", "type": "date", "required": True},
         {"name": "is_oneoff", "label": "Разовый сбор (не участвует в месячном пересчёте)", "type": "boolean", "required": False},
         {"name": "comment", "label": "Примечание", "type": "text", "required": False},

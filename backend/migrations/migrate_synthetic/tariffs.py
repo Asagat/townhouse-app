@@ -10,8 +10,9 @@ Tariff каждой услуги с правильной ценой и дато�
     (истинная ставка периода); цена меняется в месяцах смены — собираем интервалы.
   - Для фикс-услуг (2..7): месячная база = amount строки (reg/при разовых
     не участвуют); собираем интервалы по смене цены.
-  - Создаётся Tariff на каждый интервал [первый день месяца .. смены цены),
-    тип тарифа: услуга 1 = «По счетчику», остальные = «Фиксированный».
+  - Создаётся Tariff на каждый интервал [первый день месяца .. смены цены).
+    Тип тарифа на тарифе НЕ хранится (09.2026): он задан на виде услуги
+    (услуга code=1 = «По счетчику», остальные = «Фиксированный»).
 
 Контроль не связывает amount (это сделает этап начислений), но выводит,
 сколько Tariff-интервалов получилось по каждой услуге.
@@ -34,7 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import database  # noqa: E402
-from models import ServiceType, Tariff, TariffType  # noqa: E402
+from models import ServiceType, Tariff  # noqa: E402
 
 
 def ym_date(s: str) -> dt.date:
@@ -91,11 +92,9 @@ def main() -> int:
             for per, info in months.items():
                 month_price[(code, per)] = info["price"]
 
-        # Маппинг TariffType
-        t0 = db.query(TariffType).all()
-        tt = {x.name: x for x in t0}
+        # Маппинг TariffType не нужен: тип задан на виде услуги (09.2026).
 
-        def add_tariffs(code: str, name: str, type_name: str):
+        def add_tariffs(code: str, name: str):
             # отсобираем пары (per->price) в хрон, свернув подряд равные
             pairs = sorted([(k, v) for (c, k), v in month_price.items() if c == code],
                            key=lambda x: x[0])
@@ -111,7 +110,6 @@ def main() -> int:
                 # точная ставка близкая - поищем по цене не буdem (чтобы не дублить повтор от старта)
                 if base is None:
                     db.add(Tariff(services_type_id=svcs[name].id,
-                                  tariff_type_id=tt[type_name].id,
                                   price=pr, valid_from=ym_date(per)))
                     made += 1
             return made
@@ -119,8 +117,7 @@ def main() -> int:
         plan = {}
         for code in code_name:
             name = code_name[code]
-            type_name = "По счетчику" if code == "1" else "Фиксированный"
-            plan[code] = add_tariffs(code, name, type_name)
+            plan[code] = add_tariffs(code, name)
 
         if not args.commit:
             print("План Tariff-интервалов по услугам (commit не сделан):")

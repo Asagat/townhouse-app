@@ -7,10 +7,9 @@ validate_meter_service_type); HTTP-слой generic CRUD вызывает их �
 """
 
 import pytest
-from datetime import date
 from fastapi import HTTPException
 
-from models import ServiceType, Tariff, TariffType
+from models import ServiceType, TariffType
 from services import (
     METER_TARIFF_TYPE_NAME,
     service_supports_meter,
@@ -18,36 +17,32 @@ from services import (
 )
 
 
-def _meter_tariff_type(db) -> TariffType:
-    """Системный тип тарифа «По счетчику» (init_data); если отсутствует — создаёт."""
-    tt = db.query(TariffType).filter(TariffType.name == METER_TARIFF_TYPE_NAME).first()
+# Тип «По счетчику»/«Фиксированный» (по имени); переиспользует существующий.
+def _tariff_type(db, name: str) -> TariffType:
+    tt = db.query(TariffType).filter(TariffType.name == name).first()
     if tt is None:
-        tt = TariffType(name=METER_TARIFF_TYPE_NAME)
+        tt = TariffType(name=name)
         db.add(tt)
         db.flush()
     return tt
 
 
 def _make_service(db, name: str, meter_tariff_type: TariffType | None) -> ServiceType:
-    """Создаёт услугу (удаляется авто-фикстурой conftest по префиксу __test_)."""
-    svc = ServiceType(services_type=name, priority=0)
+    """Создаёт услугу (удаляется авто-фикстурой conftest по префиксу __test_).
+
+    Тип тарифа задаётся на виде услуги (09.2026): счётчику соответствует услуга
+    с типом «По счетчику», прочим — «Фиксированный».
+    """
+    fixed = _tariff_type(db, "Фиксированный")
+    chosen = meter_tariff_type if meter_tariff_type is not None else fixed
+    svc = ServiceType(services_type=name, priority=0, tariff_type_id=chosen.id)
     db.add(svc)
     db.flush()
-    if meter_tariff_type is not None:
-        db.add(
-            Tariff(
-                services_type_id=svc.id,
-                tariff_type_id=meter_tariff_type.id,
-                price=10.00,
-                valid_from=date(2020, 1, 1),
-            )
-        )
-        db.flush()
     return svc
 
 
 def test_service_supports_meter_detects_tariff(db):
-    meter_tt = _meter_tariff_type(db)
+    meter_tt = _tariff_type(db, METER_TARIFF_TYPE_NAME)
     ok_svc = _make_service(db, "__test_meter_ok", meter_tt)
     plain_svc = _make_service(db, "__test_meter_plain", None)
     db.commit()
@@ -59,7 +54,7 @@ def test_service_supports_meter_detects_tariff(db):
 
 
 def test_validate_meter_service_type_rejects_unsupported(db):
-    meter_tt = _meter_tariff_type(db)
+    meter_tt = _tariff_type(db, METER_TARIFF_TYPE_NAME)
     ok_svc = _make_service(db, "__test_meter_ok2", meter_tt)
     plain_svc = _make_service(db, "__test_meter_plain2", None)
     db.commit()

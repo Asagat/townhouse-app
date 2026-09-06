@@ -250,18 +250,18 @@ def validate_date_not_future(value: date, label: str) -> None:
 
 
 def service_supports_meter(db: Session, services_type_id) -> bool:
-    """Есть ли у услуги тариф типа «По счетчику» (п. 2.7 роадмапа).
+    """Есть ли у услуги тип тарифа «По счетчику» (п. 2.7 роадмапа).
 
-    Только к таким услугам осмысленно заводить счётчик: показания участвуют
-    в расчёте начислений лишь при тарифе «По счетчику».
+    Тип задан на виде услуги (09.2026). Только к таким услугам осмысленно заводить
+    счётчик: показания участвуют в расчёте начислений лишь при тарифе «По счетчику».
     """
     if services_type_id in (None, ""):
         return False
     row = (
         db.query(TariffType.id)
-        .join(Tariff, Tariff.tariff_type_id == TariffType.id)
+        .join(ServiceType, ServiceType.tariff_type_id == TariffType.id)
         .filter(
-            Tariff.services_type_id == int(services_type_id),
+            ServiceType.id == int(services_type_id),
             TariffType.name == METER_TARIFF_TYPE_NAME,
         )
         .first()
@@ -271,7 +271,7 @@ def service_supports_meter(db: Session, services_type_id) -> bool:
 
 def validate_meter_service_type(db: Session, services_type_id) -> None:
     """Валидация п. 2.7: счётчик можно завести/перевести только на услугу
-    с тарифом «По счетчику» (иначе счётчик бессмыслен).
+    с типом тарифа «По счетчику» (иначе счётчик бессмыслен).
 
     Бросает HTTPException(422) с понятным текстом; вызывается из generic CRUD
     (create и update ресурса `meters`), поэтому работает и для прямых вызовов API.
@@ -285,7 +285,7 @@ def validate_meter_service_type(db: Session, services_type_id) -> None:
         raise HTTPException(
             status_code=422,
             detail=(
-                f"У услуги «{name}» нет тарифа «{METER_TARIFF_TYPE_NAME}» — "
+                f"У услуги «{name}» тип тарифа не «{METER_TARIFF_TYPE_NAME}» — "
                 "счётчик к такой услуге завести нельзя (показания не влияют на расчёт)"
             ),
         )
@@ -429,11 +429,12 @@ def calculate_accrual_for_account_service(
 
             consumption = current_reading - past_reading
 
-    # Определяем тип тарифа (служебный справочник — защищён от изменений):
+    # Тип тарифа задан на ВИДЕ УСЛУГИ (09.2026, перенесён с тарифа): единая привязка
+    # исключает ошибку «на тарифе указан не тот тип». Логика по имени типа:
     #  - «По счетчику»   : сумма = тариф × (текущее − предыдущее показание)
     #  - «Фиксированный» : сумма = тариф (не зависит от счётчика/площади)
     #  - «По площади»    : сумма = тариф × площадь квартиры
-    tariff_type = db.query(TariffType).filter(TariffType.id == tariff.tariff_type_id).first()
+    tariff_type = service_type.tariff_type
     tariff_type_name = tariff_type.name if tariff_type else ""
 
     if tariff_type_name == "По площади":
