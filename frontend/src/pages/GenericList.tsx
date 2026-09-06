@@ -7,7 +7,6 @@ import {
     Space,
     Popconfirm,
     Popover,
-    Checkbox,
     Input,
     InputNumber,
     Select,
@@ -39,6 +38,7 @@ import {
 } from "../config/filters";
 import { RecordFormModal } from "../components/common/RecordFormModal";
 import { ReferenceFilterSelect } from "../components/common/ReferenceFilterSelect";
+import { SortableColumns } from "../components/common/SortableColumns";
 import { BulkReadingsModal } from "../components/meter-readings/BulkReadingsModal";
 import { AccrualsCalculationModal } from "../components/accruals/AccrualsCalculationModal";
 import { OneOffAccrualsEditModal } from "../components/accruals/OneOffAccrualsEditModal";
@@ -49,7 +49,7 @@ import { WriteoffViewModal } from "../components/writeoffs/WriteoffViewModal";
 import type { SortOrder } from "antd/es/table/interface";
 import { BRAND } from "../config/colors";
 import { canCreate, canEdit, canDelete } from "../auth/can";
-import { useVisibleColumns, filterVisibleColumns } from "../hooks/useVisibleColumns";
+import { useColumnSettings } from "../hooks/useColumnSettings";
 import { openAuthorizedPdf } from "../auth/http";
 
 interface GenericListProps {
@@ -296,9 +296,18 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const columns = getColumnsForResource(resourceName);
     const meta = allResources.find((r) => r.key === resourceName);
 
-    // Вариант A (п. 2.10): настройка видимых колонок списка, сохранение в localStorage.
-    const { visibleKeys, toggle } = useVisibleColumns(resourceName, role, columns.map((c) => c.key));
-    const displayColumns = filterVisibleColumns(columns, visibleKeys);
+    // Вариант A + C (п. 2.10): видимость и ПОРЯДОК колонок списка, сохранение в
+    // localStorage по (ресурс, роль). Перестановка — drag&drop в панели «Колонки».
+    const { orderedAll, hiddenKeys, toggle, move } = useColumnSettings(
+        resourceName,
+        role,
+        columns.map((c) => c.key),
+    );
+    const columnByKey = new Map(columns.map((c) => [c.key, c]));
+    const displayColumns = orderedAll
+        .filter((k) => !hiddenKeys.has(k))
+        .map((k) => columnByKey.get(k))
+        .filter((c): c is NonNullable<typeof c> => !!c);
 
     const getColumnSortOrder = (dataIndex: string): SortOrder | undefined => {
         if (!isSortableField(dataIndex)) return undefined;
@@ -852,7 +861,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                             trigger="click"
                             placement="bottomRight"
                             content={
-                                <div style={{ maxWidth: 280, maxHeight: 360, overflow: "auto" }}>
+                                <div style={{ width: 300, maxHeight: 360, overflow: "auto" }}>
                                     <div
                                         style={{
                                             fontSize: 13,
@@ -861,21 +870,17 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                             color: "#666",
                                         }}
                                     >
-                                        Отображаемые колонки
+                                        Отображаемые колонки (перетащите для порядка)
                                     </div>
-                                    {columns.map((col) => {
-                                        const checked = !visibleKeys ? true : visibleKeys.has(col.key);
-                                        return (
-                                            <div key={col.key} style={{ marginBottom: 4 }}>
-                                                <Checkbox
-                                                    checked={checked}
-                                                    onChange={(e) => toggle(col.key, e.target.checked)}
-                                                >
-                                                    {col.label}
-                                                </Checkbox>
-                                            </div>
-                                        );
-                                    })}
+                                    <SortableColumns
+                                        items={orderedAll.map((k) => ({
+                                            key: k,
+                                            label: columnByKey.get(k)?.label ?? k,
+                                            checked: !hiddenKeys.has(k),
+                                        }))}
+                                        onToggle={toggle}
+                                        onMove={move}
+                                    />
                                 </div>
                             }
                         >
