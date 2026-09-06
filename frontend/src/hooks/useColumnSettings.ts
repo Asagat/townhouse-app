@@ -116,5 +116,21 @@ export const useColumnSettings = (
         [orderedAll, settings, save],
     );
 
-    return { orderedAll, hiddenKeys, toggle, move };
+    // Перестановка по ключам (используется при drag&drop заголовков колонок, где
+    // видимые колонки соседствуют в orderedAll со скрытыми).
+    const moveKey = useCallback(
+        (fromKey: string, toKey: string) => {
+            if (fromKey === toKey) return;
+            const order = [...orderedAll];
+            const fromIdx = order.indexOf(fromKey);
+            const toIdx = order.indexOf(toKey);
+            if (fromIdx < 0 || toIdx < 0) return;
+            order.splice(fromIdx, 1);
+            order.splice(order.indexOf(toKey), 0, fromKey);
+            save({ order, hidden: settings?.hidden ?? [] });
+        },
+        [orderedAll, settings, save],
+    );
+
+    return { orderedAll, hiddenKeys, toggle, move, moveKey };
 };

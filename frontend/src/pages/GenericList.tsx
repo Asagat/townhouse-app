@@ -38,7 +38,19 @@ import {
 } from "../config/filters";
 import { RecordFormModal } from "../components/common/RecordFormModal";
 import { ReferenceFilterSelect } from "../components/common/ReferenceFilterSelect";
-import { SortableColumns } from "../components/common/SortableColumns";
+import {
+    ColumnDragTitle,
+    SortableColumns,
+} from "../components/common/SortableColumns";
+import {
+    DndContext,
+    PointerSensor,
+    closestCenter,
+    useSensor,
+    useSensors,
+    type DragEndEvent,
+} from "@dnd-kit/core";
+import { SortableContext } from "@dnd-kit/sortable";
 import { BulkReadingsModal } from "../components/meter-readings/BulkReadingsModal";
 import { AccrualsCalculationModal } from "../components/accruals/AccrualsCalculationModal";
 import { OneOffAccrualsEditModal } from "../components/accruals/OneOffAccrualsEditModal";
@@ -297,8 +309,9 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const meta = allResources.find((r) => r.key === resourceName);
 
     // Вариант A + C (п. 2.10): видимость и ПОРЯДОК колонок списка, сохранение в
-    // localStorage по (ресурс, роль). Перестановка — drag&drop в панели «Колонки».
-    const { orderedAll, hiddenKeys, toggle, move } = useColumnSettings(
+    // localStorage по (ресурс, роль). Перестановка — drag&drop заголовков таблицы
+    // или в панели «Колонки».
+    const { orderedAll, hiddenKeys, toggle, move, moveKey } = useColumnSettings(
         resourceName,
         role,
         columns.map((c) => c.key),
@@ -308,6 +321,17 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         .filter((k) => !hiddenKeys.has(k))
         .map((k) => columnByKey.get(k))
         .filter((c): c is NonNullable<typeof c> => !!c);
+
+    // Drag&drop самих заголовков колонок (короткий клик без сдвига — сортировка,
+    // сдвиг от 5px — перетаскивание).
+    const headerSensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    );
+    const handleHeaderDragEnd = (event: DragEndEvent) => {
+        const { active, over } = event;
+        if (!over || active.id === over.id) return;
+        moveKey(String(active.id), String(over.id));
+    };
 
     const getColumnSortOrder = (dataIndex: string): SortOrder | undefined => {
         if (!isSortableField(dataIndex)) return undefined;
@@ -540,7 +564,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             const sortable = isSortableField(col.key);
             const isNested = col.key.includes('.');
             return {
-                title: col.label,
+                title: <ColumnDragTitle columnKey={col.key}>{col.label}</ColumnDragTitle>,
                 dataIndex: col.key,
                 key: col.key,
                 render: (value: any, record: any) => {
@@ -942,25 +966,35 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 </Space>
             </div>
 
-            <Table
-                rowKey="id"
-                dataSource={data}
-                columns={tableColumns}
-                loading={tableQuery.isLoading}
-                onChange={handleTableChange}
-                pagination={{
-                    current,
-                    pageSize,
-                    total,
-                    showSizeChanger: true,
-                    showTotal: (total) => `Всего ${total} записей`,
-                    onChange: (page, size) => {
-                        setCurrent(page);
-                        if (size) setPageSize(size);
-                    },
-                }}
-                scroll={{ x: 'max-content' }}
-            />
+            <DndContext
+                sensors={headerSensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleHeaderDragEnd}
+            >
+                <SortableContext
+                    items={displayColumns.map((c) => c.key)}
+                >
+                    <Table
+                        rowKey="id"
+                        dataSource={data}
+                        columns={tableColumns}
+                        loading={tableQuery.isLoading}
+                        onChange={handleTableChange}
+                        pagination={{
+                            current,
+                            pageSize,
+                            total,
+                            showSizeChanger: true,
+                            showTotal: (total) => `Всего ${total} записей`,
+                            onChange: (page, size) => {
+                                setCurrent(page);
+                                if (size) setPageSize(size);
+                            },
+                        }}
+                        scroll={{ x: 'max-content' }}
+                    />
+                </SortableContext>
+            </DndContext>
 
             {modalState && (
                 <RecordFormModal

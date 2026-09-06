@@ -66,6 +66,46 @@ const SortableRow = ({
     );
 };
 
+/**
+ * Заголовок колонки таблицы, который можно перетаскивать для изменения порядка
+ * (альтернатива панели «Колонки»). Должен находиться внутри SortableContext,
+ * оборачивающего таблицу (см. GenericList). Короткий клик без перемещения
+ * не начинает drag — сортировка по заголовку продолжает работать.
+ */
+export const ColumnDragTitle = ({
+    columnKey,
+    children,
+}: {
+    columnKey: string;
+    children: React.ReactNode;
+}) => {
+    const { attributes, listeners, setNodeRef, isDragging, transform, transition } =
+        useSortable({ id: columnKey });
+
+    const style: React.CSSProperties = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        cursor: "grab",
+        userSelect: "none",
+        opacity: isDragging ? 0.55 : 1,
+    };
+
+    return (
+        <span
+            ref={setNodeRef}
+            {...attributes}
+            {...listeners}
+            style={style}
+            title="Перетащите, чтобы изменить порядок колонок"
+        >
+            {children}
+        </span>
+    );
+};
+
 export const SortableColumns = ({
     items,
     onToggle,
