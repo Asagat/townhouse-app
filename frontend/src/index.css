@@ -69,18 +69,23 @@ a {
 
 /* --- Режим просмотра формы: текст в disabled-полях остаётся контрастным --- */
 .form-view-mode .ant-input[disabled],
+.form-view-mode textarea.ant-input[disabled],
 .form-view-mode .ant-input-number-disabled .ant-input-number-input,
 .form-view-mode .ant-picker.ant-picker-disabled .ant-picker-input > input,
 .form-view-mode .ant-select-disabled .ant-select-selection-item,
-.form-view-mode .ant-cascader-picker-disabled .ant-cascader-input {
-  color: #262626;
-  -webkit-text-fill-color: #262626;
+.form-view-mode .ant-select-disabled .ant-select-selector,
+.form-view-mode .ant-select-disabled.ant-select-multiple .ant-select-selection-item,
+.form-view-mode .ant-input-affix-wrapper-disabled .ant-input {
+  color: #1f1f1f;
+  -webkit-text-fill-color: #1f1f1f;
 }
 .form-view-mode .ant-input[disabled],
+.form-view-mode textarea.ant-input[disabled],
 .form-view-mode .ant-input-number-disabled,
+.form-view-mode .ant-input-number-disabled .ant-input-number-input,
 .form-view-mode .ant-picker.ant-picker-disabled,
 .form-view-mode .ant-select-disabled .ant-select-selector {
-  background: #fafafa;
+  background: #ffffff;
 }
 .form-view-mode .ant-input[disabled]::placeholder,
 .form-view-mode .ant-picker.ant-picker-disabled .ant-picker-input > input::placeholder {

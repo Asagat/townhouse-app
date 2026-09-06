@@ -747,21 +747,21 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     };
 
     // --- Панель действий выбранной записи (2.12): кнопки-иконки с tooltip (Б7) ---
-    // filled — «Просмотр»/«Редактировать» в цвет фона выделенной записи.
+    // Стиль как у «Удалить»: белый фон + цветной акцент (у каждой кнопки свой цвет).
     const iconButton = (
         key: string,
         label: string,
         icon: React.ReactNode,
         onClick?: () => void,
-        filled?: boolean,
+        accentColor?: string,
     ) => (
         <Tooltip key={key} title={label}>
             <Button
                 icon={icon}
                 onClick={onClick}
                 style={
-                    filled
-                        ? { background: "#d9f2df", borderColor: "#b5e4c2", color: "#0f4d38" }
+                    accentColor
+                        ? { color: accentColor, borderColor: accentColor }
                         : undefined
                 }
             />
@@ -782,7 +782,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         if (isWriteoffDocuments) {
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setWriteoffViewId(record.id), true)}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setWriteoffViewId(record.id), "#1677ff")}
                     {roleCanEdit && record.status === "new" && (
                         <Tooltip key="cancel" title="Отменить документ">
                             <Popconfirm
@@ -801,7 +801,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         if (isReceiptDocuments) {
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setReceiptViewId(record.id), true)}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setReceiptViewId(record.id), "#1677ff")}
                     {iconButton("pdf", "PDF", <FilePdfOutlined />, () =>
                         openAuthorizedPdf(
                             `${apiUrl}/receipt_documents/${record.id}/pdf`,
@@ -831,9 +831,9 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             };
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => openDoc(true), true)}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => openDoc(true), "#1677ff")}
                     {roleCanEdit &&
-                        iconButton("edit", "Редактировать", <EditOutlined />, () => openDoc(false), true)}
+                        iconButton("edit", "Редактировать", <EditOutlined />, () => openDoc(false), "#22ae2e")}
                     {roleCanDelete &&
                         deleteButton("del", "Удалить", "Удалить документ начислений? Все связанные записи регистра будут удалены.", () =>
                             deleteRecord(
@@ -858,9 +858,9 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             };
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => openDoc(true), true)}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => openDoc(true), "#1677ff")}
                     {roleCanEdit &&
-                        iconButton("edit", "Редактировать", <EditOutlined />, () => openDoc(false), true)}
+                        iconButton("edit", "Редактировать", <EditOutlined />, () => openDoc(false), "#22ae2e")}
                     {roleCanDelete &&
                         deleteButton("del", "Удалить", "Удалить документ показаний? Все связанные показания будут удалены.", () =>
                             deleteRecord(
@@ -880,9 +880,9 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         if (!isReadOnly) {
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setModalState({ mode: "view", record }), true)}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setModalState({ mode: "view", record }), "#1677ff")}
                     {roleCanEdit &&
-                        iconButton("edit", "Редактировать", <EditOutlined />, () => setModalState({ mode: "edit", record }), true)}
+                        iconButton("edit", "Редактировать", <EditOutlined />, () => setModalState({ mode: "edit", record }), "#22ae2e")}
                     {roleCanDelete &&
                         deleteButton("del", "Удалить", "Удалить запись?", () =>
                             deleteRecord(
