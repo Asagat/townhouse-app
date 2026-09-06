@@ -8,12 +8,26 @@ import {
     Space,
     Popconfirm,
     Popover,
+    Tooltip,
+    Badge,
     Input,
     InputNumber,
     Select,
     DatePicker,
     message,
 } from "antd";
+import {
+    AccountBookOutlined,
+    DeleteOutlined,
+    EditOutlined,
+    EyeOutlined,
+    FileAddOutlined,
+    FilePdfOutlined,
+    FilterOutlined,
+    PlusOutlined,
+    TableOutlined,
+    UndoOutlined,
+} from "@ant-design/icons";
 import {
     useTable,
     useCreate,
@@ -399,8 +413,19 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const roleCanCreate = canCreate(role, resourceName);
     const roleCanEdit = canEdit(role, resourceName);
     const roleCanDelete = canDelete(role, resourceName);
-    // Есть ли у роли хоть какое-то действие записи (иначе столбец «Действия» не показываем).
+    // Есть ли у роли хоть какое-то действие записи (иначе выбор строки/панель действий скрыты).
     const roleCanWrite = roleCanCreate || roleCanEdit || roleCanDelete;
+
+    // --- Выделенная запись (2.12): действия записи — из панели над списком ---
+    const [selectedRowKey, setSelectedRowKey] = useState<string | number | null>(null);
+    const selectedRecord = data.find((r) => r.id === selectedRowKey) ?? null;
+
+    // Если выделенная запись исчезла из данных (удалена/другая страница) — снимаем выбор.
+    useEffect(() => {
+        if (selectedRowKey != null && !data.some((r) => r.id === selectedRowKey)) {
+            setSelectedRowKey(null);
+        }
+    }, [data, selectedRowKey]);
 
     const columns = getColumnsForResource(resourceName);
     const meta = allResources.find((r) => r.key === resourceName);
@@ -701,6 +726,148 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         }
     };
 
+    // --- Панель действий выбранной записи (2.12): кнопки-иконки с tooltip (Б7) ---
+    const iconButton = (key: string, label: string, icon: React.ReactNode, onClick?: () => void, danger?: boolean) => (
+        <Tooltip key={key} title={label}>
+            <Button size="small" danger={danger} icon={icon} onClick={onClick} />
+        </Tooltip>
+    );
+
+    const deleteButton = (key: string, label: string, confirmTitle: string, onOk: () => void) => (
+        <Tooltip key={key} title={label}>
+            <Popconfirm title={confirmTitle} okText="Удалить" cancelText="Отмена" onConfirm={onOk}>
+                <Button size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+        </Tooltip>
+    );
+
+    const errMsg = (err: any, fallback: string) => err?.response?.data?.detail ?? fallback;
+
+    const renderRecordActions = (record: any): React.ReactNode => {
+        if (isWriteoffDocuments) {
+            return (
+                <Space>
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setWriteoffViewId(record.id))}
+                    {roleCanEdit && record.status === "new" && (
+                        <Tooltip key="cancel" title="Отменить документ">
+                            <Popconfirm
+                                title="Отменить документ списания? Записи регистра будут удалены, балансы пересчитаны."
+                                okText="Отменить"
+                                cancelText="Закрыть"
+                                onConfirm={() => cancelWriteoffDoc(record.id)}
+                            >
+                                <Button size="small" danger icon={<UndoOutlined />} />
+                            </Popconfirm>
+                        </Tooltip>
+                    )}
+                </Space>
+            );
+        }
+        if (isReceiptDocuments) {
+            return (
+                <Space>
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setReceiptViewId(record.id))}
+                    {iconButton("pdf", "PDF", <FilePdfOutlined />, () =>
+                        openAuthorizedPdf(
+                            `${apiUrl}/receipt_documents/${record.id}/pdf`,
+                            `receipt_${record.id}.pdf`,
+                        ),
+                    )}
+                    {roleCanDelete &&
+                        deleteButton("del", "Удалить", "Удалить квитанцию?", () =>
+                            deleteRecord(
+                                { resource: resourceName, id: record.id },
+                                {
+                                    onSuccess: () => message.success("Квитанция удалена"),
+                                    onError: (err: any) => message.error(errMsg(err, "Не удалось удалить квитанцию")),
+                                },
+                            ),
+                        )}
+                </Space>
+            );
+        }
+        if (isAccrualDocuments) {
+            const isOneOff = record.doc_kind === "oneoff";
+            return (
+                <Space>
+                    {roleCanEdit &&
+                        iconButton("edit", "Редактировать", <EditOutlined />, () => {
+                            setEditingAccrualDocumentId(record.id);
+                            if (isOneOff) setOneOffAccrualsOpen(true);
+                            else setAccrualsModalOpen(true);
+                        })}
+                    {roleCanDelete &&
+                        deleteButton("del", "Удалить", "Удалить документ начислений? Все связанные записи регистра будут удалены.", () =>
+                            deleteRecord(
+                                { resource: resourceName, id: record.id },
+                                {
+                                    onSuccess: () => {
+                                        message.success("Документ начислений удален");
+                                        tableQuery.refetch();
+                                    },
+                                    onError: (err: any) => message.error(errMsg(err, "Не удалось удалить документ")),
+                                },
+                            ),
+                        )}
+                </Space>
+            );
+        }
+        if (isMeterReadingDocuments) {
+            return (
+                <Space>
+                    {roleCanEdit &&
+                        iconButton("edit", "Редактировать", <EditOutlined />, () => {
+                            setEditingMeterReadingDocumentId(record.id);
+                            setBulkModalOpen(true);
+                        })}
+                    {roleCanDelete &&
+                        deleteButton("del", "Удалить", "Удалить документ показаний? Все связанные показания будут удалены.", () =>
+                            deleteRecord(
+                                { resource: resourceName, id: record.id },
+                                {
+                                    onSuccess: () => {
+                                        message.success("Документ показаний удален");
+                                        tableQuery.refetch();
+                                    },
+                                    onError: (err: any) => message.error(errMsg(err, "Не удалось удалить документ")),
+                                },
+                            ),
+                        )}
+                </Space>
+            );
+        }
+        if (!isReadOnly) {
+            return (
+                <Space>
+                    {roleCanEdit &&
+                        iconButton("edit", "Редактировать", <EditOutlined />, () => setModalState({ mode: "edit", record }))}
+                    {roleCanDelete &&
+                        deleteButton("del", "Удалить", "Удалить запись?", () =>
+                            deleteRecord(
+                                { resource: resourceName, id: record.id },
+                                {
+                                    onSuccess: () => message.success("Запись удалена"),
+                                    onError: (err: any) => message.error(errMsg(err, "Не удалось удалить запись")),
+                                },
+                            ),
+                        )}
+                </Space>
+            );
+        }
+        return null;
+    };
+
+    const recordActions = selectedRecord ? renderRecordActions(selectedRecord) : null;
+
+    // Колонка выбора строки нужна только там, где для записи есть действия.
+    const canUseSelection =
+        !isRegister &&
+        (isWriteoffDocuments ||
+            isReceiptDocuments ||
+            isAccrualDocuments ||
+            isMeterReadingDocuments ||
+            roleCanWrite);
+
     const tableColumns = [
         {
             title: "ID",
@@ -743,224 +910,6 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     : {}),
             };
         }),
-        ...(isRegister || !roleCanWrite
-            ? []
-            : [
-                  {
-                      title: "Действия",
-                      key: "actions",
-                      width: 200,
-                      fixed: 'right' as const,
-                      render: (_: unknown, record: any) => {
-                          if (isWriteoffDocuments) {
-                              return (
-                                  <Space>
-                                      <Button
-                                          size="small"
-                                          onClick={() => setWriteoffViewId(record.id)}
-                                      >
-                                          Просмотр
-                                      </Button>
-                                      {roleCanEdit && record.status === "new" && (
-                                          <Popconfirm
-                                              title="Отменить документ списания? Записи регистра будут удалены, балансы пересчитаны."
-                                              okText="Отменить"
-                                              cancelText="Закрыть"
-                                              onConfirm={() => cancelWriteoffDoc(record.id)}
-                                          >
-                                              <Button size="small" danger>
-                                                  Отменить
-                                              </Button>
-                                          </Popconfirm>
-                                      )}
-                                  </Space>
-                              );
-                          }
-
-                          if (isReceiptDocuments) {
-                              return (
-                                  <Space>
-                                      <Button
-                                          size="small"
-                                          onClick={() => setReceiptViewId(record.id)}
-                                      >
-                                          Просмотр
-                                      </Button>
-                                      <Button
-                                          size="small"
-                                          onClick={() =>
-                                              openAuthorizedPdf(
-                                                  `${apiUrl}/receipt_documents/${record.id}/pdf`,
-                                                  `receipt_${record.id}.pdf`,
-                                              )
-                                          }
-                                      >
-                                          PDF
-                                      </Button>
-                                      {roleCanDelete && (
-                                      <Popconfirm
-                                          title="Удалить квитанцию?"
-                                          okText="Удалить"
-                                          cancelText="Отмена"
-                                          onConfirm={() =>
-                                              deleteRecord(
-                                                  { resource: resourceName, id: record.id },
-                                                  {
-                                                      onSuccess: () => message.success("Квитанция удалена"),
-                                                      onError: (err: any) =>
-                                                          message.error(
-                                                              err?.response?.data?.detail ??
-                                                              "Не удалось удалить квитанцию",
-                                                          ),
-                                                  },
-                                              )
-                                          }
-                                      >
-                                          <Button size="small" danger>
-                                              Удалить
-                                          </Button>
-                                      </Popconfirm>
-                                      )}
-                                  </Space>
-                              );
-                          }
-
-                          if (isAccrualDocuments) {
-                              const isOneOff = record.doc_kind === 'oneoff';
-                              return (
-                                  <Space>
-                                      {roleCanEdit && (
-                                      <Button
-                                          size="small"
-                                          onClick={() => {
-                                              setEditingAccrualDocumentId(record.id);
-                                              if (isOneOff) {
-                                                  setOneOffAccrualsOpen(true);
-                                              } else {
-                                                  setAccrualsModalOpen(true);
-                                              }
-                                          }}
-                                      >
-                                          Редактировать
-                                      </Button>
-                                      )}
-                                      {roleCanDelete && (
-                                      <Popconfirm
-                                          title="Удалить документ начислений? Все связанные записи в регистре начислений также будут удалены."
-                                          okText="Удалить"
-                                          cancelText="Отмена"
-                                          onConfirm={() =>
-                                              deleteRecord(
-                                                  { resource: resourceName, id: record.id },
-                                                  {
-                                                      onSuccess: () => {
-                                                          message.success("Документ начислений удален");
-                                                          tableQuery.refetch();
-                                                      },
-                                                      onError: (err: any) =>
-                                                          message.error(
-                                                              err?.response?.data?.detail ??
-                                                              "Не удалось удалить документ",
-                                                          ),
-                                                  },
-                                              )
-                                          }
-                                      >
-                                          <Button size="small" danger>
-                                              Удалить
-                                          </Button>
-                                      </Popconfirm>
-                                      )}
-                                  </Space>
-                              );
-                          }
-
-                          if (isMeterReadingDocuments) {
-                              return (
-                                  <Space>
-                                      {roleCanEdit && (
-                                      <Button
-                                          size="small"
-                                          onClick={() => {
-                                              setEditingMeterReadingDocumentId(record.id);
-                                              setBulkModalOpen(true);
-                                          }}
-                                      >
-                                          Редактировать
-                                      </Button>
-                                      )}
-                                      {roleCanDelete && (
-                                      <Popconfirm
-                                          title="Удалить документ показаний? Все связанные показания также будут удалены."
-                                          okText="Удалить"
-                                          cancelText="Отмена"
-                                          onConfirm={() =>
-                                              deleteRecord(
-                                                  { resource: resourceName, id: record.id },
-                                                  {
-                                                      onSuccess: () => {
-                                                          message.success("Документ показаний удален");
-                                                          tableQuery.refetch();
-                                                      },
-                                                      onError: (err: any) =>
-                                                          message.error(
-                                                              err?.response?.data?.detail ??
-                                                              "Не удалось удалить документ",
-                                                          ),
-                                                  },
-                                              )
-                                          }
-                                      >
-                                          <Button size="small" danger>
-                                              Удалить
-                                          </Button>
-                                      </Popconfirm>
-                                      )}
-                                  </Space>
-                              );
-                          }
-
-                          if (!isReadOnly) {
-                              return (
-                                  <Space>
-                                      {roleCanEdit && (
-                                      <Button
-                                          size="small"
-                                          onClick={() => setModalState({ mode: "edit", record })}
-                                      >
-                                          Редактировать
-                                      </Button>
-                                      )}
-                                      {roleCanDelete && (
-                                      <Popconfirm
-                                          title="Удалить запись?"
-                                          okText="Удалить"
-                                          cancelText="Отмена"
-                                          onConfirm={() =>
-                                              deleteRecord(
-                                                  { resource: resourceName, id: record.id },
-                                                  {
-                                                      onSuccess: () => message.success("Запись удалена"),
-                                                      onError: (err: any) =>
-                                                          message.error(
-                                                              err?.response?.data?.detail ??
-                                                              "Не удалось удалить запись",
-                                                          ),
-                                                  },
-                                              )
-                                          }
-                                      >
-                                          <Button size="small" danger>
-                                              Удалить
-                                          </Button>
-                                      </Popconfirm>
-                                      )}
-                                  </Space>
-                              );
-                          }
-                      },
-                  },
-              ]),
     ];
 
     return (
@@ -979,14 +928,68 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 style={{
                     display: "flex",
                     justifyContent: "space-between",
-                    alignItems: "center",
+                    alignItems: "flex-start",
+                    gap: 16,
                     marginBottom: 20,
                 }}
             >
-                <h1 style={{ color: "#14501d", margin: 0 }}>
-                    {meta?.label ?? resourceName}
-                </h1>
-                <Space>
+                <div style={{ minWidth: 0 }}>
+                    <h1 style={{ color: "#14501d", margin: 0 }}>
+                        {meta?.label ?? resourceName}
+                    </h1>
+                    {recordActions && (
+                        <div
+                            style={{
+                                marginTop: 10,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                flexWrap: "wrap",
+                            }}
+                        >
+                            <span style={{ color: "#888", fontSize: 12 }}>
+                                Запись № {selectedRecord?.id ?? ""}:
+                            </span>
+                            {recordActions}
+                        </div>
+                    )}
+                </div>
+                <Space wrap style={{ flexShrink: 0 }}>
+                    {/* Сортировка (2.12): выбор колонки + направление */}
+                    <Select
+                        allowClear
+                        placeholder="Сортировка"
+                        style={{ width: 170 }}
+                        value={sorters?.[0]?.field}
+                        onChange={(field?: string) => {
+                            if (!field) {
+                                setSorters([]);
+                                return;
+                            }
+                            const cur = sorters?.[0];
+                            setSorters([{ field, order: cur?.field === field ? cur.order : "desc" }]);
+                        }}
+                        options={[
+                            { value: "id", label: "ID" },
+                            ...displayColumns
+                                .filter((c) => isSortableField(c.key))
+                                .map((c) => ({ value: c.key, label: c.label })),
+                        ]}
+                    />
+                    <Select
+                        style={{ width: 130 }}
+                        value={sorters?.[0]?.order ?? "desc"}
+                        disabled={!sorters?.length}
+                        onChange={(order) => {
+                            const cur = sorters?.[0];
+                            if (cur) setSorters([{ ...cur, order }]);
+                        }}
+                        options={[
+                            { value: "asc", label: "По возрастанию" },
+                            { value: "desc", label: "По убыванию" },
+                        ]}
+                    />
+
                     <Popover
                         trigger="click"
                         open={filtersOpen}
@@ -1030,9 +1033,11 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                             </div>
                         }
                     >
-                        <Button>
-                            Фильтры{appliedCount > 0 ? ` (${appliedCount})` : ""}
-                        </Button>
+                        <Tooltip title={appliedCount > 0 ? `Фильтры (${appliedCount})` : "Фильтры"}>
+                            <Badge size="small" count={appliedCount} offset={[-6, 6]}>
+                                <Button icon={<FilterOutlined />} />
+                            </Badge>
+                        </Tooltip>
                     </Popover>
                     {columns.length > 0 && (
                         <Popover
@@ -1062,60 +1067,67 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                 </div>
                             }
                         >
-                            <Button>Колонки</Button>
+                            <Tooltip title="Колонки">
+                                <Button icon={<TableOutlined />} />
+                            </Tooltip>
                         </Popover>
                     )}
 
                     {isMeterReadingDocuments && roleCanCreate && (
-                        <Button
-                            type="primary"
-                            onClick={() => {
-                                setEditingMeterReadingDocumentId(undefined);
-                                setBulkModalOpen(true);
-                            }}
-                        >
-                            Добавить
-                        </Button>
+                        <Tooltip title="Массовый ввод показаний">
+                            <Button
+                                type="primary"
+                                icon={<EditOutlined />}
+                                onClick={() => {
+                                    setEditingMeterReadingDocumentId(undefined);
+                                    setBulkModalOpen(true);
+                                }}
+                            />
+                        </Tooltip>
                     )}
 
                     {isReceiptDocuments && (
-                        <Button
-                            type="primary"
-                            onClick={() => setReceiptsModalOpen(true)}
-                        >
-                            Сформировать квитанции
-                        </Button>
+                        <Tooltip title="Сформировать квитанции">
+                            <Button
+                                type="primary"
+                                icon={<FileAddOutlined />}
+                                onClick={() => setReceiptsModalOpen(true)}
+                            />
+                        </Tooltip>
                     )}
 
                     {isAccrualDocuments && (
-                        <Button
-                            type="primary"
-                            onClick={() => {
-                                setEditingAccrualDocumentId(undefined);
-                                setAccrualsModalOpen(true);
-                            }}
-                        >
-                            Добавить
-                        </Button>
+                        <Tooltip title="Новое начисление">
+                            <Button
+                                type="primary"
+                                icon={<PlusOutlined />}
+                                onClick={() => {
+                                    setEditingAccrualDocumentId(undefined);
+                                    setAccrualsModalOpen(true);
+                                }}
+                            />
+                        </Tooltip>
                     )}
 
                     {isWriteoffDocuments && (role === "admin" || role === "operator") && (
-                        <Button
-                            type="primary"
-                            onClick={() => setWriteOffsModalOpen(true)}
-                        >
-                            Выполнить списание
-                        </Button>
+                        <Tooltip title="Выполнить списание">
+                            <Button
+                                type="primary"
+                                icon={<AccountBookOutlined />}
+                                onClick={() => setWriteOffsModalOpen(true)}
+                            />
+                        </Tooltip>
                     )}
 
                     {roleCanCreate && !isReadOnly && !isAccrualsRegister && !isAccrualDocuments && !isMeterReadingDocuments && !isMeterReadings && !isReceiptDocuments && !isWriteoffDocuments && (
-                        <Button
-                            type="primary"
-                            disabled={metaLoading}
-                            onClick={() => setModalState({ mode: "create" })}
-                        >
-                            Добавить
-                        </Button>
+                        <Tooltip title="Добавить">
+                            <Button
+                                type="primary"
+                                disabled={metaLoading}
+                                icon={<PlusOutlined />}
+                                onClick={() => setModalState({ mode: "create" })}
+                            />
+                        </Tooltip>
                     )}
                 </Space>
             </div>
@@ -1135,6 +1147,21 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         components={tableHeaderComponents}
                         loading={tableQuery.isLoading}
                         onChange={handleTableChange}
+                        {...(canUseSelection
+                            ? {
+                                  onRow: (record: any) => ({
+                                      onClick: () => setSelectedRowKey(record.id),
+                                      style: { cursor: "pointer" },
+                                  }),
+                                  rowSelection: {
+                                      type: "radio",
+                                      selectedRowKeys:
+                                          selectedRowKey != null ? [selectedRowKey] : [],
+                                      onChange: (keys) =>
+                                          setSelectedRowKey((keys[0] as string | number) ?? null),
+                                  },
+                              }
+                            : {})}
                         pagination={{
                             current,
                             pageSize,
