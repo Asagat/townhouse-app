@@ -497,6 +497,30 @@ async def get_resource_item(
     return row
 
 
+def _require_positive_document_amount(resource: str, amount) -> None:
+    """Сумма документа «Приход/Расход» не может быть отрицательной или нулевой.
+
+    Уменьшение суммы выполняется правкой того же документа либо противоположным
+    документом (расход вместо прихода и наоборот) — отрицательные суммы запрещены
+    (в истории они появились из-за особенностей старой БД и были сведены).
+    """
+    if resource not in ("transactions", "payments"):
+        return
+    try:
+        value = Decimal(str(amount))
+    except (InvalidOperation, ValueError, TypeError):
+        return
+    if value <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Сумма документа «Приход/Расход» должна быть положительной. "
+                "Чтобы уменьшить сумму — отредактируйте документ или создайте "
+                "противоположный (расход/приход)."
+            ),
+        )
+
+
 @api_router.post("/{resource}", status_code=201)
 async def create_resource_item(
     resource: str,
@@ -510,6 +534,8 @@ async def create_resource_item(
             status_code=403,
             detail=f"Создание записей в '{resource}' запрещено."
         )
+
+    _require_positive_document_amount(resource, payload.get("amount"))
 
     model = MODEL_MAP.get(resource)
     fields = FIELD_CONFIG.get(resource)
@@ -618,6 +644,10 @@ async def update_resource_item(
     # чтобы правка других полей не падала на «историческом» счётчике.
     if resource == "meters" and "services_type_id" in payload:
         validate_meter_service_type(db, item.services_type_id)
+
+    # Сумма «Приход/Расход» — только положительная (см. _require_positive_document_amount).
+    if "amount" in payload:
+        _require_positive_document_amount(resource, item.amount)
 
     # Тарифы: если тариф «Действующий» и меняется его группа (вид услуги/разовость) —
     # вытесняем прежних действующих в новой группе (сам тариф остаётся действующим).

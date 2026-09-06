@@ -9,7 +9,8 @@ kind='opening'), затем остальные приходы/расходы (с
 Переприсвоение id каскадно затрагивает:
   - cash_register.transaction_id  (1:1 с транзакцией, NOT NULL) — обновляется парно;
   - accounts_register            (срез пересоздаётся заново ядром rebuild_accounts_register);
-  - transactions.doc_no           = новый id (сквозной хронологический номер).
+  - transactions.doc_no           = новый id (сквозной хронологический номер);
+  - transactions.title            = «Тип операции №<id> от <дд.мм.гггг>» (по новому id).
 
 Всё выполняется в ОДНОЙ транзакции; при сбое — полный откат.
 
@@ -26,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from sqlalchemy import text  # noqa: E402
 
 import database  # noqa: E402
+from models import TransactionTypeEnum  # noqa: E402
 from writeoffs import rebuild_accounts_register  # noqa: E402
 
 
@@ -99,13 +101,34 @@ def main() -> int:
         # Последовательность под max(id).
         db.execute(text("SELECT setval('transactions_id_seq', (SELECT max(id) FROM transactions))"))
 
+        # Названия документов по формуле «Тип операции №<id> от <дд.мм.гггг>»
+        # (номер документа = id после перенумерации).
+        _TYPE_LABEL = {m.name: m.value for m in TransactionTypeEnum}
+        _label_of = lambda raw: _TYPE_LABEL.get(raw) or next(
+            (v for k, v in _TYPE_LABEL.items() if v == raw), None)
+        tx_rows = db.execute(text(
+            "SELECT id, transaction_type, transaction_date FROM transactions"
+        )).fetchall()
+        titles_updated = 0
+        for t in tx_rows:
+            label = _label_of(t[1])
+            if not label:
+                continue
+            d = t[2]
+            date_label = d.strftime("%d.%m.%Y") if d is not None else ""
+            new_title = f"{label} №{t[0]} от {date_label}".strip()
+            db.execute(text("UPDATE transactions SET title=:t WHERE id=:id"),
+                       {"t": new_title, "id": int(t[0])})
+            titles_updated += 1
+
         # Восстанавливаем FK кассы (уже на новые id).
         db.execute(text(
             "ALTER TABLE cash_register ADD CONSTRAINT cash_register_transaction_id_fkey "
             "FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE"
         ))
         db.commit()
-        print("Транзакции (ид + cash_register) перенумерованы и doc_no обновлён.")
+        print(f"Транзакции (ид + cash_register) перенумерованы и doc_no обновлён; "
+              f"названия пересчитаны: {titles_updated}.")
 
         # --- Пересборка производного регистра взаиморасчётов (связь по новым id). ---
         res = rebuild_accounts_register(db)

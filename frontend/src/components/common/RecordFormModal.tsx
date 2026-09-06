@@ -157,10 +157,34 @@ export const RecordFormModal = ({
                         ) {
                             itemProps.dependencies = ["transaction_type"];
                         }
+                        const rules: any[] = [];
                         if (field.required) {
-                            itemProps.rules = [
-                                { required: true, message: `Поле «${field.label}» обязательно` },
-                            ];
+                            rules.push({
+                                required: true,
+                                message: `Поле «${field.label}» обязательно`,
+                            });
+                        }
+                        // Денежные поля — только положительные значения. Для «Приход/Расход»
+                        // уменьшение суммы выполняется правкой документа или противоположным
+                        // документом (сервер тоже проверяет).
+                        if (field.type === "decimal" && isMoneyFieldName(field.name)) {
+                            rules.push({
+                                validator: (_: any, value: any) =>
+                                    value == null || value === "" || Number(value) > 0
+                                        ? Promise.resolve()
+                                        : Promise.reject(
+                                              new Error(
+                                                  field.name === "amount" &&
+                                                      (resourceName === "transactions" ||
+                                                          resourceName === "payments")
+                                                      ? "Сумма документа должна быть положительной: уменьшение — правкой документа или противоположным (расход/приход)"
+                                                      : "Значение должно быть положительным",
+                                              ),
+                                          ),
+                            });
+                        }
+                        if (rules.length > 0) {
+                            itemProps.rules = rules;
                         }
                     }
 
