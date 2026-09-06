@@ -512,6 +512,24 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [sorters, filters, pageSize]);
 
+    // «По умолчанию — последняя страница»: при сортировке по возрастанию (дата/любое
+    // поле) список открывается в конце, где последние записи (один раз за открытие).
+    const autoLastPageRef = useRef(false);
+    useEffect(() => {
+        if (autoLastPageRef.current) return;
+        const total = tableQuery?.data?.total;
+        if (!total || total <= 0) return;
+        autoLastPageRef.current = true;
+        const sorter = sorters?.[0];
+        if (sorter?.order !== "asc") return;
+        const lastPage = Math.ceil(total / pageSize);
+        if (lastPage > 1 && current === 1) {
+            setCurrent(lastPage);
+        }
+        // Реагируем на появление данных и применение сохранённой сортировки (prefs).
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tableQuery?.data?.total, sorters]);
+
     const getColumnSortOrder = (dataIndex: string): SortOrder | undefined => {
         if (!isSortableField(dataIndex)) return undefined;
         const sortField = getSortField(dataIndex);
@@ -729,9 +747,24 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     };
 
     // --- Панель действий выбранной записи (2.12): кнопки-иконки с tooltip (Б7) ---
-    const iconButton = (key: string, label: string, icon: React.ReactNode, onClick?: () => void, danger?: boolean) => (
+    // filled — «Просмотр»/«Редактировать» в цвет фона выделенной записи.
+    const iconButton = (
+        key: string,
+        label: string,
+        icon: React.ReactNode,
+        onClick?: () => void,
+        filled?: boolean,
+    ) => (
         <Tooltip key={key} title={label}>
-            <Button danger={danger} icon={icon} onClick={onClick} />
+            <Button
+                icon={icon}
+                onClick={onClick}
+                style={
+                    filled
+                        ? { background: "#d9f2df", borderColor: "#b5e4c2", color: "#0f4d38" }
+                        : undefined
+                }
+            />
         </Tooltip>
     );
 
@@ -749,7 +782,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         if (isWriteoffDocuments) {
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setWriteoffViewId(record.id))}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setWriteoffViewId(record.id), true)}
                     {roleCanEdit && record.status === "new" && (
                         <Tooltip key="cancel" title="Отменить документ">
                             <Popconfirm
@@ -768,7 +801,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         if (isReceiptDocuments) {
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setReceiptViewId(record.id))}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setReceiptViewId(record.id), true)}
                     {iconButton("pdf", "PDF", <FilePdfOutlined />, () =>
                         openAuthorizedPdf(
                             `${apiUrl}/receipt_documents/${record.id}/pdf`,
@@ -798,9 +831,9 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             };
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => openDoc(true))}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => openDoc(true), true)}
                     {roleCanEdit &&
-                        iconButton("edit", "Редактировать", <EditOutlined />, () => openDoc(false))}
+                        iconButton("edit", "Редактировать", <EditOutlined />, () => openDoc(false), true)}
                     {roleCanDelete &&
                         deleteButton("del", "Удалить", "Удалить документ начислений? Все связанные записи регистра будут удалены.", () =>
                             deleteRecord(
@@ -825,9 +858,9 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             };
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => openDoc(true))}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => openDoc(true), true)}
                     {roleCanEdit &&
-                        iconButton("edit", "Редактировать", <EditOutlined />, () => openDoc(false))}
+                        iconButton("edit", "Редактировать", <EditOutlined />, () => openDoc(false), true)}
                     {roleCanDelete &&
                         deleteButton("del", "Удалить", "Удалить документ показаний? Все связанные показания будут удалены.", () =>
                             deleteRecord(
@@ -847,9 +880,9 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         if (!isReadOnly) {
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setModalState({ mode: "view", record }))}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setModalState({ mode: "view", record }), true)}
                     {roleCanEdit &&
-                        iconButton("edit", "Редактировать", <EditOutlined />, () => setModalState({ mode: "edit", record }))}
+                        iconButton("edit", "Редактировать", <EditOutlined />, () => setModalState({ mode: "edit", record }), true)}
                     {roleCanDelete &&
                         deleteButton("del", "Удалить", "Удалить запись?", () =>
                             deleteRecord(
@@ -865,8 +898,6 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         }
         return null;
     };
-
-    const recordActions = selectedRecord ? renderRecordActions(selectedRecord) : null;
 
     // Кнопка создания новой записи выносится в левую панель действий записи.
     const canCreateRecord =
@@ -957,7 +988,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     <h1 style={{ color: "#14501d", margin: 0 }}>
                         {meta?.label ?? resourceName}
                     </h1>
-                    {(recordActions ||
+                    {(canUseSelection ||
                         canCreateRecord ||
                         (isMeterReadingDocuments && roleCanCreate) ||
                         isAccrualDocuments) && (
@@ -1006,14 +1037,31 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                     />
                                 </Tooltip>
                             )}
-                            {recordActions && (
-                                <>
-                                    {recordActions}
-                                    <span style={{ color: "#888", fontSize: 12, marginLeft: 4 }}>
-                                        Запись № {selectedRecord?.id ?? ""}
-                                    </span>
-                                </>
-                            )}
+                            {canUseSelection &&
+                                (selectedRecord ? (
+                                    <>
+                                        {renderRecordActions(selectedRecord)}
+                                        <span style={{ color: "#888", fontSize: 12, marginLeft: 4 }}>
+                                            Запись № {selectedRecord?.id ?? ""}
+                                        </span>
+                                    </>
+                                ) : (
+                                    <Space>
+                                        <Tooltip title="Просмотр">
+                                            <Button icon={<EyeOutlined />} disabled />
+                                        </Tooltip>
+                                        {roleCanEdit && (
+                                            <Tooltip title="Редактировать">
+                                                <Button icon={<EditOutlined />} disabled />
+                                            </Tooltip>
+                                        )}
+                                        {roleCanDelete && (
+                                            <Tooltip title="Удалить">
+                                                <Button icon={<DeleteOutlined />} danger disabled />
+                                            </Tooltip>
+                                        )}
+                                    </Space>
+                                ))}
                         </div>
                     )}
                 </div>
