@@ -405,6 +405,7 @@ def calculate_accrual_for_account_service(
 
     past_reading = None
     current_reading = None
+    current_reading_id = None
     consumption = 0
 
     if meter:
@@ -414,6 +415,7 @@ def calculate_accrual_for_account_service(
         ).order_by(MeterReading.reading_date.desc()).first()
 
         if current_reading_obj:
+            current_reading_id = current_reading_obj.id
             current_reading = float(current_reading_obj.reading)
 
             past_reading_obj = db.query(MeterReading).filter(
@@ -447,6 +449,7 @@ def calculate_accrual_for_account_service(
             "services_type_id_label": service_type.services_type,
             "tariff_id": tariff.id,
             "tariff_id_label": f"{float(tariff.price)} ₸ × {square} м²",
+            "current_reading_id": current_reading_id,
             "past_reading_value": past_reading,
             "current_reading_value": current_reading,
             "consumption": consumption,
@@ -463,6 +466,7 @@ def calculate_accrual_for_account_service(
             "services_type_id_label": service_type.services_type,
             "tariff_id": tariff.id,
             "tariff_id_label": f"{float(tariff.price)} ₸",
+            "current_reading_id": current_reading_id,
             "past_reading_value": past_reading,
             "current_reading_value": current_reading,
             "consumption": consumption,
@@ -480,6 +484,7 @@ def calculate_accrual_for_account_service(
         "services_type_id_label": service_type.services_type,
         "tariff_id": tariff.id,
         "tariff_id_label": f"{float(tariff.price)} ₸ × {consumption}",
+        "current_reading_id": current_reading_id,
         "past_reading_value": past_reading,
         "current_reading_value": current_reading,
         "consumption": consumption,
@@ -517,6 +522,7 @@ def build_accrual_register_items(
                 account_id=calculated["account_id"],
                 services_type_id=calculated["services_type_id"],
                 tariff_id=calculated["tariff_id"],
+                current_reading_id=calculated.get("current_reading_id"),
                 past_reading_value=Decimal(str(calculated["past_reading_value"])) if calculated["past_reading_value"] is not None else None,
                 current_reading_value=Decimal(str(calculated["current_reading_value"])) if calculated["current_reading_value"] is not None else None,
                 consumption=Decimal(str(calculated["consumption"])),

@@ -100,6 +100,14 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'past_reading_value', label: 'Показание прошлое', format: formatNumber },
         { key: 'current_reading_value', label: 'Показание текущее', format: formatNumber },
         { key: 'consumption', label: 'Потребление', format: formatNumber },
+        {
+            key: 'tariff',
+            label: 'Тариф',
+            format: (v: any) =>
+                v && v.price != null
+                    ? `${formatNumber(v.price)} ₸${v.unit ? ' / ' + v.unit : ''}`
+                    : '—',
+        },
         { key: 'amount', label: 'Сумма', format: formatNumber },
         { key: 'document_title', label: 'Документ' },
         { key: 'notes', label: 'Примечание' },
