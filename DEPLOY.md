@@ -161,15 +161,15 @@ systemctl reload nginx
 
 #### 5) DNS-запись
 
-На ваш DNS-провайдер добавьте A/AAAA-запись:
+На ваш DNS-провайдер добавьте A/AAAA-запись на домен сервера:
 
 ```text
-townhouse.sagacloud.kz.   IN   A   <IP-вашего-VPS>
+<ваш-домен>.   IN   A   <IP-вашего-VPS>
 ```
 
 Проверка:
 ```bash
-dig townhouse.sagacloud.kz +short
+dig <ваш-домен> +short
 # должно вернуть IP сервера
 ```
 
@@ -179,7 +179,7 @@ dig townhouse.sagacloud.kz +short
 
 ```bash
 apt-get install -y certbot python3-certbot-nginx
-certbot --nginx -d townhouse.sagacloud.kz
+certbot --nginx -d <ваш-домен>
 # certbot самостоятельно пропишет SSL в nginx и настроит продление
 ```
 

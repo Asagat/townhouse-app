@@ -435,7 +435,7 @@ POST /api/accruals_register/generate
 
 ### Запуск через nginx
 ```
-Браузер → nginx (townhouse.sagacloud.kz)
+Браузер → nginx (ваш домен)
     → location /        → 127.0.0.1:5173 (Vite dev-server)
     → location /api/    → 127.0.0.1:8000 (FastAPI, без отрезания префикса!)
 ```

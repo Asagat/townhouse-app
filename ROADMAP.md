@@ -156,7 +156,7 @@
 - ✅ Пункт 1.3: модель `User` + роль (6 ролей: admin/operator/cashier/controller/resident/auditor), миграция Alembic `0001_users` (legacy `users` пустая — пересоздана чисто). Роль `auditor` добавлена позже (09.2026) — миграция БД не требуется (`users.role` — VARCHAR).
 - ✅ JWT-логин: `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/users` (только admin). Хеш паролей PBKDF2-SHA256 (stdlib).
 - ✅ Ролевой доступ: `permissions.py` (generic CRUD по (метод, ресурс)) + защита спец-эндпоинтов (начисление/списание/пересбор/отчёт).
-- ✅ CORS: явные origins из `CORS_ORIGINS` (по умолчанию `townhouse.sagacloud.kz` + localhost), вместо `['*']`.
+- ✅ CORS: явные origins из `CORS_ORIGINS` (по умолчанию — `http://localhost:5173` для разработки; прод-домен задаётся в `.env`), вместо `['*']`.
 - ✅ CLI: `backend/create_user.py` для первоначального заведения админа.
 - ✅ pytest: тесты auth (хеш, JWT, login, все роли) + HTTP-тесты ролевого доступа через TestClient (httpx).
 - ✅ Роль `auditor` («Аудитор», 09.2026): read-only — просмотр всех разделов/регистров/отчётов и ЛК/выписки любого счёта; изменения запрещены на всех эндпоинтах (generic CRUD — `permissions._read_allowed`; кастомные write-эндпоинты документов/квитанций — `require_write_access`; настройки/регистры-записи недоступны). Фронт: меню показывает все разделы (`menuAccess.ts`), кнопки добавления/изменения/удаления скрыты (`can.ts`); «Пользователи и права» остаётся только у admin.

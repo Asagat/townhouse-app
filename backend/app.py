@@ -87,9 +87,10 @@ logger = logging.getLogger(__name__)
 
 # --- НАСТРОЙКА CORS ---
 # Разрешённые источники берутся из CORS_ORIGINS (разделитель — запятая).
-# По умолчанию — прод-домен и localhost для разработки. allow_origins=["*"]
-# совместно с allow_credentials=True браузерами не поддерживается, поэтому листим явно.
-_DEFAULT_ORIGINS = "https://townhouse.sagacloud.kz,http://localhost:5173"
+# По умолчанию — localhost:5173 для разработки. В продакшене задайте CORS_ORIGINS
+# в .env со своим доменом: allow_origins=["*"] совместно с allow_credentials=True
+# браузерами не поддерживается, поэтому источники перечисляем явно.
+_DEFAULT_ORIGINS = "http://localhost:5173"
 _cors_src = os.getenv("CORS_ORIGINS", _DEFAULT_ORIGINS)
 _cors_origins = [o.strip() for o in _cors_src.split(",") if o.strip()]
 app.add_middleware(
