@@ -33,6 +33,12 @@ from models import (
 )
 
 
+# Системное имя типа тарифа «По счетчику» (источник — init_data._TARIFF_TYPES).
+# П. 2.7 роадмапа: счётчик осмыслен только для услуг с таким тарифом — плата
+# считается от показаний; для остальных типов показания в расчёт не идут.
+METER_TARIFF_TYPE_NAME = "По счетчику"
+
+
 def audit_document_create(item: Any, user_id: int | None, description: str | None = None) -> None:
     """Проставляет метаданные автора при создании документа (п. 2.9).
 
@@ -241,6 +247,48 @@ def validate_date_not_future(value: date, label: str) -> None:
     """Проверка «дата не в будущем» (1.10 роадмапа)."""
     if value > date.today():
         raise HTTPException(status_code=422, detail=f"{label} не может быть в будущем")
+
+
+def service_supports_meter(db: Session, services_type_id) -> bool:
+    """Есть ли у услуги тариф типа «По счетчику» (п. 2.7 роадмапа).
+
+    Только к таким услугам осмысленно заводить счётчик: показания участвуют
+    в расчёте начислений лишь при тарифе «По счетчику».
+    """
+    if services_type_id in (None, ""):
+        return False
+    row = (
+        db.query(TariffType.id)
+        .join(Tariff, Tariff.tariff_type_id == TariffType.id)
+        .filter(
+            Tariff.services_type_id == int(services_type_id),
+            TariffType.name == METER_TARIFF_TYPE_NAME,
+        )
+        .first()
+    )
+    return row is not None
+
+
+def validate_meter_service_type(db: Session, services_type_id) -> None:
+    """Валидация п. 2.7: счётчик можно завести/перевести только на услугу
+    с тарифом «По счетчику» (иначе счётчик бессмыслен).
+
+    Бросает HTTPException(422) с понятным текстом; вызывается из generic CRUD
+    (create и update ресурса `meters`), поэтому работает и для прямых вызовов API.
+    """
+    if services_type_id in (None, ""):
+        raise HTTPException(status_code=422, detail="Укажите вид услуги")
+    sid = int(services_type_id)
+    if not service_supports_meter(db, sid):
+        service = db.get(ServiceType, sid)
+        name = service.services_type if service else f"#{sid}"
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"У услуги «{name}» нет тарифа «{METER_TARIFF_TYPE_NAME}» — "
+                "счётчик к такой услуге завести нельзя (показания не влияют на расчёт)"
+            ),
+        )
 
 
 def resolve_meter_reading_document_values(

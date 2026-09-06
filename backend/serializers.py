@@ -62,6 +62,27 @@ def make_serializer(fields: list[str]):
     return serialize
 
 
+# Системное имя типа тарифа «По счетчику» — для признака has_meter_tariff (п. 2.7).
+METER_TARIFF_TYPE_NAME = "По счетчику"
+
+
+def service_type_serializer(item: ServiceType) -> dict:
+    """Сериализатор вида услуг.
+
+    `has_meter_tariff` (п. 2.7 роадмапа): есть ли у услуги тариф «По счетчику».
+    По этому признаку фронт фильтрует выбор «Вид услуги» в форме «Счетчики».
+    """
+    return {
+        "id": item.id,
+        "services_type": item.services_type,
+        "priority": item.priority,
+        "has_meter_tariff": any(
+            t.tariff_type is not None and t.tariff_type.name == METER_TARIFF_TYPE_NAME
+            for t in item.tariffs
+        ),
+    }
+
+
 def apartment_serializer(item: Apartment) -> dict:
     owner = item.owner
     return {
@@ -612,7 +633,7 @@ SERIALIZERS = {
     CashPoint: cash_point_serializer,
     AnalyticArticle: analytic_article_serializer,
     Transaction: transaction_serializer,
-    ServiceType: make_serializer(["services_type", "priority"]),
+    ServiceType: service_type_serializer,
     TariffType: make_serializer(["name"]),
     Tariff: tariff_serializer,
     Meter: meter_serializer,

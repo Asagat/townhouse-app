@@ -10,3 +10,4 @@ pytest
 alembic
 PyJWT
 httpx
+openpyxl

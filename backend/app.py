@@ -65,7 +65,7 @@ from models import (
     recalculate_account_balance,
 )
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import desc, asc
 
 import receipt_config as rc
@@ -80,7 +80,7 @@ from permissions import require_resource_access
 from field_config import FIELD_CONFIG, MODEL_MAP, coerce_field_value
 from sorting import build_order_clause
 from serializers import SERIALIZERS, _user_serializer
-from services import (build_accrual_register_items, build_transaction_title, calculate_accrual_for_account_service, calculate_accruals_preview, create_accounts_register_entries_for_accruals, resolve_meter_reading_values, resolve_meter_reading_document_values, resolve_transaction_values, set_transaction_title, audit_document_create, audit_document_update)
+from services import (build_accrual_register_items, build_transaction_title, calculate_accrual_for_account_service, calculate_accruals_preview, create_accounts_register_entries_for_accruals, resolve_meter_reading_values, resolve_meter_reading_document_values, resolve_transaction_values, set_transaction_title, audit_document_create, audit_document_update, validate_meter_service_type)
 
 
 # Инициализация основного приложения
@@ -366,6 +366,11 @@ def get_list(
             joinedload(ReceiptDocument.account).joinedload(Account.apartment),
             joinedload(ReceiptDocument.items),
         )
+    elif resource == "services_type":
+        # 2.7: тарифы подгружаем заранее — сериализатор отдаёт has_meter_tariff без N+1.
+        query = query.options(
+            selectinload(ServiceType.tariffs).joinedload(Tariff.tariff_type),
+        )
 
     if _sort:
         order_func = desc if (_order or "").lower() == "desc" else asc
@@ -463,6 +468,11 @@ async def get_resource_item(
         item = db.query(model).options(
             joinedload(ReceiptItem.receipt)
         ).filter(model.id == item_id).first()
+    elif resource == "services_type":
+        # 2.7: тарифы подгружаем заранее — сериализатор отдаёт has_meter_tariff без N+1.
+        item = db.query(model).options(
+            selectinload(ServiceType.tariffs).joinedload(Tariff.tariff_type),
+        ).filter(model.id == item_id).first()
     else:
         item = db.get(model, item_id)
 
@@ -510,6 +520,10 @@ async def create_resource_item(
                 raise HTTPException(
                     status_code=422, detail=f"Поле '{field['label']}' обязательно"
                 )
+
+    # 2.7: счётчик можно завести только к услуге с тарифом «По счетчику».
+    if resource == "meters":
+        validate_meter_service_type(db, values.get("services_type_id"))
 
     item = model(**values)
     db.add(item)
@@ -576,6 +590,12 @@ async def update_resource_item(
             if not field:
                 continue
             setattr(item, name, coerce_field_value(raw_value, field))
+
+    # 2.7: при смене «Вида услуги» у счётчика — только на услугу с тарифом «По счетчику».
+    # Проверяем финальное значение (item уже обновлён), но только если услугу меняли,
+    # чтобы правка других полей не падала на «историческом» счётчике.
+    if resource == "meters" and "services_type_id" in payload:
+        validate_meter_service_type(db, item.services_type_id)
 
     # Аудит: фиксируем автора последнего изменения (п. 2.9).
     audit_document_update(item, _auth.id)

@@ -72,7 +72,7 @@ const AnalyticArticleSelect = ({
     );
 };
 
-export const renderFieldControl = (field: FieldMeta, form?: FormInstance) => {
+export const renderFieldControl = (field: FieldMeta, form?: FormInstance, resourceName?: string) => {
     switch (field.type) {
         case "text":
             return <Input.TextArea rows={3} />;
@@ -100,6 +100,17 @@ export const renderFieldControl = (field: FieldMeta, form?: FormInstance) => {
                 return (
                     <AnalyticArticleSelect
                         form={form}
+                        optional={!field.required}
+                    />
+                );
+            }
+            // 2.7: в форме «Счетчики» вид услуги — только с тарифом «По счетчику»
+            // (сервер отдаёт в списке услуг признак has_meter_tariff).
+            if (field.reference === "services_type" && resourceName === "meters") {
+                return (
+                    <ReferenceSelect
+                        resource="services_type"
+                        filterFn={(item: any) => item.has_meter_tariff === true}
                         optional={!field.required}
                     />
                 );

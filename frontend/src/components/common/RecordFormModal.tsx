@@ -133,7 +133,7 @@ export const RecordFormModal = ({
                                 // Для readonly полей показываем просто текст, приводим к строке
                                 <Input disabled value={String(initialValues?.[field.name] ?? "—")} />
                             ) : (
-                                renderFieldControl(field, form)
+                                renderFieldControl(field, form, resourceName)
                             )}
                         </Form.Item>
                     );
