@@ -243,6 +243,31 @@ export const CabinetView = ({
                 </Card>
             )}
 
+            {houseExpenses !== undefined && (
+                <Card
+                    title="Расходы по кассе (ТСЖ)"
+                    style={{ marginBottom: 16 }}
+                    extra={<Typography.Text type="secondary">всё время</Typography.Text>}
+                >
+                    <Table
+                        rowKey="name"
+                        size="small"
+                        pagination={false}
+                        dataSource={houseExpenses?.articles ?? []}
+                        locale={{ emptyText: "Расходов по кассе пока нет" }}
+                        columns={[
+                            { title: "Статья расхода", dataIndex: "name", key: "name" },
+                            { title: "Сумма", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => fmt(v) },
+                        ]}
+                        footer={() => (
+                            <Typography.Text strong>
+                                Итого расходов: {fmt(houseExpenses?.total ?? 0)}
+                            </Typography.Text>
+                        )}
+                    />
+                </Card>
+            )}
+
             {statement && statement.services && statement.services.length > 0 && (
                 <Card title="Детализация по услугам" style={{ marginBottom: 16 }}>
                     <Table
@@ -350,31 +375,6 @@ export const CabinetView = ({
                             },
                         ]}
                         locale={{ emptyText: "Движений за выбранный период нет" }}
-                    />
-                </Card>
-            )}
-
-            {houseExpenses !== undefined && (
-                <Card
-                    title="Расходы по кассе (ТСЖ)"
-                    style={{ marginBottom: 16 }}
-                    extra={<Typography.Text type="secondary">всё время</Typography.Text>}
-                >
-                    <Table
-                        rowKey="name"
-                        size="small"
-                        pagination={false}
-                        dataSource={houseExpenses?.articles ?? []}
-                        locale={{ emptyText: "Расходов по кассе пока нет" }}
-                        columns={[
-                            { title: "Статья расхода", dataIndex: "name", key: "name" },
-                            { title: "Сумма", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => fmt(v) },
-                        ]}
-                        footer={() => (
-                            <Typography.Text strong>
-                                Итого расходов: {fmt(houseExpenses?.total ?? 0)}
-                            </Typography.Text>
-                        )}
                     />
                 </Card>
             )}
