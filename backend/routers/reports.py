@@ -508,11 +508,20 @@ def statement_report_pdf(
     db: Session = Depends(get_db),
     _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
 ):
-    """PDF выписки по лицевому счёту (помесячно) за период."""
-    data = build_statement_report(db, account_id, from_date, to_date)
+    """PDF выписки по лицевому счёту — той же, что формируется в ЛК (2.3+Б15).
+
+    Печать повторяет детализацию движений по счёту, как в ЛК жителя
+    (`build_account_movements` + `build_movements_pdf`), а не помесячную сводку,
+    чтобы отчёт администратора совпадал с выпиской жителя из ЛК.
+    """
+    from routers.others import build_account_movements
+
+    data = build_account_movements(db, account_id, from_date, to_date)
     period_label = _period_label(from_date, to_date)
-    pdf = spdf.build_monthly_pdf(data["account"], data["monthly"], data["closing"],
-                                 period_label=period_label)
+    pdf = spdf.build_movements_pdf(
+        data["account"], data["movements"],
+        closing=data.get("closing"), period_label=period_label,
+    )
     filename = f"statement_{account_id}.pdf"
     return StreamingResponse(
         io.BytesIO(pdf),
