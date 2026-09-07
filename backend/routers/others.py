@@ -424,42 +424,29 @@ def get_my_house_expenses(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """Расходы ТСЖ по кассе за текущий месяц (для ЛК жителя).
+    """Расходы ТСЖ по кассе — агрегированная сводка для ЛК жителя.
 
-    Агрегированная сводка из того же источника, что и «Отчёт по расходам»
-    (cash_register): итог по статьям расходов + общая сумма за текущий месяц.
-    Жителю НЕ отдаём персональные операции/контрагентов — только разбивку по статьям.
+    Разбивка по статьям расходов и общая сумма из того же источника, что
+    «Отчёт по расходам» (cash_register). Показываем за ВСЁ время (накопление),
+    чтобы житель всегда видел, куда потрачены средства; персональные операции/
+    контрагенты жителю не отдаются (только статьи и итог).
     """
-    now = datetime.utcnow().date()
-    start = now.replace(day=1)
-    # Последний день месяца: берём первый день следующего месяца и минус один день.
-    if start.month == 12:
-        month_end = start.replace(year=start.year + 1, month=1) - _one_day()
-    else:
-        month_end = start.replace(month=start.month + 1) - _one_day()
     rows = db.execute(
         text("""
             SELECT COALESCE(aa.name, 'Без статьи') AS name, COALESCE(SUM(cr.expense), 0) AS total
             FROM cash_register cr
             JOIN transactions t ON t.id = cr.transaction_id
             LEFT JOIN analytic_articles aa ON aa.id = t.article_id
-            WHERE cr.expense > 0 AND cr.operation_date >= :s AND cr.operation_date <= :e
+            WHERE cr.expense > 0
             GROUP BY name
             ORDER BY total DESC, name
         """),
-        {"s": start, "e": month_end},
     ).fetchall()
     articles = [{"name": r[0], "expense": round(float(r[1]), 2)} for r in rows]
     return {
-        "period": {"from": start.isoformat(), "to": month_end.isoformat()},
         "articles": articles,
         "total": round(sum(a["expense"] for a in articles), 2),
     }
-
-
-def _one_day():
-    from datetime import timedelta
-    return timedelta(days=1)
 
 
 @router.get("/creators")

@@ -10,7 +10,6 @@ import { CabinetView } from "../components/cabinet/CabinetView";
 import type { ReceiptRow, StatementData } from "../components/cabinet/CabinetView";
 
 interface HouseExpense {
-    period: { from: string; to: string };
     articles: { name: string; expense: number }[];
     total: number;
 }

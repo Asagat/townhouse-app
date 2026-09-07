@@ -111,8 +111,8 @@ export const CabinetView = ({
     receiptsTitle?: string;
     /** me — данные «моего» счёта (эндпоинты /me), account — по выбранному счёту. */
     mode?: "me" | "account";
-    /** Расходы ТСЖ по кассе за текущий месяц (для ЛК жителя; undefined — блок скрыт). */
-    houseExpenses?: { period: { from: string; to: string }; articles: { name: string; expense: number }[]; total: number } | null;
+    /** Расходы ТСЖ по кассе за всё время (для ЛК жителя; undefined — блок скрыт*). */
+    houseExpenses?: { articles: { name: string; expense: number }[]; total: number } | null;
 }) => {
     const [viewId, setViewId] = useState<number | undefined>(undefined);
     const m = statement?.metrics;
@@ -354,25 +354,25 @@ export const CabinetView = ({
                 </Card>
             )}
 
-            {houseExpenses && (
+            {houseExpenses !== undefined && (
                 <Card
                     title="Расходы по кассе (ТСЖ)"
                     style={{ marginBottom: 16 }}
-                    extra={<Typography.Text type="secondary">текущий месяц</Typography.Text>}
+                    extra={<Typography.Text type="secondary">всё время</Typography.Text>}
                 >
                     <Table
                         rowKey="name"
                         size="small"
                         pagination={false}
-                        dataSource={houseExpenses.articles}
-                        locale={{ emptyText: "За текущий месяц расходов не было" }}
+                        dataSource={houseExpenses?.articles ?? []}
+                        locale={{ emptyText: "Расходов по кассе пока нет" }}
                         columns={[
                             { title: "Статья расхода", dataIndex: "name", key: "name" },
                             { title: "Сумма", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => fmt(v) },
                         ]}
                         footer={() => (
                             <Typography.Text strong>
-                                Итого расходов: {fmt(houseExpenses.total)}
+                                Итого расходов: {fmt(houseExpenses?.total ?? 0)}
                             </Typography.Text>
                         )}
                     />
