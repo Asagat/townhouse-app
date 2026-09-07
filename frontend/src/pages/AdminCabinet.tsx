@@ -20,6 +20,8 @@ export const AdminCabinet = () => {
     const [selectedId, setSelectedId] = useState<number | undefined>(undefined);
     const [statement, setStatement] = useState<StatementData | null>(null);
     const [receipts, setReceipts] = useState<ReceiptRow[]>([]);
+    // Расходы ТСЖ по кассе (общие, те же, что видит житель в ЛК).
+    const [houseExpenses, setHouseExpenses] = useState<{ articles: { name: string; expense: number }[]; total: number } | null>(null);
     const [loadingAccounts, setLoadingAccounts] = useState(true);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -43,6 +45,14 @@ export const AdminCabinet = () => {
             })
             .catch((e: any) => setError(e?.message ?? "Не удалось загрузить лицевые счета"))
             .finally(() => setLoadingAccounts(false));
+    }, [apiUrl]);
+
+    // Расходы ТСЖ по кассе — те же данные, что житель видит в ЛК (не зависят от выбранной квартиры).
+    useEffect(() => {
+        authedFetch(`${apiUrl}/me/house_expenses`)
+            .then(async (r) => (r.ok ? r.json() : null))
+            .then((d: any) => setHouseExpenses(d ?? null))
+            .catch(() => setHouseExpenses(null));
     }, [apiUrl]);
 
     // Сводка и квитанции по выбранному счёту (те же данные, что видит житель).
@@ -114,6 +124,7 @@ export const AdminCabinet = () => {
                 <CabinetView
                     statement={statement}
                     receipts={receipts}
+                    houseExpenses={houseExpenses}
                     apiUrl={apiUrl}
                     mode="account"
                     receiptsTitle="Квитанции жителя"
