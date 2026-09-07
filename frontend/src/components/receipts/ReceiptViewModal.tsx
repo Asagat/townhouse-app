@@ -38,6 +38,8 @@ interface ReceiptViewModalProps {
     open: boolean;
     receiptId: number | undefined;
     onClose: () => void;
+    /** Режим «Редактирование»: разрешено менять только примечание квитанции (Б6). */
+    editable?: boolean;
 }
 
 const MONTH_NAMES = [
@@ -112,6 +114,7 @@ export const ReceiptViewModal = ({
     open,
     receiptId,
     onClose,
+    editable = false,
 }: ReceiptViewModalProps) => {
     const apiUrl = useApiUrl();
     const [loading, setLoading] = useState(false);
@@ -505,19 +508,22 @@ export const ReceiptViewModal = ({
                                         rows={2}
                                         maxLength={500}
                                         value={commentDraft}
+                                        readOnly={!editable}
                                         onChange={(e) => setCommentDraft(e.target.value)}
-                                        placeholder="Дополнительная пометка по квитанции (не влияет на суммы)"
+                                        placeholder={"Дополнительная пометка по квитанции (не влияет на суммы)"}
                                         style={{ fontSize: 12 }}
                                     />
-                                    <Button
-                                        size="small"
-                                        type="primary"
-                                        loading={savingComment}
-                                        onClick={saveComment}
-                                        style={{ alignSelf: "flex-end" }}
-                                    >
-                                        Сохранить
-                                    </Button>
+                                    {editable && (
+                                        <Button
+                                            size="small"
+                                            type="primary"
+                                            loading={savingComment}
+                                            onClick={saveComment}
+                                            style={{ alignSelf: "flex-end" }}
+                                        >
+                                            Сохранить
+                                        </Button>
+                                    )}
                                 </div>
                             </div>
                         </>

@@ -100,7 +100,12 @@ def _account_debt_overpayment(db: Session, account_id: int, since: date | None =
 
 
 def generate_receipt_document(
-    db: Session, account: Account, year: int, month: int, user_id: int | None = None
+    db: Session,
+    account: Account,
+    year: int,
+    month: int,
+    user_id: int | None = None,
+    comment: str | None = None,
 ) -> ReceiptDocument | None:
     """
     Формирует квитанцию для одного лицевого счёта за период.
@@ -132,6 +137,7 @@ def generate_receipt_document(
         address=apartment.address if apartment else None,
         owner_name=owner_name,
         account_number=account.account_number,
+        comment=comment,
     )
     audit_document_create(receipt, user_id)
     db.add(receipt)
@@ -222,8 +228,12 @@ def generate_receipts(
 
     accounts = db.query(Account).filter(Account.is_active == True).all()
     created = []
+    comment = payload.get("comment")
+    comment = (str(comment).strip()[:500]) if comment else None
     for account in accounts:
-        rec = generate_receipt_document(db, account, year, month, user_id=user.id)
+        rec = generate_receipt_document(
+            db, account, year, month, user_id=user.id, comment=comment
+        )
         if rec:
             created.append(rec)
 

@@ -381,6 +381,9 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const [oneOffAccrualsOpen, setOneOffAccrualsOpen] = useState(false);
     const [receiptsModalOpen, setReceiptsModalOpen] = useState(false);
     const [receiptViewId, setReceiptViewId] = useState<number | undefined>(undefined);
+    // Режим открытия квитанции в ReceiptViewModal: false — просмотр (readonly),
+    // true — редактирование примечания (Б6).
+    const [receiptEditMode, setReceiptEditMode] = useState(false);
     const [writeOffsModalOpen, setWriteOffsModalOpen] = useState(false);
     const [writeoffViewId, setWriteoffViewId] = useState<number | undefined>(undefined);
 
@@ -853,7 +856,15 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         if (isReceiptDocuments) {
             return (
                 <Space>
-                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setReceiptViewId(record.id), "#22ae2e")}
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => {
+                        setReceiptEditMode(false);
+                        setReceiptViewId(record.id);
+                    }, "#22ae2e")}
+                    {roleCanEdit &&
+                        iconButton("edit", "Редактировать", <EditOutlined />, () => {
+                            setReceiptEditMode(true);
+                            setReceiptViewId(record.id);
+                        }, "#22ae2e")}
                     {iconButton("pdf", "PDF", <FilePdfOutlined />, () =>
                         openAuthorizedPdf(
                             `${apiUrl}/receipt_documents/${record.id}/pdf`,
@@ -1375,7 +1386,11 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 <ReceiptViewModal
                     open={receiptViewId !== undefined}
                     receiptId={receiptViewId}
-                    onClose={() => setReceiptViewId(undefined)}
+                    editable={receiptEditMode && roleCanEdit}
+                    onClose={() => {
+                        setReceiptEditMode(false);
+                        setReceiptViewId(undefined);
+                    }}
                 />
             )}
 

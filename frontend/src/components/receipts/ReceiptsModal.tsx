@@ -7,6 +7,7 @@ import {
     Space,
     Select,
     InputNumber,
+    Input,
     message,
     Popconfirm,
 } from "antd";
@@ -44,6 +45,7 @@ export const ReceiptsModal = ({ open, onClose, onSaved }: ReceiptsModalProps) =>
     const now = dayjs();
     const [year, setYear] = useState<number>(now.year());
     const [month, setMonth] = useState<number>(now.month() + 1);
+    const [comment, setComment] = useState("");
     const [generating, setGenerating] = useState(false);
     const [downloading, setDownloading] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -54,6 +56,7 @@ export const ReceiptsModal = ({ open, onClose, onSaved }: ReceiptsModalProps) =>
         if (open) {
             setYear(now.year());
             setMonth(now.month() + 1);
+            setComment("");
             setGenerating(false);
             setDownloading(false);
             setDeleting(false);
@@ -67,7 +70,7 @@ export const ReceiptsModal = ({ open, onClose, onSaved }: ReceiptsModalProps) =>
             {
                 url: `${apiUrl}/receipt_documents/generate`,
                 method: "post",
-                values: { year, month },
+                values: { year, month, comment },
             },
             {
                 onSuccess: (response) => {
@@ -213,6 +216,16 @@ export const ReceiptsModal = ({ open, onClose, onSaved }: ReceiptsModalProps) =>
                     />
                 </div>
             </Space>
+            <div style={{ marginTop: 8 }}>
+                <div style={{ marginBottom: 4 }}>Примечание (для всех квитанций)</div>
+                <Input.TextArea
+                    rows={2}
+                    maxLength={500}
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    placeholder="Например: изменён тариф электроэнергии"
+                />
+            </div>
             <div style={{ color: "#888" }}>
                 Квитанции будут сформированы по всем активным лицевым счетам за выбранный
                 период. ZIP-архив содержит PDF по каждой квитанции. Удаление затрагивает
