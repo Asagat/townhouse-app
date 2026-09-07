@@ -978,6 +978,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             key: "id",
             width: widths["id"] ?? 70,
             sorter: true,
+            sortDirections: ['ascend', 'descend'],
             sortOrder: getColumnSortOrder('id'),
             // Без всплывающей подсказки сортировки: оверлей antd над заголовком
             // перекрывает кнопки панели записи (например «Просмотр») над таблицей.
@@ -1003,6 +1004,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     }
                 },
                 sorter: sortable,
+                sortDirections: ['ascend', 'descend'],
                 sortOrder: getColumnSortOrder(col.key),
                 // Без всплывающей подсказки сортировки: оверлей antd над заголовком
                 // перекрывает кнопки панели записи над таблицей.
