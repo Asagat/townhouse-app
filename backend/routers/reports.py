@@ -196,6 +196,23 @@ def cash_register_report(
     return build_cash_register_report(db, from_date, to_date, cash_point_id)
 
 
+@router.get("/reports/cash_register/pdf")
+def cash_register_report_pdf(
+    from_date: str | None = Query(None, description="Начало периода YYYY-MM-DD"),
+    to_date: str | None = Query(None, description="Конец периода YYYY-MM-DD"),
+    cash_point_id: int | None = Query(None, description="Фильтр по кассе"),
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
+):
+    """PDF «Отчёт по кассе» (2.16)."""
+    data = build_cash_register_report(db, from_date, to_date, cash_point_id)
+    content = spdf.build_cash_register_report_pdf(data)
+    return StreamingResponse(
+        io.BytesIO(content), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=cash_register_report.pdf"},
+    )
+
+
 def build_expense_report(
     db: Session,
     from_date: str | None,
@@ -291,6 +308,23 @@ def expense_report(
     return build_expense_report(db, from_date, to_date, cash_point_id)
 
 
+@router.get("/reports/expenses/pdf")
+def expense_report_pdf(
+    from_date: str | None = Query(None, description="Начало периода YYYY-MM-DD"),
+    to_date: str | None = Query(None, description="Конец периода YYYY-MM-DD"),
+    cash_point_id: int | None = Query(None, description="Фильтр по кассе"),
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
+):
+    """PDF «Отчёт по расходам» (2.16)."""
+    data = build_expense_report(db, from_date, to_date, cash_point_id)
+    content = spdf.build_expense_report_pdf(data)
+    return StreamingResponse(
+        io.BytesIO(content), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=expense_report.pdf"},
+    )
+
+
 # --- Отчёт по должникам ---
 
 
@@ -363,6 +397,20 @@ def debtors_report(
 ):
     """Отчёт по должникам: активные л/с с долгом, по убыванию."""
     return build_debtors_report(db)
+
+
+@router.get("/reports/debtors/pdf")
+def debtors_report_pdf(
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
+):
+    """PDF «Отчёт по должникам» (2.16)."""
+    data = build_debtors_report(db)
+    content = spdf.build_debtors_report_pdf(data)
+    return StreamingResponse(
+        io.BytesIO(content), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=debtors_report.pdf"},
+    )
 
 
 # --- Выписка по лицевому счёту ---

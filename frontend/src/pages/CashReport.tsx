@@ -6,7 +6,7 @@ import { Card, Row, Col, Statistic, Table, DatePicker, Button, Space, Select, Sp
 import { ReloadOutlined } from "@ant-design/icons";
 import dayjs, { Dayjs } from "dayjs";
 import { useList } from "@refinedev/core";
-import { authedFetch, apiUrl } from "../auth/http";
+import { authedFetch, apiUrl, openAuthorizedPdf } from "../auth/http";
 
 const { RangePicker } = DatePicker;
 
@@ -88,6 +88,17 @@ export const CashReport = () => {
         load(from, to, cashPointId);
     };
 
+    const handlePdf = () => {
+        const qs = new URLSearchParams();
+        const from = range?.[0]?.format("YYYY-MM-DD");
+        const to = range?.[1]?.format("YYYY-MM-DD");
+        if (from) qs.set("from_date", from);
+        if (to) qs.set("to_date", to);
+        if (cashPointId) qs.set("cash_point_id", String(cashPointId));
+        const s = qs.toString();
+        openAuthorizedPdf(`${apiUrl}/reports/cash_register/pdf${s ? `?${s}` : ""}`, "cash_register_report.pdf");
+    };
+
     const totals = data?.totals;
 
     const pointCols = [
@@ -127,6 +138,7 @@ export const CashReport = () => {
                     <Button type="primary" icon={<ReloadOutlined />} onClick={handleApply} disabled={loading}>
                         Сформировать
                     </Button>
+                    <Button onClick={handlePdf} disabled={loading}>PDF</Button>
                 </Space>
             </Card>
 

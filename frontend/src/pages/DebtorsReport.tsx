@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Card, Table, Spin, Alert, Statistic, Space, Typography, Button } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
-import { authedFetch, apiUrl } from "../auth/http";
+import { authedFetch, apiUrl, openAuthorizedPdf } from "../auth/http";
 
 interface DebtorRow {
     account_id: number;
@@ -53,6 +53,10 @@ export const DebtorsReport = () => {
 
     useEffect(() => { load(); }, [load]);
 
+    const handlePdf = () => {
+        openAuthorizedPdf(`${apiUrl}/reports/debtors/pdf`, "debtors_report.pdf");
+    };
+
     const cols = [
         { title: "№ квартиры", dataIndex: "apartment_number", key: "apartment_number", render: (v: number | null) => v ?? "—" },
         { title: "Лицевой счёт", dataIndex: "account_number", key: "account_number" },
@@ -66,7 +70,7 @@ export const DebtorsReport = () => {
     return (
         <div>
             <Typography.Title level={4} style={{ marginTop: 0 }}>Отчёт по должникам</Typography.Title>
-            <Card style={{ marginBottom: 16 }}><Space><Button type="primary" icon={<ReloadOutlined />} onClick={load} disabled={loading}>Обновить</Button></Space></Card>
+            <Card style={{ marginBottom: 16 }}>                <Space>                    <Button type="primary" icon={<ReloadOutlined />} onClick={load} disabled={loading}>Обновить</Button>                    <Button onClick={handlePdf} disabled={loading}>PDF</Button>                </Space>            </Card>
             {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
             {loading && <div style={{ textAlign: "center", padding: 60 }}><Spin size="large" /></div>}
             {!loading && data && (

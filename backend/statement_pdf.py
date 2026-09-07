@@ -202,5 +202,171 @@ def build_monthly_pdf(account: dict, monthly: list[dict], closing: float | None,
                        widths, data_rows, total_row)
 
 
+def _report_pdf(
+    title: str,
+    subtitle: list[str],
+    page_landscape: bool,
+    sections: list[tuple[str | None, list[str], list[float], list[list[str]], list[str] | None]],
+) -> bytes:
+    """PDF отчёта (2.16): одна-две таблицы подряд, общей платReportLab-каркас квитанций."""
+    from reportlab.lib.units import cm as _cm_u
+    from reportlab.lib.pagesizes import A4, landscape
+    _cm = lambda v: v * _cm_u
+    _ensure_fonts()
+    page = landscape(A4) if page_landscape else A4
+    styles = getSampleStyleSheet()
+    t_style = ParagraphStyle("Rt", parent=styles["Normal"], fontSize=rc.TITLE_SIZE,
+                              leading=rc.TITLE_SIZE + 3, spaceAfter=4, fontName=rc.FONT_BOLD,
+                              textColor=colors.HexColor(rc.COLOR_TEXT_TITLE))
+    txt_style = ParagraphStyle("Rs", parent=styles["Normal"], fontSize=9, leading=12,
+                                fontName=rc.FONT_REGULAR, textColor=colors.HexColor(rc.COLOR_TEXT_CELL))
+    cell_style = ParagraphStyle("Rc", parent=styles["Normal"], fontSize=rc.TABLE_SIZE, leading=11,
+                                 fontName=rc.FONT_REGULAR, textColor=colors.HexColor(rc.COLOR_TEXT_CELL))
+    head_style = ParagraphStyle("Rh", parent=styles["Normal"], fontSize=rc.TABLE_SIZE, leading=11,
+                                 fontName=rc.FONT_BOLD, textColor=colors.HexColor(rc.COLOR_TEXT_HEADER_TABLE))
+    sec_style = ParagraphStyle("Rk", parent=styles["Normal"], fontSize=10, leading=13, spaceBefore=10,
+                                spaceAfter=4, fontName=rc.FONT_BOLD, textColor=colors.HexColor(rc.COLOR_TEXT_TITLE))
+    grid = colors.HexColor(rc.COLOR_TABLE_GRID)
+    head_bg = colors.HexColor(rc.COLOR_HEADER_BG)
+    total_bg = colors.HexColor(rc.COLOR_TOTAL_BG)
+
+    bio = io.BytesIO()
+    doc = SimpleDocTemplate(
+        bio, pagesize=page,
+        topMargin=rc.PAGE_TOP_MARGIN + 30, bottomMargin=rc.PAGE_BOTTOM_MARGIN,
+        leftMargin=rc.PAGE_LEFT_MARGIN, rightMargin=rc.PAGE_RIGHT_MARGIN, title=title,
+    )
+    story = [Paragraph(title, t_style)]
+    for line in subtitle:
+        story.append(Paragraph(line, txt_style))
+    story.append(Spacer(1, 6))
+
+    def _cell(text: str, head: bool = False):
+        style = head_style if head else cell_style
+        esc = str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return Paragraph(esc, style)
+
+    for caption, headers, widths, rows, total_row in sections:
+        if not rows and not total_row:
+            continue
+        if caption:
+            story.append(Paragraph(caption, sec_style))
+        tbl = [[_cell(h, True) for h in headers]]
+        for r in rows:
+            tbl.append([_cell(c) for c in r])
+        if total_row:
+            tbl.append([_cell(c) for c in total_row])
+        table = Table(tbl, colWidths=widths, repeatRows=1)
+        cmd = [
+            ("GRID", (0, 0), (-1, -1), 0.5, grid),
+            ("BACKGROUND", (0, 0), (-1, 0), head_bg),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), rc.CELL_TOP_PADDING),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), rc.CELL_BOTTOM_PADDING),
+        ]
+        if total_row:
+            cmd += [
+                ("BACKGROUND", (0, len(tbl) - 1), (-1, len(tbl) - 1), total_bg),
+                ("FONTNAME", (0, len(tbl) - 1), (-1, len(tbl) - 1), rc.FONT_BOLD),
+            ]
+        table.setStyle(TableStyle(cmd))
+        story.append(table)
+    doc.build(story)
+    return bio.getvalue()
+
+
+def build_cash_register_report_pdf(data: dict) -> bytes:
+    """PDF отчёта «По кассе» (2.16)."""
+    from reportlab.lib.units import cm
+    p = data.get("period") or {}
+    subtitle = [f"Период: {_period_text(p.get('from'), p.get('to'))}"]
+    sections = []
+    headers = ["Касса/Счёт", "Нач. остаток", "Приход", "Расход", "Конечный остаток"]
+    widths = [cm * w for w in (4.0, 2.4, 2.4, 2.4, 2.6)]
+    rows = []
+    for cp in data.get("cash_points", []):
+        rows.append([cp.get("cash_point_name") or "", _money(cp.get("opening")),
+                      _money(cp.get("income")), _money(cp.get("expense")),
+                      _money(cp.get("closing"))])
+    t = data.get("totals") or {}
+    total = (["Итого", _money(t.get("opening")), _money(t.get("income")),
+              _money(t.get("expense")), _money(t.get("closing"))]
+             if data.get("cash_points") else None)
+    sections.append(("Сводка по кассам/счетам", headers, widths, rows, total))
+
+    headers2 = ["Дата", "Касса/Счёт", "Документ", "Счёт", "Статья", "Контрагент", "Приход", "Расход"]
+    widths2 = [cm * w for w in (2.2, 2.4, 3.4, 2.0, 2.4, 2.8, 2.0, 2.0)]
+    rows2 = []
+    for m in data.get("movements", []):
+        rows2.append([_date_label(m.get("operation_date") or ""), m.get("cash_point_name") or "",
+                      m.get("document_title") or "", m.get("account_number") or "",
+                      m.get("article_name") or "", m.get("contractor_name") or "",
+                      _money(m.get("income")) if m.get("income") else "",
+                      _money(m.get("expense")) if m.get("expense") else ""])
+    sections.append(("Движения за период", headers2, widths2, rows2, None))
+    return _report_pdf("Отчёт по кассе", subtitle, True, sections)
+
+
+def build_expense_report_pdf(data: dict) -> bytes:
+    """PDF отчёта «По расходам» (2.16)."""
+    from reportlab.lib.units import cm
+    p = data.get("period") or {}
+    subtitle = [f"Период: {_period_text(p.get('from'), p.get('to'))}"]
+    headers = ["Статья расхода", "Сумма"]
+    widths = [cm * 8.0, cm * 3.2]
+    rows = [[a.get("name") or "(без статьи)", _money(a.get("expense"))]
+            for a in data.get("articles", [])]
+    total = ["Итого", _money(data.get("total_expense"))] if data.get("articles") else None
+    headers2 = ["Дата", "Документ", "Статья", "Контрагент", "Счёт", "Сумма"]
+    widths2 = [cm * w for w in (2.2, 3.6, 2.8, 2.8, 2.0, 2.2)]
+    rows2 = []
+    for m in data.get("movements", []):
+        rows2.append([_date_label(m.get("operation_date") or ""), m.get("document_title") or "",
+                      m.get("article_name") or "", m.get("contractor_name") or "",
+                      m.get("account_number") or "", _money(m.get("amount"))])
+    total2 = (["Итого", "", "", "", "", _money(data.get("total_expense"))]
+              if data.get("movements") else None)
+    return _report_pdf("Отчёт по расходам", subtitle, True,
+                       [("Разбивка по статьям", headers, widths, rows, total),
+                        ("Документы расходов", headers2, widths2, rows2, total2)])
+
+
+def build_debtors_report_pdf(data: dict) -> bytes:
+    """PDF отчёта «По должникам» (2.16)."""
+    from reportlab.lib.units import cm
+    headers = ["Кв.", "Лицевой счёт", "Собственник", "Начислено", "Оплачено", "Задолженность"]
+    widths = [cm * w for w in (1.4, 3.0, 5.0, 2.4, 2.4, 2.6)]
+    rows = []
+    for r in data.get("rows", []):
+        rows.append([str(r.get("apartment_number") or ""), r.get("account_number") or "",
+                     r.get("owner_name") or (r.get("account_name") or ""),
+                     _money(r.get("accrued")), _money(r.get("paid")),
+                     _money(r.get("debt"))])
+    total = (["Итого", "", "", "", "", _money(data.get("total_debt"))]
+             if data.get("rows") else None)
+    sections = [("Должники", headers, widths, rows, total)] if rows else []
+    return _report_pdf("Отчёт по должникам", [f"Должников: {data.get('count', 0)}"],
+                       False, sections)
+
+
+def _period_text(f: str | None, t: str | None) -> str:
+    if f and t:
+        return f"{_short_date(f)} — {_short_date(t)}"
+    if f:
+        return f"с {_short_date(f)}"
+    if t:
+        return f"по {_short_date(t)}"
+    return "за всё время"
+
+
+def _short_date(value: str) -> str:
+    s = (value or "")[:10]
+    if len(s) == 10:
+        return f"{s[8:10]}.{s[5:7]}.{s[:4]}"
+    return s
+
+
 if __name__ == "__main__":  # pragma: no cover
     print("Модуль-хелпер: build_movements_pdf / build_monthly_pdf")
