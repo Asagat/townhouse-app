@@ -385,7 +385,7 @@ def build_debtors_report(db: Session, min_amount: float = 0.0) -> dict:
                 "debt": m["debt"],
                 "overpayment": m["overpayment"],
             })
-    rows.sort(key=lambda r: -r["debt"])
+    rows.sort(key=lambda r: (r["apartment_number"] is None, r["apartment_number"] if r["apartment_number"] is not None else 0))
     total_debt = round(sum(r["debt"] for r in rows), 2)
     return {"rows": rows, "total_debt": total_debt, "count": len(rows)}
 

@@ -330,7 +330,7 @@ def build_cash_register_report_pdf(data: dict) -> bytes:
     sections.append(("Сводка по кассам/счетам", headers, widths, rows, total))
 
     headers2 = ["Дата", "Касса/Счёт", "Документ", "Счёт", "Статья", "Контрагент", "Приход", "Расход"]
-    widths2 = [cm * w for w in (1.9, 2.3, 3.3, 1.7, 2.3, 2.5, 1.8, 1.8)]
+    widths2 = [cm * w for w in (1.6, 2.0, 4.0, 1.5, 3.0, 3.4, 1.8, 1.8)]
     rows2 = []
     for m in data.get("movements", []):
         rows2.append([_date_label(m.get("operation_date") or ""), m.get("cash_point_name") or "",
