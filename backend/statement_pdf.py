@@ -167,7 +167,7 @@ def build_movements_pdf(account: dict, rows: list[dict], closing: float | None =
         subtitle.append(owner)
     subtitle.append(f"Период: {period_label}")
 
-    headers = ["Дата", "Вид", "Услуга", "Сумма", "Баланс после"]
+    headers = ["Дата", "Вид", "Услуга", "Сумма", "Долг"]
     widths = [62, 110, 180, 95, 108]
     data_rows = []
     acc_total = Decimal("0")

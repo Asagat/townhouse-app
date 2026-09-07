@@ -338,7 +338,7 @@ export const CabinetView = ({
                                 },
                             },
                             {
-                                title: "Баланс после",
+                                title: "Долг",
                                 dataIndex: "balance_after",
                                 key: "balance_after",
                                 align: "right" as const,
