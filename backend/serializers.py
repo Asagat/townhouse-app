@@ -579,6 +579,7 @@ def receipt_document_serializer(item: ReceiptDocument) -> dict:
         "updated_by": item.updated_by,
         "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         "change_description": item.change_description,
+        "comment": item.comment,
         "created_by_name": _creator_name(item.creator),
         "updated_by_name": item.updater.full_name if item.updater else None,
     }

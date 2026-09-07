@@ -39,7 +39,7 @@ from auth import get_current_user
 from permissions import require_write_access
 from models import Account, AccrualsRegister, ReceiptDocument, ReceiptItem, ServiceType, User
 from serializers import SERIALIZERS, receipt_document_serializer
-from services import FUND_SERVICE_FALLBACK, _service_name, audit_document_create
+from services import FUND_SERVICE_FALLBACK, _service_name, audit_document_create, audit_document_update
 from routers.others import _ensure_can_view_account
 
 
@@ -334,6 +334,31 @@ def get_receipt_items(
         "document": receipt_document_serializer(receipt),
         "items": [serializer(i) for i in items] if serializer else [],
     }
+
+
+@router.patch("/receipt_documents/{document_id}/comment")
+def update_receipt_comment(
+    document_id: int,
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_write_access),
+):
+    """Изменяет только примечание квитанции (Б6).
+
+    Остальные поля квитанции (суммы, строки) — вычисляемые/неизменные; здесь
+    оператор может зафиксировать свободную текстовую пометку. Править вправе
+    роли с доступом на запись (не auditor/resident).
+    """
+    receipt = db.get(ReceiptDocument, document_id)
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Квитанция не найдена")
+    raw = payload.get("comment")
+    comment = str(raw).strip() if raw is not None else ""
+    receipt.comment = comment[:500]
+    audit_document_update(receipt, user.id)
+    db.commit()
+    db.refresh(receipt)
+    return receipt_document_serializer(receipt)
 
 
 @router.get("/receipt_documents/{document_id}/pdf")

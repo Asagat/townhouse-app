@@ -2,7 +2,7 @@
 // Просмотр квитанции в модальном окне, вёрстка максимально повторяет PDF.
 
 import { useEffect, useState } from "react";
-import { Modal, Button, Spin, Table } from "antd";
+import { Modal, Button, Spin, Table, Input, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useApiUrl } from "@refinedev/core";
 import { authedFetch, openAuthorizedPdf } from "../../auth/http";
@@ -31,6 +31,7 @@ interface ReceiptDocumentData {
     overpayment: number;
     payable_amount: number;
     issued_at: string | null;
+    comment?: string | null;
 }
 
 interface ReceiptViewModalProps {
@@ -117,6 +118,8 @@ export const ReceiptViewModal = ({
     const [error, setError] = useState<string | null>(null);
     const [doc, setDoc] = useState<ReceiptDocumentData | null>(null);
     const [items, setItems] = useState<ReceiptItemData[]>([]);
+    const [commentDraft, setCommentDraft] = useState("");
+    const [savingComment, setSavingComment] = useState(false);
 
     useEffect(() => {
         if (!open || receiptId === undefined) return;
@@ -154,6 +157,11 @@ export const ReceiptViewModal = ({
             cancelled = true;
         };
     }, [open, receiptId, apiUrl]);
+
+    // Синхронизируем черновик примечания при смене документа/открытии.
+    useEffect(() => {
+        setCommentDraft(doc?.comment ?? "");
+    }, [doc]);
 
     const rows: TableRow[] = [];
     const dataRows = items.map((it, idx): TableRow => ({
@@ -278,6 +286,42 @@ export const ReceiptViewModal = ({
         return r.key.startsWith("r") && parseInt(r.key.slice(1), 10) % 2 === 0
             ? "receipt-row-odd"
             : "";
+    };
+
+    const saveComment = async () => {
+        if (receiptId === undefined) return;
+        setSavingComment(true);
+        try {
+            const resp = await authedFetch(
+                `${apiUrl}/receipt_documents/${receiptId}/comment`,
+                {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ comment: commentDraft }),
+                },
+            );
+            if (!resp.ok) {
+                let detail = "Не удалось сохранить примечание";
+                try {
+                    const err = await resp.json();
+                    detail = err?.detail ?? detail;
+                } catch {
+                    // ignore
+                }
+                throw new Error(detail);
+            }
+            const updated = await resp.json();
+            setDoc((prev: ReceiptDocumentData | null) =>
+                prev
+                    ? { ...prev, comment: updated?.comment ?? commentDraft }
+                    : prev,
+            );
+            message.success("Примечание сохранено");
+        } catch (err: any) {
+            message.error(err?.message ?? "Не удалось сохранить примечание");
+        } finally {
+            setSavingComment(false);
+        }
     };
 
     return (
@@ -443,6 +487,38 @@ export const ReceiptViewModal = ({
                                 }}
                             >
                                 {formatIssued(doc.issued_at)}
+                            </div>
+
+                            {/* Примечание (Б6) — свободная пометка, правится оператором */}
+                            <div style={{ marginTop: 22 }}>
+                                <div
+                                    style={{
+                                        fontWeight: 700,
+                                        color: HEAD_TEXT,
+                                        marginBottom: 6,
+                                    }}
+                                >
+                                    Примечание
+                                </div>
+                                <div style={{ display: "flex", gap: 8 }}>
+                                    <Input.TextArea
+                                        rows={2}
+                                        maxLength={500}
+                                        value={commentDraft}
+                                        onChange={(e) => setCommentDraft(e.target.value)}
+                                        placeholder="Дополнительная пометка по квитанции (не влияет на суммы)"
+                                        style={{ fontSize: 12 }}
+                                    />
+                                    <Button
+                                        size="small"
+                                        type="primary"
+                                        loading={savingComment}
+                                        onClick={saveComment}
+                                        style={{ alignSelf: "flex-end" }}
+                                    >
+                                        Сохранить
+                                    </Button>
+                                </div>
                             </div>
                         </>
                     )}

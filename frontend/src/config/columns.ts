@@ -214,6 +214,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'overpayment', label: 'Переплата', format: formatMoney },
         { key: 'payable_amount', label: 'К оплате', format: formatMoney },
         { key: 'created_by_name', label: 'Автор' },
+        { key: 'comment', label: 'Примечание' },
     ],
 
     writeoff_documents: [

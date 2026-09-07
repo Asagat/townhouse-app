@@ -704,6 +704,10 @@ class ReceiptDocument(Base):
     # (момент выставления квитанции), чтобы даты документа и создания были различимы.
     created_at = Column(TIMESTAMP, server_default=func.now())
 
+    # Примечание к квитанции (Б6): свободное текстовое поле, заполняется оператором
+    # вручную (не влияет на расчётные суммы — только информационная пометка).
+    comment = Column(String(500))
+
     # Аудит документа (п. 2.9).
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
