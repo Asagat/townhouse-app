@@ -283,7 +283,13 @@ def _report_pdf(
             tbl.append([_cell(c, False, i in money_cols) for i, c in enumerate(r)])
         if total_row:
             tbl.append([_cell(c, True, i in money_cols) for i, c in enumerate(total_row)])
-        table = Table(tbl, colWidths=widths, repeatRows=1)
+        # Растягиваем ширины колонок на всю полезную ширину листа (таблицы занимают
+        # страницу по ширине и выровнены влево от левого края).
+        usable_w = float(page[0]) - rc.PAGE_LEFT_MARGIN - rc.PAGE_RIGHT_MARGIN
+        sum_w = sum(widths) or 1.0
+        scale = usable_w / sum_w
+        widths_scaled = [w * scale for w in widths]
+        table = Table(tbl, colWidths=widths_scaled, repeatRows=1)
         cmd = [
             ("GRID", (0, 0), (-1, -1), 0.5, grid),
             ("BACKGROUND", (0, 0), (-1, 0), head_bg),
@@ -333,7 +339,7 @@ def build_cash_register_report_pdf(data: dict) -> bytes:
                       _money(m.get("income")) if m.get("income") else "",
                       _money(m.get("expense")) if m.get("expense") else ""])
     sections.append(("Движения за период", headers2, widths2, rows2, None))
-    return _report_pdf("Отчёт по кассе", subtitle, False, sections)
+    return _report_pdf("Отчёт по кассе", subtitle, True, sections)
 
 
 def build_expense_report_pdf(data: dict) -> bytes:
@@ -355,7 +361,7 @@ def build_expense_report_pdf(data: dict) -> bytes:
                       m.get("account_number") or "", _money(m.get("amount"))])
     total2 = (["Итого", "", "", "", "", _money(data.get("total_expense"))]
               if data.get("movements") else None)
-    return _report_pdf("Отчёт по расходам", subtitle, False,
+    return _report_pdf("Отчёт по расходам", subtitle, True,
                        [("Разбивка по статьям", headers, widths, rows, total),
                         ("Документы расходов", headers2, widths2, rows2, total2)])
 
