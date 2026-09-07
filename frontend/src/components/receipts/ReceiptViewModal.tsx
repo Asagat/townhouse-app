@@ -459,6 +459,7 @@ export const ReceiptViewModal = ({
                                                 style={{
                                                     ...props?.style,
                                                     borderColor: GRID,
+                                                    textAlign: "center",
                                                 }}
                                                 className={`${props?.className ?? ""} ${
                                                     props?.colSpan ? "receipt-head-group" : ""
