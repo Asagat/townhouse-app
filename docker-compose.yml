@@ -5,7 +5,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-townhouse_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME}
+      # Пароль только из .env (без дефолта-секрета в git).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?...POSTGRES_PASSWORD не задан в .env}
       POSTGRES_DB: ${POSTGRES_DB:-townhouse}
     ports:
       - "5432:5432"
@@ -29,10 +30,12 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-townhouse_user}:${POSTGRES_PASSWORD:-CHANGE_ME}@postgres:5432/${POSTGRES_DB:-townhouse}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-townhouse_user}:${POSTGRES_PASSWORD:?...POSTGRES_PASSWORD не задан в .env}@postgres:5432/${POSTGRES_DB:-townhouse}
       # Секрет JWT берём из корневого .env (AUTH_SECRET_KEY); dev-значение — только запасной вариант.
       - AUTH_SECRET_KEY=${AUTH_SECRET_KEY:-dev-only-insecure-secret-change-me}
       - CORS_ORIGINS=${CORS_ORIGINS}
+      # Пароль админа для авто-догона create_user.py — из .env (как и пароль БД).
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?...ADMIN_PASSWORD не задан в .env}
     volumes:
       - ./backend:/app:z
 
