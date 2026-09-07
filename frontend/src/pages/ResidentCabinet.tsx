@@ -9,10 +9,17 @@ import { getIdentity } from "../auth/token";
 import { CabinetView } from "../components/cabinet/CabinetView";
 import type { ReceiptRow, StatementData } from "../components/cabinet/CabinetView";
 
+interface HouseExpense {
+    period: { from: string; to: string };
+    articles: { name: string; expense: number }[];
+    total: number;
+}
+
 export const ResidentCabinet = () => {
     const apiUrl = useApiUrl();
     const [statement, setStatement] = useState<StatementData | null>(null);
     const [receipts, setReceipts] = useState<ReceiptRow[]>([]);
+    const [houseExpenses, setHouseExpenses] = useState<HouseExpense | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -32,10 +39,15 @@ export const ResidentCabinet = () => {
                 if (!r.ok) return [] as ReceiptRow[];
                 return r.json() as Promise<ReceiptRow[]>;
             }),
+            authedFetch(`${apiUrl}/me/house_expenses`).then(async (r) => {
+                if (!r.ok) return null as HouseExpense | null;
+                return r.json() as Promise<HouseExpense>;
+            }),
         ])
-            .then(([stmt, recs]: [StatementData, ReceiptRow[]]) => {
+            .then(([stmt, recs, exp]: [StatementData, ReceiptRow[], HouseExpense | null]) => {
                 setStatement(stmt);
                 setReceipts(recs ?? []);
+                setHouseExpenses(exp ?? null);
             })
             .catch((err: any) => setError(err?.message ?? "Не удалось загрузить данные"))
             .finally(() => setLoading(false));
@@ -62,6 +74,7 @@ export const ResidentCabinet = () => {
             <CabinetView
                 statement={statement}
                 receipts={receipts}
+                houseExpenses={houseExpenses ?? undefined}
                 apiUrl={apiUrl}
                 userLabel={`Пользователь: ${identity?.full_name || identity?.username || ""}`}
             />
