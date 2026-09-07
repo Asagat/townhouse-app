@@ -423,27 +423,49 @@ def get_my_statement(
 def get_my_house_expenses(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
+    from_date: str | None = None,
+    to_date: str | None = None,
 ):
     """Расходы ТСЖ по кассе — агрегированная сводка для ЛК жителя.
 
     Разбивка по статьям расходов и общая сумма из того же источника, что
-    «Отчёт по расходам» (cash_register). Показываем за ВСЁ время (накопление),
-    чтобы житель всегда видел, куда потрачены средства; персональные операции/
-    контрагенты жителю не отдаются (только статьи и итог).
+    «Отчёт по расходам» (cash_register). Границы периода (YYYY-MM-DD) опциональны;
+    если не заданы — за всё время. Персональные операции/контрагенты жителю не
+    отдаются (только статьи и итог).
     """
+    from datetime import date
+    where = "cr.expense > 0"
+    params: dict = {}
+    if from_date:
+        try:
+            f = date.fromisoformat(str(from_date)[:10])
+        except ValueError:
+            f = None
+        if f is not None:
+            where += " AND cr.operation_date >= :s"
+            params["s"] = f
+    if to_date:
+        try:
+            t = date.fromisoformat(str(to_date)[:10])
+        except ValueError:
+            t = None
+        if t is not None:
+            where += " AND cr.operation_date <= :e"
+            params["e"] = t
     rows = db.execute(
-        text("""
-            SELECT COALESCE(aa.name, 'Без статьи') AS name, COALESCE(SUM(cr.expense), 0) AS total
-            FROM cash_register cr
-            JOIN transactions t ON t.id = cr.transaction_id
-            LEFT JOIN analytic_articles aa ON aa.id = t.article_id
-            WHERE cr.expense > 0
-            GROUP BY name
-            ORDER BY total DESC, name
-        """),
+        text(
+            "SELECT COALESCE(aa.name, 'Без статьи') AS name, COALESCE(SUM(cr.expense), 0) AS total "
+            "FROM cash_register cr "
+            "JOIN transactions t ON t.id = cr.transaction_id "
+            "LEFT JOIN analytic_articles aa ON aa.id = t.article_id "
+            f"WHERE {where} "
+            "GROUP BY name ORDER BY total DESC, name"
+        ),
+        params,
     ).fetchall()
     articles = [{"name": r[0], "expense": round(float(r[1]), 2)} for r in rows]
     return {
+        "period": {"from": from_date, "to": to_date},
         "articles": articles,
         "total": round(sum(a["expense"] for a in articles), 2),
     }

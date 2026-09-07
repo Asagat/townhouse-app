@@ -111,9 +111,10 @@ export const CabinetView = ({
     receiptsTitle?: string;
     /** me — данные «моего» счёта (эндпоинты /me), account — по выбранному счёту. */
     mode?: "me" | "account";
-    /** Расходы ТСЖ по кассе за всё время (для ЛК жителя; undefined — блок скрыт*). */
-    houseExpenses?: { articles: { name: string; expense: number }[]; total: number } | null;
+    /** Показывать блок «Расходы по кассе» (в ЛК жителя и админ-просмотре). */
+    houseExpenses?: boolean;
 }) => {
+    const houseExpensesEnabled = houseExpenses === true;
     const [viewId, setViewId] = useState<number | undefined>(undefined);
     const m = statement?.metrics;
     const accountId = statement?.account?.id;
@@ -207,6 +208,29 @@ export const CabinetView = ({
         },
     ];
 
+    // --- Блок «Расходы по кассе» (в ЛК жителя и в админ-просмотре) ---
+    const [expRange, setExpRange] = useState<[Dayjs, Dayjs] | null>(() => [
+        dayjs().startOf("month"),
+        dayjs().endOf("month"),
+    ]);
+    const [expData, setExpData] = useState<{ articles: { name: string; expense: number }[]; total: number } | null>(null);
+    useEffect(() => {
+        if (!houseExpensesEnabled) return;
+        let cancelled = false;
+        authedFetch(
+            `${apiUrl}/me/house_expenses?from_date=${(expRange?.[0] ?? dayjs().startOf("month")).format("YYYY-MM-DD")}&to_date=${(expRange?.[1] ?? dayjs().endOf("month")).format("YYYY-MM-DD")}`,
+        )
+            .then(async (r) => (r.ok ? r.json() : null))
+            .then((d: any) => {
+                if (!cancelled) setExpData(d ?? null);
+            })
+            .catch(() => {
+                if (!cancelled) setExpData(null);
+            });
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [houseExpensesEnabled, expRange, apiUrl]);
+
     return (
         <div>
             {statement && m && (
@@ -243,25 +267,34 @@ export const CabinetView = ({
                 </Card>
             )}
 
-            {houseExpenses !== undefined && (
+            {houseExpensesEnabled && (
                 <Card
-                    title="Расходы по кассе (ТСЖ)"
+                    title="Расходы по кассе"
                     style={{ marginBottom: 16 }}
-                    extra={<Typography.Text type="secondary">всё время</Typography.Text>}
+                    extra={
+                        <Space wrap>
+                            <DatePicker.RangePicker
+                                format="DD.MM.YYYY"
+                                value={expRange as any}
+                                onChange={(v) => setExpRange(v as any)}
+                                allowClear={false}
+                            />
+                        </Space>
+                    }
                 >
                     <Table
                         rowKey="name"
                         size="small"
                         pagination={false}
-                        dataSource={houseExpenses?.articles ?? []}
-                        locale={{ emptyText: "Расходов по кассе пока нет" }}
+                        dataSource={expData?.articles ?? []}
+                        locale={{ emptyText: "Расходов за выбранный период нет" }}
                         columns={[
                             { title: "Статья расхода", dataIndex: "name", key: "name" },
                             { title: "Сумма", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => fmt(v) },
                         ]}
                         footer={() => (
                             <Typography.Text strong>
-                                Итого расходов: {fmt(houseExpenses?.total ?? 0)}
+                                Итого расходов: {fmt(expData?.total ?? 0)}
                             </Typography.Text>
                         )}
                     />
