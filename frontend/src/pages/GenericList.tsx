@@ -162,6 +162,7 @@ const sortMapping: Record<string, string> = {
 
     // Поля квитанций
     'owner_name': 'owner_name',
+    'issued_at': 'issued_at',
     'period_month': 'period_month',
     'period_year': 'period_year',
     'debt': 'debt',
@@ -171,6 +172,7 @@ const sortMapping: Record<string, string> = {
     // Дополнение (2.11 «Сортировка»): аналитика, автор, справочные/вложенные поля,
     // статусы и количества записей.
     'article.name': 'article.name',
+    'contractor.full_name': 'contractor.full_name',
     'created_by_name': 'created_by_name',
     'kind': 'kind',
     'reading': 'reading',
