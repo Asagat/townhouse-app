@@ -184,8 +184,8 @@ def build_monthly_pdf(account: dict, monthly: list[dict], closing: float | None,
                         + (f" — {account.get('owner_name')}" if account.get("owner_name") else ""))
     subtitle.append(f"Период: {period_label}")
 
-    headers = ["Период", "Начислено", "Списано/оплачено", "Остаток на конец"]
-    widths = [150, 135, 135, 135]
+    headers = ["Период", "Начислено", "Списано/оплачено", "Остаток на конец (долг)"]
+    widths = [150, 135, 135, 150]
     data_rows = []
     for m in monthly:
         period = str(m.get("period") or "")
@@ -199,7 +199,8 @@ def build_monthly_pdf(account: dict, monthly: list[dict], closing: float | None,
         ])
     total_row = ["Итого", "", "", _money(closing)]
     return _render_pdf("Выписка по лицевому счёту (помесячно)", subtitle, headers,
-                       widths, data_rows, total_row)
+                       widths, data_rows, total_row,
+                       footer_note="Примечание: «Остаток на конец» > 0 означает задолженность (долг) на конец периода.")
 
 
 def _report_pdf(
@@ -297,7 +298,7 @@ def build_cash_register_report_pdf(data: dict) -> bytes:
     sections.append(("Сводка по кассам/счетам", headers, widths, rows, total))
 
     headers2 = ["Дата", "Касса/Счёт", "Документ", "Счёт", "Статья", "Контрагент", "Приход", "Расход"]
-    widths2 = [cm * w for w in (2.2, 2.4, 3.4, 2.0, 2.4, 2.8, 2.0, 2.0)]
+    widths2 = [cm * w for w in (1.9, 2.3, 3.3, 1.7, 2.3, 2.5, 1.8, 1.8)]
     rows2 = []
     for m in data.get("movements", []):
         rows2.append([_date_label(m.get("operation_date") or ""), m.get("cash_point_name") or "",
@@ -306,7 +307,7 @@ def build_cash_register_report_pdf(data: dict) -> bytes:
                       _money(m.get("income")) if m.get("income") else "",
                       _money(m.get("expense")) if m.get("expense") else ""])
     sections.append(("Движения за период", headers2, widths2, rows2, None))
-    return _report_pdf("Отчёт по кассе", subtitle, True, sections)
+    return _report_pdf("Отчёт по кассе", subtitle, False, sections)
 
 
 def build_expense_report_pdf(data: dict) -> bytes:
@@ -328,7 +329,7 @@ def build_expense_report_pdf(data: dict) -> bytes:
                       m.get("account_number") or "", _money(m.get("amount"))])
     total2 = (["Итого", "", "", "", "", _money(data.get("total_expense"))]
               if data.get("movements") else None)
-    return _report_pdf("Отчёт по расходам", subtitle, True,
+    return _report_pdf("Отчёт по расходам", subtitle, False,
                        [("Разбивка по статьям", headers, widths, rows, total),
                         ("Документы расходов", headers2, widths2, rows2, total2)])
 
@@ -336,8 +337,8 @@ def build_expense_report_pdf(data: dict) -> bytes:
 def build_debtors_report_pdf(data: dict) -> bytes:
     """PDF отчёта «По должникам» (2.16)."""
     from reportlab.lib.units import cm
-    headers = ["Кв.", "Лицевой счёт", "Собственник", "Начислено", "Оплачено", "Задолженность"]
-    widths = [cm * w for w in (1.4, 3.0, 5.0, 2.4, 2.4, 2.6)]
+    headers = ["Кв.", "Л/с", "Собственник", "Начислено", "Оплачено", "Долг"]
+    widths = [cm * w for w in (1.3, 1.7, 5.0, 2.4, 2.4, 2.6)]
     rows = []
     for r in data.get("rows", []):
         rows.append([str(r.get("apartment_number") or ""), r.get("account_number") or "",
