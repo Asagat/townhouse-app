@@ -12,6 +12,7 @@
 """
 
 import io
+import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
@@ -86,6 +87,9 @@ def _render_pdf(title: str, subtitle_lines: list[str], headers: list[str],
         "StHead", parent=styles["Normal"], fontSize=rc.TABLE_SIZE, leading=11,
         fontName=rc.FONT_BOLD, textColor=colors.HexColor(rc.COLOR_TEXT_HEADER_TABLE),
     )
+    # Правосвязанные варианты — для денежных колонок (роадмап 2.16: суммы справа).
+    head_right = ParagraphStyle("StHeadR", parent=head_style, alignment=2)
+    cell_right = ParagraphStyle("StCellR", parent=cell_style, alignment=2)
 
     bio = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -100,15 +104,26 @@ def _render_pdf(title: str, subtitle_lines: list[str], headers: list[str],
         story.append(Paragraph(line, text_style))
     story.append(Spacer(1, 8))
 
-    def _cell(text: str, head: bool = False):
-        style = head_style if head else cell_style
-        return Paragraph(text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"), style)
+    def _is_money(text: str) -> bool:
+        return bool(text) and bool(re.fullmatch(r"[+-]?\d[\d ]*,\d{2}", str(text).strip()))
 
-    table_rows = [[_cell(h, head=True) for h in headers]]
+    money_cols: set[int] = set()
+    for data_row in list(rows or []) + ([total_row] if total_row else []):
+        for i, val in enumerate(data_row):
+            if _is_money(val):
+                money_cols.add(i)
+
+    def _cell(text: str, head: bool = False, right: bool = False):
+        esc = str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        if head:
+            return Paragraph(esc, head_right if right else head_style)
+        return Paragraph(esc, cell_right if right else cell_style)
+
+    table_rows = [[_cell(h, head=True, right=(i in money_cols)) for i, h in enumerate(headers)]]
     for r in rows:
-        table_rows.append([_cell(c) for c in r])
+        table_rows.append([_cell(c, right=(i in money_cols)) for i, c in enumerate(r)])
     if total_row:
-        table_rows.append([_cell(c) for c in total_row])
+        table_rows.append([_cell(c, right=(i in money_cols)) for i, c in enumerate(total_row)])
 
     table = Table(table_rows, colWidths=widths, repeatRows=1)
     grid = colors.HexColor(rc.COLOR_TABLE_GRID)
@@ -225,6 +240,8 @@ def _report_pdf(
                                  fontName=rc.FONT_REGULAR, textColor=colors.HexColor(rc.COLOR_TEXT_CELL))
     head_style = ParagraphStyle("Rh", parent=styles["Normal"], fontSize=rc.TABLE_SIZE, leading=11,
                                  fontName=rc.FONT_BOLD, textColor=colors.HexColor(rc.COLOR_TEXT_HEADER_TABLE))
+    cell_right = ParagraphStyle("RcR", parent=cell_style, alignment=2)
+    head_right = ParagraphStyle("RhR", parent=head_style, alignment=2)
     sec_style = ParagraphStyle("Rk", parent=styles["Normal"], fontSize=10, leading=13, spaceBefore=10,
                                 spaceAfter=4, fontName=rc.FONT_BOLD, textColor=colors.HexColor(rc.COLOR_TEXT_TITLE))
     grid = colors.HexColor(rc.COLOR_TABLE_GRID)
@@ -242,21 +259,30 @@ def _report_pdf(
         story.append(Paragraph(line, txt_style))
     story.append(Spacer(1, 6))
 
-    def _cell(text: str, head: bool = False):
-        style = head_style if head else cell_style
+    def _is_money(text: str) -> bool:
+        return bool(text) and bool(re.fullmatch(r"[+-]?\d[\d ]*,\d{2}", str(text).strip()))
+
+    def _cell(text: str, head: bool = False, right: bool = False):
         esc = str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        return Paragraph(esc, style)
+        if head:
+            return Paragraph(esc, head_right if right else head_style)
+        return Paragraph(esc, cell_right if right else cell_style)
 
     for caption, headers, widths, rows, total_row in sections:
         if not rows and not total_row:
             continue
         if caption:
             story.append(Paragraph(caption, sec_style))
-        tbl = [[_cell(h, True) for h in headers]]
+        money_cols: set[int] = set()
+        for data_row in list(rows or []) + ([total_row] if total_row else []):
+            for i, val in enumerate(data_row):
+                if _is_money(val):
+                    money_cols.add(i)
+        tbl = [[_cell(h, True, i in money_cols) for i, h in enumerate(headers)]]
         for r in rows:
-            tbl.append([_cell(c) for c in r])
+            tbl.append([_cell(c, False, i in money_cols) for i, c in enumerate(r)])
         if total_row:
-            tbl.append([_cell(c) for c in total_row])
+            tbl.append([_cell(c, True, i in money_cols) for i, c in enumerate(total_row)])
         table = Table(tbl, colWidths=widths, repeatRows=1)
         cmd = [
             ("GRID", (0, 0), (-1, -1), 0.5, grid),
