@@ -38,7 +38,10 @@ const fmt = (v: number | null | undefined): string => {
 };
 
 export const ExpenseReport = () => {
-    const [range, setRange] = useState<[Dayjs, Dayjs] | null>(null);
+    const [range, setRange] = useState<[Dayjs, Dayjs] | null>(() => [
+        dayjs().startOf("month"),
+        dayjs().endOf("month"),
+    ]);
     const [cashPointId, setCashPointId] = useState<number | undefined>(undefined);
     const { data: cashPointsData } = useList({ resource: "cash_points", pagination: { mode: "off" } });
     const cashPointOptions = (cashPointsData?.data ?? []).map((p: any) => ({ value: p.id, label: p.name }));
@@ -68,7 +71,12 @@ export const ExpenseReport = () => {
             .finally(() => setLoading(false));
     }, []);
 
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        const from = range?.[0]?.format("YYYY-MM-DD");
+        const to = range?.[1]?.format("YYYY-MM-DD");
+        load(from, to, cashPointId);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [load]);
 
     const handleApply = () => {
         const from = range?.[0]?.format("YYYY-MM-DD") ?? undefined;

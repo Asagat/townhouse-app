@@ -119,8 +119,13 @@ export const CabinetView = ({
     const [movements, setMovements] = useState<MovementRow[]>([]);
     const [movementMetrics, setMovementMetrics] = useState<MovementMetrics | null>(null);
     const [movementsLoading, setMovementsLoading] = useState(false);
-    const [fromDate, setFromDate] = useState<string | undefined>(undefined);
-    const [toDate, setToDate] = useState<string | undefined>(undefined);
+    // Период движений по умолчанию — текущий месяц (с 1-го по конец месяца).
+    const [fromDate, setFromDate] = useState<string | undefined>(
+        dayjs().startOf("month").format("YYYY-MM-DD"),
+    );
+    const [toDate, setToDate] = useState<string | undefined>(
+        dayjs().endOf("month").format("YYYY-MM-DD"),
+    );
 
     const movementBase =
         mode === "me" ? `${apiUrl}/me/movements` : `${apiUrl}/accounts/${accountId}/movements`;
