@@ -51,7 +51,30 @@ export const RecordFormModal = ({
 
     // Текстовое представление поля в режиме просмотра: дата — «DD.MM.YYYY»,
     // телефон — «+7(XXX)XXX-XX-XX», деньги — с разделителями и 2 знаками,
-    // булево — «Да/Нет».
+    // булево — «Да/Нет», reference — текстовое значение связанной записи.
+    const _pickLabel = (obj: any): string | null => {
+        if (obj == null) return null;
+        if (typeof obj !== "object") {
+            // Уже строка/текст — берём как есть.
+            return typeof obj === "string" ? obj : null;
+        }
+        const keys = [
+            "name",
+            "full_name",
+            "title",
+            "account_name",
+            "account_number",
+            "label",
+            "value",
+        ];
+        for (const k of keys) {
+            const v = obj[k];
+            if (v !== undefined && v !== null && v !== "") {
+                return String(v);
+            }
+        }
+        return null;
+    };
     const fieldViewText = (field: FieldMeta): string => {
         const raw = initialValues?.[field.name];
         if (field.type === "date") return formatDate(raw);
@@ -59,6 +82,23 @@ export const RecordFormModal = ({
         if (field.type === "boolean") return raw ? "Да" : "Нет";
         if (isMoneyFieldName(field.name)) return formatMoney(raw);
         if (field.name === "phone") return formatPhone(raw);
+
+        // Reference-поле: показываем не id, а подставленное название связанной записи.
+        // Сначала пробуем готовый «*_name»-атрибут из сериализатора, затем вложенный
+        // объект по корню поля (например cash_point_id -> record.cash_point.name).
+        if (field.type === "reference") {
+            const nameAttr = `${field.name.replace(/_id$/, "")}_name`;
+            const flat = initialValues?.[nameAttr];
+            if (flat !== undefined && flat !== null && flat !== "") {
+                return String(flat);
+            }
+            const root = field.name.replace(/_id$/, "");
+            const label = _pickLabel(initialValues?.[root]);
+            if (label) return label;
+            // Нет подставленного значения — хотя бы не оставлять связку «голым» id.
+            if (raw != null) return String(raw);
+            return "—";
+        }
         return String(raw ?? "—");
     };
 
