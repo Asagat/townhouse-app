@@ -18,6 +18,7 @@ import {
 } from "antd";
 import {
     AccountBookOutlined,
+    CloudUploadOutlined,
     DeleteOutlined,
     EditOutlined,
     EyeOutlined,
@@ -1098,7 +1099,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                 <Tooltip title="Массовый ввод показаний">
                                     <Button
                                         type="primary"
-                                        icon={<EditOutlined />}
+                                        icon={<CloudUploadOutlined />}
                                         onClick={() => {
                                             setDocReadOnly(false);
                                             setEditingMeterReadingDocumentId(undefined);
