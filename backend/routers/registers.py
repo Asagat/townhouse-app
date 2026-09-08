@@ -31,6 +31,7 @@ from services import (
     create_accounts_register_entries_for_accruals,
     audit_document_create,
     audit_document_update,
+    apply_month_tariff_drafts,
 )
 from writeoffs import (
     cancel_writeoff_document,
@@ -109,6 +110,14 @@ async def generate_accruals(
         raise HTTPException(status_code=422, detail="Нет корректных строк для начисления")
 
     accrual_date = date(year, month, calendar.monthrange(year, month)[1])
+
+    # 2.18 (единица №3): месячное подтверждение — применяем внесённые оператором ставки
+    # месяца (draft_tariffs) как тарифы-периоды ДО пересчёта строк.
+    try:
+        apply_month_tariff_drafts(db, payload.get("draft_tariffs"), year, month)
+    except HTTPException:
+        db.rollback()
+        raise
 
     # Создаём документ начислений в той же транзакции, чтобы исключить документы-сирот.
     # Название генерируется автоматически (1.9 роадмапа) — ввод пользователя игнорируется.

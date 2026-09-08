@@ -377,6 +377,99 @@ def validate_tariff_invariants(db: Session, tariff: Tariff) -> None:
         )
 
 
+def apply_month_tariff_drafts(
+    db: Session,
+    drafts: list[dict[str, Any]] | None,
+    year: int,
+    month: int,
+) -> None:
+    """Применяет месячные «черновые» ставки, которые оператор внес при начислении (2.18).
+
+    Месячное подтверждение: если в месячном начислении оператор хочет собрать иную
+    сумму по услуге, чем действует текущий тариф, он вводит новую ставку месяца
+    (draft_tariffs: услуга, ставка, обязательное «Примечание»). Сервер создаёт тариф-
+    период на этот месяц (valid_from..valid_to = месяц), который `resolve...` подхватит
+    как «закрытый месячный канон» при пересчёте строк.
+
+    Правила:
+      - причина обязательна (иначе 422); цена положительна;
+      - если на услугу на этот месяц уже есть тариф-период (закрытый канон месяца),
+        создание второго запрещается (422) — ставка месяца должна быть единственной;
+      - при повторном подтверждении с той же ставкой новый тариф не плодится,
+        если он уже заведён (запрос по месяцу находит и оставляет его).
+    Бросает HTTPException(422) при нарушении. Вызывается ДО построения строк начисления.
+    """
+    if not drafts:
+        return
+
+    month_start = date(year, month, 1)
+    month_end = date(year, month, calendar.monthrange(year, month)[1])
+    month_label = f"{MONTH_NAMES_RU[month - 1]} {year}"
+
+    for d in drafts:
+        if not isinstance(d, dict):
+            continue
+        svc = d.get("services_type_id")
+        if svc in (None, ""):
+            raise HTTPException(status_code=422, detail="В «Тариф месяца» не указан вид услуги")
+        svc = int(svc)
+        try:
+            price = float(d.get("price"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="В «Тарифе месяца» некорректная цена")
+        if price <= 0:
+            raise HTTPException(status_code=422, detail="Ставка месяца должна быть положительной")
+
+        comment = (d.get("comment") or "").strip()
+        if not comment:
+            service = db.query(ServiceType).filter(ServiceType.id == svc).first()
+            name = service.services_type if service else f"#{svc}"
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Для услуги «{name}» в месяце {month_label} обязательно укажите «Примечание» "
+                    "(причину изменения ставки)."
+                ),
+            )
+
+        # Проверяем: на услугу/месяц уже есть месячный канон (тариф-период)
+        existing = (
+            db.query(Tariff)
+            .filter(
+                Tariff.services_type_id == svc,
+                Tariff.valid_to == month_end,
+                Tariff.valid_from >= month_start,
+                Tariff.valid_from <= month_end,
+            )
+            .order_by(Tariff.valid_from.desc(), Tariff.id.desc())
+            .first()
+        )
+        if existing is not None:
+            # повторное подтверждение с той же ставкой — идемпотентно (не плодим)
+            if abs(float(existing.price) - price) < 0.005:
+                continue
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"На {month_label} для этого вида услуги уже заведён тариф-период "
+                    f"{float(existing.price):g} ₸. Оформите общую ставку месяца одной записью "
+                    "(в «Тариф месяца» введите итоговую сумму с «Примечанием»)."
+                ),
+            )
+
+        t = Tariff(
+            services_type_id=svc,
+            price=price,
+            valid_from=month_start,
+            valid_to=month_end,
+            comment=comment,
+            is_oneoff=False,
+        )
+        t.status = TARIFF_STATUS_ACTIVE
+        db.add(t)
+    db.flush()
+
+
 def resolve_meter_reading_document_values(
     db: Session, payload: dict[str, Any], exclude_id: int | None = None
 ) -> dict[str, Any]:

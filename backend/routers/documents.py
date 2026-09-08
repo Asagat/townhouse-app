@@ -45,6 +45,7 @@ from services import (
     validate_date_not_future,
     validate_reading_not_decreased,
     _service_name,
+    apply_month_tariff_drafts,
 )
 from writeoffs import auto_recalculate_writeoffs
 
@@ -473,6 +474,14 @@ async def update_accrual_document_full(
     if (accrual_date.year, accrual_date.month) > (now.year, now.month):
         raise HTTPException(status_code=422, detail="Нельзя начислить за будущий период")
     period_end = date(accrual_date.year, accrual_date.month, calendar.monthrange(accrual_date.year, accrual_date.month)[1])
+
+    # 2.18 (единица №3): применяем ставки месяца (draft_tariffs) как тарифы-периоды.
+    try:
+        apply_month_tariff_drafts(db, payload.get("draft_tariffs"),
+                                   accrual_date.year, accrual_date.month)
+    except HTTPException:
+        db.rollback()
+        raise
 
     # Удаляем старые строки регистра вместе со связанными записями взаиморасчётов
     old_items = db.query(AccrualsRegister).filter(AccrualsRegister.accrual_document_id == document_id).all()
