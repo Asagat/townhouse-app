@@ -25,6 +25,7 @@ import {
     FileAddOutlined,
     FilePdfOutlined,
     FilterOutlined,
+    FormOutlined,
     PlusOutlined,
     TableOutlined,
     UndoOutlined,
@@ -84,6 +85,7 @@ import {
 import { SortableContext } from "@dnd-kit/sortable";
 import { BulkReadingsModal } from "../components/meter-readings/BulkReadingsModal";
 import { AccrualsCalculationModal } from "../components/accruals/AccrualsCalculationModal";
+import { PersonalAccrualModal } from "../components/accruals/PersonalAccrualModal";
 import { OneOffAccrualsEditModal } from "../components/accruals/OneOffAccrualsEditModal";
 import { ReceiptsModal } from "../components/receipts/ReceiptsModal";
 import { ReceiptViewModal } from "../components/receipts/ReceiptViewModal";
@@ -386,6 +388,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     // true — модалки документов открыты в режиме «просмотр» (read-only).
     const [docReadOnly, setDocReadOnly] = useState(false);
     const [oneOffAccrualsOpen, setOneOffAccrualsOpen] = useState(false);
+    const [personalAccrualsOpen, setPersonalAccrualsOpen] = useState(false);
     const [receiptsModalOpen, setReceiptsModalOpen] = useState(false);
     const [receiptViewId, setReceiptViewId] = useState<number | undefined>(undefined);
     // Режим открытия квитанции в ReceiptViewModal: false — просмотр (readonly),
@@ -1121,6 +1124,15 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                     />
                                 </Tooltip>
                             )}
+                            {isAccrualDocuments && roleCanCreate && (
+                                <Tooltip title="Персональное доначисление">
+                                    <Button
+                                        type="primary"
+                                        icon={<FormOutlined />}
+                                        onClick={() => setPersonalAccrualsOpen(true)}
+                                    />
+                                </Tooltip>
+                            )}
                             {canUseSelection &&
                                 (selectedRecord ? (
                                     <>
@@ -1395,6 +1407,14 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         onSaved={() => tableQuery.refetch()}
                     />
                 </>
+            )}
+
+            {isAccrualDocuments && (
+                <PersonalAccrualModal
+                    open={personalAccrualsOpen}
+                    onClose={() => setPersonalAccrualsOpen(false)}
+                    onSaved={() => tableQuery.refetch()}
+                />
             )}
 
             {isReceiptDocuments && (
