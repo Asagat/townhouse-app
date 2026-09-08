@@ -87,18 +87,16 @@ src/
 
 ## 🔐 Переменные окружения
 
-Файл `.env` в корне проекта содержит переменные окружения:
+Канонический перечень переменных — файл **`.env.example`** в корне репозитория
+(настройки и секреты не хранятся в git, см. `DEPLOY.md §1`).
 
-```bash
-# URL бэкенда для API запросов
-VITE_API_URL=/api
+- Backend-переменные (`DATABASE_URL` либо набор `POSTGRES_*`, `AUTH_SECRET_KEY`,
+  `CORS_ORIGINS`, …) читаются из корневого `.env`;
+- Frontend-переменные для браузера именуются с префиксом `VITE_` и доступны через
+  `import.meta.env.VITE_*` (локально берутся из `frontend/.env`; при сборке подмены
+  не нужны — `VITE_API_URL` выставляется в рантайме через nginx-прокси).
 
-# Другие переменные могут быть добавлены по необходимости
-```
-
-**Важно:** 
-- Переменные должны начинаться с `VITE_` для доступа в клиентском коде
-- Используются через `import.meta.env.VITE_*`
+Примеры и назначение каждой переменной ищите в `.env.example` и `docker-compose.yml`.
 
 ---
 
@@ -453,38 +451,26 @@ POST /api/accruals_register/generate
 
 ## 🚀 Команды для разработки
 
-### Запуск в Docker:
+Быстрый старт бэкенда + БД (+ Alembic/справочники/админ) — одной командой:
+
 ```bash
-# Перезапуск фронтенда
-docker compose restart frontend
-
-# Просмотр логов
-docker compose logs frontend --tail=30
-
-# Полная пересборка
-docker compose up -d --build frontend
-
-# Просмотр логов в реальном времени
-docker compose logs frontend -f
+./scripts/dev.sh          # развернуть и запустить API на http://localhost:8000
+./scripts/dev.sh --full   # дополнительно: pip install -r backend/requirements.txt
 ```
 
-### Локальная разработка:
-```bash
-# Переход в папку фронтенда
-cd /opt/townhouse/frontend
+Фронтенд (dev-сервер Vite, http://localhost:5173):
 
-# Установка зависимостей
+```bash
+cd frontend
 npm install
-
-# Запуск dev-сервера (Vite)
-npm run dev
-
-# Сборка для продакшена (tsc + vite build)
-npm run build
-
-# Проверка TypeScript ошибок
-npx tsc --noEmit -p tsconfig.app.json
+npm run dev          # dev-сервер Vite (HMR)
+npm run build        # сборка для продакшена (tsc + vite build)
+npx tsc --noEmit     # проверка TypeScript (эквивалент tsc-шага сборки)
 ```
+
+Запуск всего стека в Docker (`postgres`+`backend`+`frontend`+`nginx`) и типовые
+команды (`docker compose restart/logs/up -d --build …`) — в `DEPLOY.md §7`;
+развёртывание на сервере — `DEPLOY.md §3` и `scripts/` (`setup_vps.sh`, `deploy_vps.sh`).
 
 Примечание: скрипта `npm run lint` нет — ESLint не подключён как зависимость (в проекте есть только idle-конфиг `eslint.config.js`).
 

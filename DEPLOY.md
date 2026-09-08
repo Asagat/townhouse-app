@@ -302,6 +302,12 @@ cd ..
 
 ## 6. Тесты
 
+Канонический прогон проверок реализован в CI (`.github/workflows/ci.yml`):
+backend — `alembic upgrade head` → `init_data.py` → `python -m pytest tests/ -q`
+против disposable PostgreSQL 16; frontend — `npm ci` → `npm run build` (`tsc` + Vite).
+
+Локально то же самое:
+
 ```bash
 cd backend && python -m pytest tests/ -q   # тесты бэкенда
 cd frontend && npx tsc --noEmit             # проверка типов фронтенда
@@ -718,6 +724,9 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 ---
 
 ## 9. Ключевые команды / скрипты
+
+> Детали работы с Alembic и ревизиями (базовая ревизия, синтез из старой БД,
+> починочные скрипты) — в каноническом справочнике `backend/migrations/README.md`.
 
 | Команда (из каталога backend) | Назначение |
 |---|---|
