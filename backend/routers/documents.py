@@ -26,6 +26,7 @@ from models import (
     Meter,
     MeterReading,
     MeterReadingDocument,
+    Tariff,
     User,
     recalculate_account_balance,
 )
@@ -85,6 +86,112 @@ def create_accrual_document(
     db.refresh(document)
 
     return accrual_document_serializer(document)
+
+
+_MONTH_RU = ["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"]
+
+
+@router.post("/accrual_documents/personal", status_code=201)
+def create_personal_accrual(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_write_access),
+):
+    """Персональное доначисление/корректировка (единица №4, вариант 1).
+
+    Оформляется отдельным автономным документом (doc_kind='oneoff') со своими
+    строками-корректировками по конкретным л/с (сумма может быть +/−). Общих тарифов
+    и месячных начислений он НЕ создаёт и при пересчёте месячных не затрагивается,
+    поэтому корректировки сохраняются.
+
+    Формат: { accrual_date: "YYYY-MM-DD", comment?: str,
+              entries: [{ account_id, services_type_id, amount }] }
+    """
+    date_raw = payload.get("accrual_date")
+    if not date_raw:
+        raise HTTPException(status_code=422, detail="Укажите дату начисления")
+    try:
+        d = datetime.strptime(date_raw, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Некорректная дата начисления")
+    now = date.today()
+    if (d.year, d.month) > (now.year, now.month):
+        raise HTTPException(status_code=422, detail="Нельзя начислить за будущий период")
+
+    entries = payload.get("entries") or []
+    if not isinstance(entries, list) or not entries:
+        raise HTTPException(status_code=422, detail="Укажите строки персональной корректировки")
+
+    title = f"Персональное доначисление за {_MONTH_RU[d.month - 1]} {d.year}"
+    document = AccrualDocument(
+        accrual_date=d,
+        title=title,
+        doc_kind="oneoff",
+        comment=(payload.get("comment") or "").strip() or None,
+    )
+    audit_document_create(document, user.id)
+    db.add(document)
+    db.flush()
+
+    items = []
+    affected = set()
+    serializer_reg = SERIALIZERS.get(AccrualsRegister)
+    for row in entries:
+        if not isinstance(row, dict):
+            continue
+        ai = row.get("account_id")
+        si = row.get("services_type_id")
+        try:
+            amt = float(row.get("amount"))
+        except (TypeError, ValueError):
+            continue
+        if ai in (None, "") or si in (None, "") or amt == 0:
+            continue
+        ai, si = int(ai), int(si)
+        # Ссылка на тариф только как историческая метка — на сумму не влияет.
+        t = (
+            db.query(Tariff)
+            .filter(Tariff.services_type_id == si)
+            .order_by(Tariff.valid_from.desc(), Tariff.id.desc())
+            .first()
+        )
+        if t is None:
+            db.rollback()
+            raise HTTPException(status_code=422, detail=f"Для услуги #{si} нет тарифа — нельзя оформить персональную корректировку")
+        it = AccrualsRegister(
+            accrual_document_id=document.id,
+            accrual_date=d,
+            account_id=ai,
+            tariff_id=t.id,
+            services_type_id=si,
+            current_reading_id=None,
+            past_reading_value=None,
+            current_reading_value=None,
+            consumption=0,
+            amount=amt,
+        )
+        db.add(it)
+        items.append(it)
+        affected.add(ai)
+    if not items:
+        db.rollback()
+        raise HTTPException(status_code=422, detail="Нет корректных строк для персональной корректировки")
+
+    db.commit()
+    try:
+        create_accounts_register_entries_for_accruals(db, items)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Не удалось создать записи регистра: {str(exc)}")
+    # распределение доступных денег с учётом новой суммы долга
+    auto_recalculate_writeoffs(db, sorted(affected))
+    db.refresh(document)
+
+    return {
+        "document": accrual_document_serializer(document),
+        "created": [serializer_reg(it) for it in items],
+    }
 
 
 @router.get("/accrual_documents/{document_id}")
