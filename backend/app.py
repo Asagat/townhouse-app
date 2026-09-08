@@ -79,7 +79,7 @@ from field_config import FIELD_CONFIG, MODEL_MAP, coerce_field_value
 from sorting import build_order_clause
 from filtering import build_filter_clauses
 from serializers import SERIALIZERS, _user_serializer
-from services import (build_accrual_register_items, build_transaction_title, calculate_accrual_for_account_service, calculate_accruals_preview, create_accounts_register_entries_for_accruals, resolve_meter_reading_values, resolve_meter_reading_document_values, resolve_transaction_values, set_transaction_title, audit_document_create, audit_document_update, validate_meter_service_type, retire_tariff_predecessors, TARIFF_STATUS_ARCHIVED)
+from services import (build_accrual_register_items, build_transaction_title, calculate_accrual_for_account_service, calculate_accruals_preview, create_accounts_register_entries_for_accruals, resolve_meter_reading_values, resolve_meter_reading_document_values, resolve_transaction_values, set_transaction_title, audit_document_create, audit_document_update, validate_meter_service_type, retire_tariff_predecessors, validate_tariff_invariants, TARIFF_STATUS_ARCHIVED, TARIFF_STATUS_ACTIVE)
 
 
 # Инициализация основного приложения
@@ -564,6 +564,17 @@ async def create_resource_item(
     db.add(item)
     # Аудит: фиксируем автора и время создания документа (п. 2.9).
     audit_document_create(item, _auth.id)
+    # 2.18: правила «разовых» тарифов (обязательность примечания, единственность
+    # разового на месяц) проверяем ДО фиксации, чтобы не оставалась невалидная запись.
+    # Желаемый статус известен сразу — задаём его до flush/валидации (иначе status ещё
+    # None и проверка «Действующего» не сработала бы).
+    if resource == "tariffs":
+        item.status = (
+            TARIFF_STATUS_ARCHIVED
+            if payload.get("status") == TARIFF_STATUS_ARCHIVED
+            else TARIFF_STATUS_ACTIVE
+        )
+        validate_tariff_invariants(db, item)
     try:
         db.commit()
     except IntegrityError as exc:
@@ -661,6 +672,9 @@ async def update_resource_item(
             retire_tariff_predecessors(
                 db, item.services_type_id, bool(item.is_oneoff), exclude_tariff_id=item.id
             )
+        # 2.18: серверная проверка правил «разовых» тарифов по финальному значению
+        # записи (при изменении цены/месяца/признака/примечания).
+        validate_tariff_invariants(db, item)
 
     # Аудит: фиксируем автора последнего изменения (п. 2.9).
     audit_document_update(item, _auth.id)

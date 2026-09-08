@@ -1,8 +1,9 @@
 // AccrualsCalculationModal.tsx
 
 import { useEffect, useState } from "react";
-import { Modal, Button, Space, Select, InputNumber, Table, Checkbox, Input, message } from "antd";
+import { Modal, Button, Space, Select, InputNumber, Table, Checkbox, Input, message, Tag, Alert } from "antd";
 import dayjs from "dayjs";
+import { useNavigate } from "react-router-dom";
 import { useApiUrl, useCustom, useCustomMutation } from "@refinedev/core";
 import type { AccrualPreviewRow } from "../../types";
 import { formatMoney, formatNumber } from "../../config/formatters";
@@ -39,6 +40,33 @@ const monthLabelByValue: Record<number, string> = Object.fromEntries(
 const getDefaultTitle = (year: number, month: number): string =>
     `Начисление за ${monthLabelByValue[month] ?? month} ${year}`;
 
+interface ServiceTariffRow {
+    services_type_id: number;
+    service_label: string;
+    tariff_label: string;
+    is_oneoff: boolean;
+}
+
+/**
+ * Сводит строки превью (аккаунт × услуга) к уникальным услугам с применяемым
+ * за месяц тарифом. В одном месяце по услуге начисляется один тариф (2.18),
+ * поэтому он одинаков у всех аккаунтов этой услуги в превью.
+ */
+const aggregateServiceTariffs = (rows: AccrualPreviewRow[]): ServiceTariffRow[] => {
+    const seen = new Map<number, AccrualPreviewRow>();
+    for (const row of rows) {
+        if (!seen.has(row.services_type_id)) {
+            seen.set(row.services_type_id, row);
+        }
+    }
+    return Array.from(seen.values()).map((row) => ({
+        services_type_id: row.services_type_id,
+        service_label: row.services_type_id_label,
+        tariff_label: row.tariff_id_label,
+        is_oneoff: row.tariff_is_oneoff,
+    }));
+};
+
 /**
  * Модальное окно для расчета и начисления коммунальных услуг.
  * Без documentId — режим создания: оператор выбирает месяц/год, система рассчитывает
@@ -65,6 +93,8 @@ export const AccrualsCalculationModal = ({
         Array<{ account_id: number; services_type_id: number }> | null
     >(null);
     const [comment, setComment] = useState<string>("");
+    const [showTariffNotes, setShowTariffNotes] = useState(false);
+    const navigate = useNavigate();
 
     const { refetch, isFetching } = useCustom<{ rows: AccrualPreviewRow[] }>({
         url: `${apiUrl}/accruals_register/calculate`,
@@ -307,6 +337,26 @@ export const AccrualsCalculationModal = ({
         },
     ];
 
+    // 2.18: блок «Проверить тарифы» — какие тарифы реально применяются за месяц.
+    const serviceTariffs = aggregateServiceTariffs(rows);
+    const hasOneoffForPeriod = serviceTariffs.some((t) => t.is_oneoff);
+
+    const tariffNotesColumns = [
+        { title: "Вид услуги", dataIndex: "service_label", key: "service_label" },
+        { title: "Применяется тариф", dataIndex: "tariff_label", key: "tariff_label" },
+        {
+            title: "Тип",
+            key: "type",
+            width: 150,
+            render: (_: unknown, row: ServiceTariffRow) =>
+                row.is_oneoff ? (
+                    <Tag color="orange">Разовый (замена ставки)</Tag>
+                ) : (
+                    <Tag color="blue">Регулярный</Tag>
+                ),
+        },
+    ];
+
     return (
         <Modal
             title={
@@ -377,6 +427,57 @@ export const AccrualsCalculationModal = ({
                     />
                 </div>
             </Space>
+
+            {!readonly && (
+                <div style={{ marginBottom: showTariffNotes ? 8 : 0 }}>
+                    <Button
+                        size="small"
+                        type={hasOneoffForPeriod && !showTariffNotes ? "link" : "text"}
+                        onClick={() => setShowTariffNotes((v) => !v)}
+                    >
+                        {showTariffNotes
+                            ? "Скрыть проверку тарифов"
+                            : "Проверить тарифы"}
+                    </Button>
+                    {hasOneoffForPeriod && !showTariffNotes && (
+                        <span style={{ marginLeft: 8, color: "#d48806" }}>
+                            В этом месяце применяется разовый тариф (замена ставки)
+                        </span>
+                    )}
+                </div>
+            )}
+
+            {!readonly && showTariffNotes && (
+                <div style={{ marginBottom: 16, background: "#fafafa", padding: 8, borderRadius: 6 }}>
+                    {hasOneoffForPeriod && (
+                        <Alert
+                            style={{ marginBottom: 8 }}
+                            type="warning"
+                            showIcon
+                            message={
+                                "В месяце применяется разовый тариф (замена регулярной ставки). " +
+                                "Убедитесь, что это ожидаемая сумма."
+                            }
+                        />
+                    )}
+                    <Table
+                        rowKey="services_type_id"
+                        size="small"
+                        pagination={false}
+                        dataSource={serviceTariffs}
+                        columns={tariffNotesColumns}
+                        scroll={{ y: 200 }}
+                    />
+                    <div style={{ marginTop: 8, textAlign: "right" }}>
+                        <Button
+                            size="small"
+                            onClick={() => navigate("/tariffs")}
+                        >
+                            Открыть раздел «Тарифы»
+                        </Button>
+                    </div>
+                </div>
+            )}
 
             {isEditMode && (
                 <div style={{ marginBottom: 12 }}>

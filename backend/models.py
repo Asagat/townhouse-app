@@ -225,6 +225,9 @@ class Tariff(Base):
     # (services_type.tariff_type_id) и наследуется всеми тарифами услуги.
     price = Column(Numeric(15, 2), nullable=False)
     valid_from = Column(Date, nullable=False)
+    # Дата окончания действия ставки (task 2.18, миграция 0017): NULL = открытая
+    # (действующая) ставка без ке-онца. Назначение текущей активной записи.
+    valid_to = Column(Date, nullable=True)
     # Примечание/комментарий к тарифу (пояснение, от чего зависит ставка и т.п.).
     comment = Column(String(500))
     # Признак «разового/одноразового» сбора. Регулярные (повторяемые) тарифы

@@ -50,6 +50,7 @@ export type AccrualPreviewRow = {
     services_type_id_label: string;
     tariff_id: number;
     tariff_id_label: string;
+    tariff_is_oneoff: boolean;
     past_reading_value: number | null;
     current_reading_value: number | null;
     consumption: number;

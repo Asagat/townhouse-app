@@ -89,10 +89,11 @@ def test_meter_tariff_uses_consumption(db, account_factory):
     assert result["amount"] == 10.0 * 60.0  # тариф × потребление
 
 
-def test_oneoff_tariff_not_used_for_regular_accrual(db, account_factory):
-    """Регрессия «разового» тарифа: разовый сбор (is_oneoff) НЕ должен перехватывать
-    обычное начисление, даже если он «последний действующий ≤ дате» для своего вида
-    услуги (ошибка: Фонд 121000@2018-04 → месячных 281; Охрана 6060@2020-12 → 1020)."""
+def test_oneoff_on_period_takes_priority_over_regular(db, account_factory):
+    """ 2.18: разовый тариф услуги действует на месяц своего valid_from
+    и подменяет регулярный ровно в этом месяце; в соседние месяцы начисляется
+    регулярный. (Раньше разовый вовсе исключался из месячного расчёта — поэтому
+    спец-сбор «уходил в долг»: показывался регулярный тариф.)"""
     rec = account_factory("rof")
     ttype = _tariff_type(db, "Фиксированный")
     svc = ServiceType(services_type="__test_Однораз", priority=0, tariff_type_id=ttype.id)
@@ -103,13 +104,32 @@ def test_oneoff_tariff_not_used_for_regular_accrual(db, account_factory):
     regular = Tariff(services_type_id=svc.id,
                      price=100, valid_from=date(2000, 1, 1), is_oneoff=False)
     db.add(regular)
-    # Разовый сбор той же услуги с более поздним valid_from — если бы он попал в
-    # выбор «последний действующий <= дате», месячное начисление стало бы 5000.
-    db.add(Tariff(services_type_id=svc.id,
-                  price=5000, valid_from=date(2018, 4, 1), is_oneoff=True))
+    # Разовый тариф той же услуги на апрель 2018 (замена ставки месяца).
+    oneoff = Tariff(services_type_id=svc.id,
+                    price=5000, valid_from=date(2018, 4, 15), is_oneoff=True)
+    db.add(oneoff)
+    db.flush()
     db.commit()
     acc = db.get(Account, rec["account_id"])
-    result = A.calculate_accrual_for_account_service(db, acc, db.get(ServiceType, svc.id), date(2018, 4, 30))
-    assert result is not None
-    assert result["tariff_id"] == regular.id  # выбран регулярный, не разовый
-    assert result["amount"] == 100.0
+
+    # Месяц, на который задан разовый (апрель 2018) — начисляем по разовому.
+    svc_obj = db.get(ServiceType, svc.id)
+    in_month = A.calculate_accrual_for_account_service(db, acc, svc_obj, date(2018, 4, 30))
+    assert in_month is not None
+    assert in_month["tariff_id"] == oneoff.id   # выбран разовый, не регулярный
+    assert in_month["amount"] == 5000.0
+    assert in_month["tariff_is_oneoff"] is True
+
+    # Соседний месяц без разового (май 2018) — снова регулярный тариф.
+    other_month = A.calculate_accrual_for_account_service(db, acc, svc_obj, date(2018, 5, 31))
+    assert other_month is not None
+    assert other_month["tariff_id"] == regular.id  # регулярный вернулся
+    assert other_month["amount"] == 100.0
+    assert other_month["tariff_is_oneoff"] is False
+
+    # Разовый на будущую дату из другого месяца не «перехватывает» позже идущие
+    # месяцы (даже если valid_from ещё не наступил для начисляемого месяца).
+    jan_2019 = A.calculate_accrual_for_account_service(db, acc, svc_obj, date(2019, 1, 31))
+    assert jan_2019 is not None
+    assert jan_2019["tariff_id"] == regular.id
+    assert jan_2019["amount"] == 100.0

@@ -325,6 +325,58 @@ def retire_tariff_predecessors(
     return len(archived)
 
 
+def validate_tariff_invariants(db: Session, tariff: Tariff) -> None:
+    """Серверные правила для «разовых» тарифов на месяц (2.18)
+
+    1) «Примечание» (comment) у разового тарифа обязательно — объяснить причину разового
+       сбора (без него остаётся непонятно, почему месяц собрали не по регулярной ставке).
+    2) Не может быть двух «Действующих» разовых тарифов одного вида услуги на один месяц
+       valid_from: разовый — единая замена ставки месяца (правильная операция — один
+       тариф с итоговой суммой, а не несколько начислений одного месяца).
+
+    Бросает HTTPException(422) при нарушении. Источник истины — бэкенд.
+    """
+    if not tariff.is_oneoff:
+        return
+
+    if not (tariff.comment or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "У разового тарифа обязательно заполните «Примечание» — "
+                "объясните причину разового сбора."
+            ),
+        )
+
+    if tariff.status != TARIFF_STATUS_ACTIVE or tariff.valid_from is None:
+        return
+    d = tariff.valid_from
+    month_start = date(d.year, d.month, 1)
+    month_end = date(d.year, d.month, calendar.monthrange(d.year, d.month)[1])
+    clash = (
+        db.query(Tariff)
+        .filter(
+            Tariff.services_type_id == tariff.services_type_id,
+            Tariff.is_oneoff == True,  # noqa: E712
+            Tariff.status == TARIFF_STATUS_ACTIVE,
+            Tariff.valid_from >= month_start,
+            Tariff.valid_from <= month_end,
+            Tariff.id != tariff.id,
+        )
+        .first()
+    )
+    if clash is not None:
+        month_label = f"{MONTH_NAMES_RU[d.month - 1]} {d.year}"
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"На {month_label} для этого вида услуги уже есть «Действующий» разовый "
+                f"тариф {float(clash.price)} ₸. Оформите разовый сбор единым тарифом "
+                "(итоговой суммой), а не несколькими начислениями одного месяца."
+            ),
+        )
+
+
 def resolve_meter_reading_document_values(
     db: Session, payload: dict[str, Any], exclude_id: int | None = None
 ) -> dict[str, Any]:
@@ -410,6 +462,68 @@ def resolve_meter_reading_values(
 
 # --- ФУНКЦИЯ РАСЧЕТА НАЧИСЛЕНИЙ ---
 
+def resolve_tariff_for_accrual_period(
+    db: Session, services_type_id: int, period_end: date
+) -> Tariff | None:
+    """Ставка вида услуги для месячного начисления на конец period_end (2.18).
+
+    У услуги в любой момент действует ровно один «ответственный» тариф периода.
+      Приоритет:
+      1) закрытый месячный тариф-период (valid_to задан), покрывающий месяц начисления
+         (конверсионный «канон» повышенной ставки с valid_from <= period_end и
+          valid_to >= первый день месяца);
+      2) открытая (valid_to IS NULL) актуальная ставка с valid_from <= period_end;
+      3) legacy-фоллбэк (прод до миграции 0017/0018, где разовая ставка хранилась
+         признаком is_oneoff): действующий разовый, чей valid_from — в месяце period_end.
+    """
+    year, month = period_end.year, period_end.month
+    month_start = date(year, month, 1)
+    month_end = date(year, month, calendar.monthrange(year, month)[1])
+
+    # 1) закрытый месячный тариф-период (конверсионный канон на месяц)
+    closed = (
+        db.query(Tariff)
+        .filter(
+            Tariff.services_type_id == services_type_id,
+            Tariff.valid_from <= period_end,
+            Tariff.valid_to != None,  # noqa: E711
+            Tariff.valid_to >= month_start,
+        )
+        .order_by(Tariff.valid_from.desc(), Tariff.id.desc())
+        .first()
+    )
+    if closed is not None:
+        return closed
+
+    # 2) открытая ставка (актуальная база услуги)
+    reg = (
+        db.query(Tariff)
+        .filter(
+            Tariff.services_type_id == services_type_id,
+            Tariff.valid_to == None,  # noqa: E711
+            Tariff.valid_from <= period_end,
+            Tariff.is_oneoff == False,  # noqa: E712
+        )
+        .order_by(Tariff.valid_from.desc(), Tariff.id.desc())
+        .first()
+    )
+    if reg is not None:
+        return reg
+
+    # 3) legacy (прод до конверсии): разовый-месячный тариф с valid_from в месяце period_end
+    return (
+        db.query(Tariff)
+        .filter(
+            Tariff.services_type_id == services_type_id,
+            Tariff.is_oneoff == True,  # noqa: E712
+            Tariff.valid_from >= month_start,
+            Tariff.valid_from <= month_end,
+        )
+        .order_by(Tariff.valid_from.desc(), Tariff.id.desc())
+        .first()
+    )
+
+
 def calculate_accrual_for_account_service(
     db: Session, account: Account, service_type: ServiceType, period_end: date
 ) -> dict[str, Any] | None:
@@ -423,13 +537,11 @@ def calculate_accrual_for_account_service(
     if not apartment:
         return None
 
-    tariff = db.query(Tariff).filter(
-        Tariff.services_type_id == service_type.id,
-        Tariff.valid_from <= period_end,
-        Tariff.is_oneoff == False,  # noqa: E712 — в месячный пересчёт берём только регулярные
-    ).order_by(Tariff.valid_from.desc()).first()
+    # 2.18: месяц берёт «разовый» тариф (если он задан на месяц period_end) и лишь
+    # при его отсутствии — последний регулярный (см. resolve_tariff_for_accrual_period).
+    tariff = resolve_tariff_for_accrual_period(db, service_type.id, period_end)
 
-    if not tariff:
+    if tariff is None:
         return None
 
     meter = db.query(Meter).filter(
@@ -483,6 +595,7 @@ def calculate_accrual_for_account_service(
             "services_type_id_label": service_type.services_type,
             "tariff_id": tariff.id,
             "tariff_id_label": f"{float(tariff.price)} ₸ × {square} м²",
+            "tariff_is_oneoff": bool(tariff.is_oneoff),
             "current_reading_id": current_reading_id,
             "past_reading_value": past_reading,
             "current_reading_value": current_reading,
@@ -500,6 +613,7 @@ def calculate_accrual_for_account_service(
             "services_type_id_label": service_type.services_type,
             "tariff_id": tariff.id,
             "tariff_id_label": f"{float(tariff.price)} ₸",
+            "tariff_is_oneoff": bool(tariff.is_oneoff),
             "current_reading_id": current_reading_id,
             "past_reading_value": past_reading,
             "current_reading_value": current_reading,
@@ -518,6 +632,7 @@ def calculate_accrual_for_account_service(
         "services_type_id_label": service_type.services_type,
         "tariff_id": tariff.id,
         "tariff_id_label": f"{float(tariff.price)} ₸ × {consumption}",
+        "tariff_is_oneoff": bool(tariff.is_oneoff),
         "current_reading_id": current_reading_id,
         "past_reading_value": past_reading,
         "current_reading_value": current_reading,
