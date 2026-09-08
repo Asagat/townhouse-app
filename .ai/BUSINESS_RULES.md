@@ -1,6 +1,6 @@
-# Business Rules: Townhouse App
+# Бизнес-правила: Townhouse App
 
-## Rule: Server-Side Authority
-- **Description:** All calculations affecting financial data, operational statuses, or permissions must be computed and validated on the backend.
-- **Why:** Prevents client-side tampering and data inconsistency.
-- **Source:** Core system invariants.
+## Правило: авторитет на стороне сервера
+- **Описание:** Все расчёты, влияющие на финансовые данные, операционные статусы или права доступа, должны выполняться и проверяться на стороне бэкенда.
+- **Почему:** Предотвращает подмену данных на клиенте и рассинхронизацию данных.
+- **Источник:** базовые инварианты системы.

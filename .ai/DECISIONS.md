@@ -1,13 +1,13 @@
-# ADR-001: Initial Architecture Stack Selection
+# Решение ADR-001: выбор исходного стека архитектуры
 
-- **Date:** 2026-03-01
-- **Status:** Accepted
+- **Дата:** 2026-03-01
+- **Статус:** принято
 
-## Decision
-Adopted FastAPI, React (Refine framework), PostgreSQL, and Docker deployment inside Proxmox LXC containers.
+## Решение
+Приняты FastAPI, React (фреймворк Refine), PostgreSQL и развёртывание через Docker внутри LXC-контейнеров Proxmox.
 
-## Context
-Need for a rapid, scalable, and maintainable operational management application.
+## Контекст
+Требовалось быстрое, масштабируемое и сопровождаемое приложение для операционного управления.
 
-## Why
-Provides strong typing, high performance, robust asynchronous API capabilities, and structured frontend administration out of the box.
+## Почему это решение
+Даёт строгую типизацию, высокую производительность, устойчивые асинхронные возможности API и готовую структуру администрирования интерфейса «из коробки».

@@ -1,5 +1,5 @@
-# Development Guide: Townhouse App
+# Руководство по разработке: Townhouse App
 
-- **Getting Started & Launch:** Managed via Docker Compose / local virtual environments.
-- **Running Tests:** Execute `pytest` inside the backend environment.
-- **Migrations:** Managed via Alembic (`alembic revision --autogenerate`, `alembic upgrade head`).
+- **Начало работы и запуск:** управляется через Docker Compose / локальные виртуальные окружения.
+- **Запуск тестов:** выполнять `pytest` внутри окружения бэкенда.
+- **Миграции:** управляются через Alembic (`alembic revision --autogenerate`, `alembic upgrade head`).
