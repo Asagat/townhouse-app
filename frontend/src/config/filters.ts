@@ -104,7 +104,7 @@ export const FILTER_SELECT_OPTIONS: Record<string, { value: string; label: strin
     ],
     doc_kind: [
         { value: "monthly", label: "Регулярные" },
-        { value: "oneoff", label: "Разовые/персональные" },
+        { value: "oneoff", label: "Персональные" },
     ],
 };
 

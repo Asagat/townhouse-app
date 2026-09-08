@@ -94,7 +94,7 @@ export const OneOffAccrualsEditModal = ({
                 },
                 onError: (err: any) => {
                     message.error(
-                        err?.response?.data?.detail ?? "Не удалось сохранить правки разовых сборов",
+                        err?.response?.data?.detail ?? "Не удалось сохранить правки персонального начисления",
                     );
                     setSaving(false);
                 },
@@ -131,8 +131,8 @@ export const OneOffAccrualsEditModal = ({
         <Modal
             title={
                 readonly
-                    ? "Просмотр разовых/персональных начислений"
-                    : "Редактирование разовых/персональных начислений"
+                    ? "Просмотр персонального начисления"
+                    : "Редактирование персонального начисления"
             }
             open={open}
             onCancel={onClose}
@@ -162,8 +162,8 @@ export const OneOffAccrualsEditModal = ({
             }
         >
             <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                Разовые сборы начисляются фиксированными суммами (без показаний/потребления) —
-                здесь правится только сумма строки.
+                Персональные начисления задаются по конкретным л/с фиксированной суммой
+                (без показаний/потребления) — здесь правится только сумма строки.
             </Typography.Paragraph>
             <Table
                 rowKey="id"
