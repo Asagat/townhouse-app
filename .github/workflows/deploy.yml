@@ -53,6 +53,12 @@ jobs:
       contents: read
       actions: read
     steps:
+      # Локальный composite action (.github/actions/deploy) требует код в workspace:
+      # без actions/checkout запуск падает с «Can't find action.yml ... checkout».
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - name: Deploy
         uses: ./.github/actions/deploy
         with:
@@ -74,6 +80,13 @@ jobs:
       contents: read
       actions: read
     steps:
+      # Локальный composite action (.github/actions/deploy) требует код в workspace:
+      # без actions/checkout запуск падает с «Can't find action.yml ... checkout».
+      # ref: при push по тегу v* — сам тег; при ручном запуске — выбранный inputs.ref.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.ref }}
       - name: Deploy
         uses: ./.github/actions/deploy
         with:
