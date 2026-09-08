@@ -115,7 +115,8 @@ export const ExpenseReport = () => {
 
             <Card style={{ marginBottom: 16 }}>
                 <Space wrap>
-                    <RangePicker value={range as any} onChange={(v: any) => setRange(v)} allowClear />
+                    <RangePicker value={range as any} onChange={(v: any) => setRange(v)} allowClear
+                                format="DD.MM.YYYY" />
                     <Select
                         style={{ width: 200 }}
                         placeholder="Все кассы"

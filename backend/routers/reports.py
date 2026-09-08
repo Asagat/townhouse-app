@@ -209,7 +209,10 @@ def cash_register_report_pdf(
     content = spdf.build_cash_register_report_pdf(data)
     return StreamingResponse(
         io.BytesIO(content), media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=cash_register_report.pdf"},
+        headers={
+            "Content-Disposition": "attachment; filename=cash_register_report.pdf",
+            "Content-Length": str(len(content)),
+        },
     )
 
 
@@ -321,32 +324,44 @@ def expense_report_pdf(
     content = spdf.build_expense_report_pdf(data)
     return StreamingResponse(
         io.BytesIO(content), media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=expense_report.pdf"},
+        headers={
+            "Content-Disposition": "attachment; filename=expense_report.pdf",
+            "Content-Length": str(len(content)),
+        },
     )
 
 
 # --- Отчёт по должникам ---
 
 
-def _account_balance_metrics(db: Session, account_id: int) -> dict:
+def _account_balance_metrics(db: Session, account_id: int, until: datetime | None = None) -> dict:
     """Метрики баланса по л/с: начислено/списано по услугам, внесено, долг/переплата.
 
     Согласовано с build_account_statement: долг = начислено − списано (>=0),
-    переплата = внесено − списано (>=0).
+    переплата = внесено − списано (>=0). Если передан `until` — рассчитывается срез
+    «на дату»: учитываются только строки регистров с operation_date <= until.
     """
+    # Срез «на дату»: operation_date в accounts_register = дата периода начисления
+    # (для начислений) / дата платёжного документа (для оплат); в cash_register —
+    # дата операции кассы (документ или начисление).
+    cutoff = " AND operation_date <= :until" if until is not None else ""
+
     def _one(q: str) -> float:
-        return float(db.execute(text(q), {"a": account_id}).scalar() or 0.0)
+        params = {"a": account_id}
+        if until is not None:
+            params["until"] = until
+        return float(db.execute(text(q), params).scalar() or 0.0)
 
     accrued = _one(
         "SELECT COALESCE(SUM(income),0) FROM accounts_register "
-        "WHERE account_id=:a AND services_type_id IS NOT NULL"
+        "WHERE account_id=:a AND services_type_id IS NOT NULL" + cutoff
     )
     paid = _one(
         "SELECT COALESCE(SUM(expense),0) FROM accounts_register "
-        "WHERE account_id=:a AND services_type_id IS NOT NULL"
+        "WHERE account_id=:a AND services_type_id IS NOT NULL" + cutoff
     )
     available = _one(
-        "SELECT COALESCE(SUM(income - expense),0) FROM cash_register WHERE account_id=:a"
+        "SELECT COALESCE(SUM(income - expense),0) FROM cash_register WHERE account_id=:a" + cutoff
     )
     debt = max(0.0, accrued - paid)
     overpayment = max(0.0, available - paid)
@@ -359,8 +374,13 @@ def _account_balance_metrics(db: Session, account_id: int) -> dict:
     }
 
 
-def build_debtors_report(db: Session, min_amount: float = 0.0) -> dict:
-    """Список должников: активные л/с с положительным долгом, по убыванию долга."""
+def build_debtors_report(db: Session, min_amount: float = 0.0, as_of: str | None = None) -> dict:
+    """Список должников: активные л/с с положительным долгом.
+
+    Если задана `as_of` (YYYY-MM-DD) — долг считается по состоянию на конец этого дня
+    (учитываются только начисления и оплаты с operation_date <= этой даты).
+    """
+    until = _parse_day(as_of, is_start=False) if as_of else None
     accounts = db.execute(text(
         "SELECT a.id, a.account_number, a.account_name, ap.apartment_number AS kv, "
         "       ap.address, o.full_name AS owner FROM accounts a "
@@ -371,7 +391,7 @@ def build_debtors_report(db: Session, min_amount: float = 0.0) -> dict:
 
     rows = []
     for acc in accounts:
-        m = _account_balance_metrics(db, int(acc[0]))
+        m = _account_balance_metrics(db, int(acc[0]), until)
         if m["debt"] > min_amount:
             rows.append({
                 "account_id": int(acc[0]),
@@ -387,29 +407,37 @@ def build_debtors_report(db: Session, min_amount: float = 0.0) -> dict:
             })
     rows.sort(key=lambda r: (r["apartment_number"] is None, r["apartment_number"] if r["apartment_number"] is not None else 0))
     total_debt = round(sum(r["debt"] for r in rows), 2)
-    return {"rows": rows, "total_debt": total_debt, "count": len(rows)}
+    result = {"rows": rows, "total_debt": total_debt, "count": len(rows)}
+    if as_of:
+        result["as_of"] = as_of
+    return result
 
 
 @router.get("/reports/debtors")
 def debtors_report(
+    as_of: str | None = Query(None, description="Срез на дату YYYY-MM-DD (по умолчанию — на сейчас)"),
     db: Session = Depends(get_db),
     _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
 ):
-    """Отчёт по должникам: активные л/с с долгом, по убыванию."""
-    return build_debtors_report(db)
+    """Отчёт по должникам: активные л/с с долгом. as_of — считать долг на указанную дату."""
+    return build_debtors_report(db, as_of=as_of)
 
 
 @router.get("/reports/debtors/pdf")
 def debtors_report_pdf(
+    as_of: str | None = Query(None, description="Срез на дату YYYY-MM-DD (по умолчанию — на сейчас)"),
     db: Session = Depends(get_db),
     _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
 ):
-    """PDF «Отчёт по должникам» (2.16)."""
-    data = build_debtors_report(db)
+    """PDF «Отчёт по должникам». as_of — считать долг на указанную дату."""
+    data = build_debtors_report(db, as_of=as_of)
     content = spdf.build_debtors_report_pdf(data)
     return StreamingResponse(
         io.BytesIO(content), media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=debtors_report.pdf"},
+        headers={
+            "Content-Disposition": "attachment; filename=debtors_report.pdf",
+            "Content-Length": str(len(content)),
+        },
     )
 
 
@@ -526,7 +554,10 @@ def statement_report_pdf(
     return StreamingResponse(
         io.BytesIO(pdf),
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\"",
+            "Content-Length": str(len(pdf)),
+        },
     )
 
 

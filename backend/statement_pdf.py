@@ -380,8 +380,10 @@ def build_debtors_report_pdf(data: dict) -> bytes:
     total = (["Итого", "", "", "", "", _money(data.get("total_debt"))]
              if data.get("rows") else None)
     sections = [("Должники", headers, widths, rows, total)] if rows else []
-    return _report_pdf("Отчёт по должникам", [f"Должников: {data.get('count', 0)}"],
-                       False, sections)
+    subtitle = [f"Должников: {data.get('count', 0)}"]
+    if data.get("as_of"):
+        subtitle.append(f"По состоянию на: {_short_date(str(data['as_of']))}")
+    return _report_pdf("Отчёт по должникам", subtitle, False, sections)
 
 
 def _period_text(f: str | None, t: str | None) -> str:

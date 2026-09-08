@@ -352,6 +352,7 @@ export const AccrualsCalculationModal = ({
                         style={{ width: 280 }}
                         value={getDefaultTitle(year, month)}
                         readOnly
+                        disabled={readonly}
                     />
                 </div>
                 <div>

@@ -296,6 +296,7 @@ export const BulkReadingsModal = ({
                         style={{ width: 260 }}
                         value={documentTitle}
                         readOnly
+                        disabled={readonly}
                     />
                 </div>
                 <div>

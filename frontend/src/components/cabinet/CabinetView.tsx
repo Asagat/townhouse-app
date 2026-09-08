@@ -5,7 +5,7 @@
 //   - в просмотре администратора (pages/AdminCabinet) — по выбранному счёту (mode='account').
 
 import { useEffect, useState } from "react";
-import { Button, Card, Col, DatePicker, Row, Space, Statistic, Table, Typography } from "antd";
+import { Button, Card, Col, DatePicker, Grid, Row, Space, Statistic, Table, Typography } from "antd";
 import { EyeOutlined, FilePdfOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { ReceiptViewModal } from "../receipts/ReceiptViewModal";
@@ -116,6 +116,9 @@ export const CabinetView = ({
 }) => {
     const houseExpensesEnabled = houseExpenses === true;
     const [viewId, setViewId] = useState<number | undefined>(undefined);
+    // На мобильном «Просмотр квитанции» в виде широкой HTML-«PDF» не показываем —
+    // остаётся только кнопка «PDF» (скачивание документа).
+    const mobile = Grid.useBreakpoint().md === false;
     const m = statement?.metrics;
     const accountId = statement?.account?.id;
 
@@ -185,12 +188,14 @@ export const CabinetView = ({
         {
             title: "Действия",
             key: "actions",
-            width: 220,
+            width: mobile ? 110 : 220,
             render: (_: unknown, r: ReceiptRow) => (
                 <Space>
-                    <Button size="small" onClick={() => setViewId(r.id)}>
-                        <EyeOutlined /> Просмотр
-                    </Button>
+                    {!mobile && (
+                        <Button size="small" onClick={() => setViewId(r.id)}>
+                            <EyeOutlined /> Просмотр
+                        </Button>
+                    )}
                     <Button
                         size="small"
                         type="primary"

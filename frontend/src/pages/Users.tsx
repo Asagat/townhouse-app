@@ -1,9 +1,13 @@
 // src/pages/Users.tsx
 // Управление пользователями и их ролями (только администратор).
+// Интерфейс единой компоновки списков (см. GenericList): без колонки «Действия»
+// в строках — запись выделяется (radio), а действия записи «Редактировать»/«Удалить»
+// показаны иконками с подсказками под заголовком слева. Отдельного «Просмотра» нет.
 
 import { useEffect, useState } from "react";
-import { Table, Button, Space, Modal, Form, Input, Select, Switch, Popconfirm, message, Tag } from "antd";
-import { PlusOutlined } from "@ant-design/icons";
+import type { CSSProperties } from "react";
+import { Table, Button, Space, Tooltip, Modal, Form, Input, Select, Switch, Popconfirm, message, Tag } from "antd";
+import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import { http, apiUrl } from "../auth/http";
 
 interface UserRow {
@@ -33,11 +37,29 @@ const roleColor: Record<string, string> = {
     auditor: "cyan",
 };
 
+// Иконка действия в стиле GenericList.iconButton (акцент, без заливки).
+const actionIconStyle: CSSProperties = {
+    color: "#22ae2e",
+    borderColor: "#22ae2e",
+};
+
+const actionIconBtn = (onClick: () => void, danger = false, label?: string) => (
+    <Tooltip title={label}>
+        <Button
+            icon={danger ? <DeleteOutlined /> : <EditOutlined />}
+            danger={danger}
+            style={danger ? undefined : actionIconStyle}
+            onClick={onClick}
+        />
+    </Tooltip>
+);
+
 export const Users = () => {
     const [rows, setRows] = useState<UserRow[]>([]);
     const [loading, setLoading] = useState(false);
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<UserRow | null>(null);
+    const [selectedKey, setSelectedKey] = useState<number | null>(null);
     const [form] = Form.useForm();
 
     const load = async () => {
@@ -55,6 +77,15 @@ export const Users = () => {
     useEffect(() => {
         load();
     }, []);
+
+    // Если выделенная запись исчезла (удалена/перезагружена) — снимаем выбор.
+    useEffect(() => {
+        if (selectedKey != null && !rows.some((r) => r.id === selectedKey)) {
+            setSelectedKey(null);
+        }
+    }, [rows, selectedKey]);
+
+    const selectedRecord = rows.find((r) => r.id === selectedKey) ?? null;
 
     const openCreate = () => {
         setEditing(null);
@@ -116,24 +147,36 @@ export const Users = () => {
             key: "is_active",
             render: (v: boolean) => (v ? "Да" : "Нет"),
         },
-        {
-            title: "Действия",
-            key: "actions",
-            render: (_: unknown, r: UserRow) => (
-                <Space>
-                    <Button size="small" onClick={() => openEdit(r)}>Изменить</Button>
-                    <Popconfirm title="Удалить пользователя?" onConfirm={() => handleDelete(r)}>
-                        <Button size="small" danger>Удалить</Button>
-                    </Popconfirm>
-                </Space>
-            ),
-        },
     ];
 
     return (
         <div style={{ background: "#fff", padding: 30, borderRadius: 12, border: "1px solid #d9eedc" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                <h1 style={{ color: "#14501d", margin: 0 }}>Пользователи и права</h1>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 20 }}>
+                <div>
+                    <h1 style={{ color: "#14501d", margin: 0 }}>Пользователи и права</h1>
+                    <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                        {selectedRecord ? (
+                            <>
+                                {actionIconBtn(() => openEdit(selectedRecord), false, "Редактировать")}
+                                <Popconfirm title="Удалить пользователя?" onConfirm={() => handleDelete(selectedRecord)}>
+                                    {actionIconBtn(() => undefined, true, "Удалить")}
+                                </Popconfirm>
+                                <span style={{ color: "#888", fontSize: 12, marginLeft: 4 }}>
+                                    Запись № {selectedRecord.id}
+                                </span>
+                            </>
+                        ) : (
+                            <Space>
+                                <Tooltip title="Редактировать">
+                                    <Button icon={<EditOutlined />} disabled />
+                                </Tooltip>
+                                <Tooltip title="Удалить">
+                                    <Button icon={<DeleteOutlined />} danger disabled />
+                                </Tooltip>
+                            </Space>
+                        )}
+                    </div>
+                </div>
                 <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
                     Создать пользователя
                 </Button>
@@ -145,6 +188,15 @@ export const Users = () => {
                 columns={columns}
                 loading={loading}
                 pagination={false}
+                rowSelection={{
+                    type: "radio",
+                    selectedRowKeys: selectedKey != null ? [selectedKey] : [],
+                    onChange: (keys) => setSelectedKey((keys[0] as number) ?? null),
+                }}
+                onRow={(record) => ({
+                    onClick: () => setSelectedKey(record.id),
+                    style: { cursor: "pointer" },
+                })}
             />
 
             <Modal

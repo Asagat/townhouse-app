@@ -47,23 +47,23 @@ export const authedFetch = (input: RequestInfo | URL, init: RequestInit = {}): P
 };
 
 /**
- * Открывает защищённый PDF в новой вкладке.
+ * Открывает/скачивает защищённый PDF.
  *
- * Простой `window.open(url)` не работает: JWT передаётся только заголовком
- * Authorization (см. authedFetch), а в новой вкладке заголовок не добавить —
- * сервер вернул бы 401 «Требуется авторизация». Поэтому:
- *   1) синхронно открываем пустую вкладку (в рамках клика — иначе сработает
- *      блокировщик всплывающих окон);
- *   2) запрашиваем PDF через authedFetch;
- *   3) подставляем blob-URL в уже открытую вкладку.
- * Если вкладка заблокирована — скачиваем файл напрямую (fallback).
+ * JWT передаётся только заголовком Authorization (см. authedFetch), поэтому нельзя
+ * просто `window.open(url)` на рендпоинт — заголовок в новой вкладке не добавить
+ * (был бы 401). Поэтому запрашиваем blob через authedFetch и скачиваем его как файл
+ * <a download href=blob:…> в рамках текущей страницы. Это даёт при нажатии "PDF"
+ * именно скачивание документа, и работает и в iOS-браузерах, и на десктопе.
  */
-export const openAuthorizedPdf = async (url: string, fallbackName = "document.pdf") => {
-    const win = window.open("", "_blank");
+export const downloadAuthorizedPdf = async (url: string, fallbackName = "document.pdf") => {
+    let blobUrl: string | null = null;
+    // Таймаут на генерацию/загрузку отчёта, чтобы кнопка «PDF» не висела
+    // бесконечно, если бэкенд падает при сборке файла или соединение зависло.
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 60_000);
     try {
-        const resp = await authedFetch(url);
+        const resp = await authedFetch(url, { signal: controller.signal });
         if (!resp.ok) {
-            win?.close();
             let detail = `Не удалось загрузить PDF (${resp.status})`;
             try {
                 const body = await resp.json();
@@ -75,23 +75,44 @@ export const openAuthorizedPdf = async (url: string, fallbackName = "document.pd
             return;
         }
         const blob = await resp.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        // Освобождаем blob после того, как вкладка успеет открыть PDF.
-        const revoke = () => URL.revokeObjectURL(objectUrl);
-        if (win) {
-            win.location.href = objectUrl;
-        } else {
-            // Всплывающее окно заблокировано — скачиваем файл напрямую.
-            const a = document.createElement("a");
-            a.href = objectUrl;
-            a.download = fallbackName;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
+        // Предохранитель: если сервер вернул не-PDF (часто это HTML/504/ошибка),
+        // не скачиваем мусор — показываем внятное сообщение.
+        const type = (blob.type || "").toLowerCase();
+        if (blob.size === 0 || (type && !type.includes("pdf")) && resp.status === 200) {
+            message.error("PDF не сформирован (пустой/некорректный ответ). Попробуйте позже.");
+            return;
         }
-        setTimeout(revoke, 60_000);
+        // Экспонируем blob как файл-ссылку и скачиваем её из текущей страницы.
+        // Никаких window.open/about:blank: скачивание идёт только по пользовательской
+        // кнопке и не зависит от новых вкладок (работает и в iOS/WebView).
+        blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = fallbackName || "document.pdf";
+        a.style.display = "none";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        // Даём браузеру время начать скачивание, затем освобождаем объектный URL.
+        window.setTimeout(() => URL.revokeObjectURL(blobUrl as string), 30_000);
+        blobUrl = null;
     } catch (e) {
-        win?.close();
-        message.error(e instanceof Error ? e.message : "Не удалось загрузить PDF");
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+        const aborted = e instanceof DOMException && e.name === "AbortError";
+        message.error(
+            aborted
+                ? "Не удалось сформировать PDF: превышен таймаут. Повторите попытку."
+                : e instanceof Error
+                  ? e.message
+                  : "Не удалось загрузить PDF",
+        );
+    } finally {
+        window.clearTimeout(timer);
     }
 };
+
+/**
+ * Скачивает защищённый PDF (синоним downloadAuthorizedPdf) — чтобы не править все
+ * точки вызова. Нажатие на «PDF»/«Скачать» инициирует скачивание документа.
+ */
+export const openAuthorizedPdf = downloadAuthorizedPdf;

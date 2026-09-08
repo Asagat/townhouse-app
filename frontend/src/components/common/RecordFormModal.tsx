@@ -86,6 +86,26 @@ export const RecordFormModal = ({
         // Reference-поле: показываем не id, а подставленное название связанной записи.
         // Сначала пробуем готовый «*_name»-атрибут из сериализатора, затем вложенный
         // объект по корню поля (например cash_point_id -> record.cash_point.name).
+        // Если у вложенного объекта нет ключа из списка распознаваемых (name/title/…),
+        // но есть собственный скалярный текст (например услугa хранит лейбл под ключом
+        // `services_type`), берём первый непустой скаляр, кроме самого `id`.
+        const pickNestedLabel = (root: string): string | null => {
+            const obj = initialValues?.[root];
+            if (obj == null) return null;
+            if (typeof obj !== "object") {
+                return typeof obj === "string" ? obj : null;
+            }
+            const fromAllowlist = _pickLabel(obj);
+            if (fromAllowlist) return fromAllowlist;
+            for (const key of Object.keys(obj)) {
+                if (key === "id") continue;
+                const v = obj[key];
+                if (v != null && v !== "" && typeof v !== "object") {
+                    return String(v);
+                }
+            }
+            return null;
+        };
         if (field.type === "reference") {
             const nameAttr = `${field.name.replace(/_id$/, "")}_name`;
             const flat = initialValues?.[nameAttr];
@@ -93,7 +113,7 @@ export const RecordFormModal = ({
                 return String(flat);
             }
             const root = field.name.replace(/_id$/, "");
-            const label = _pickLabel(initialValues?.[root]);
+            const label = pickNestedLabel(root);
             if (label) return label;
             // Нет подставленного значения — хотя бы не оставлять связку «голым» id.
             if (raw != null) return String(raw);

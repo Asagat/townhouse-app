@@ -43,17 +43,26 @@ a {
 
 /* --- Просмотр квитанции (максимально похоже на PDF) --- */
 .receipt-preview .ant-table {
-  color: #444444;
+  color: #222222;
 }
 .receipt-preview .ant-table small .ant-table-cell {
   padding: 5px 6px 3px !important;
 }
 .receipt-preview .ant-table-thead > tr > th {
   background: #e6ffea;
-  color: #666666;
+  color: #333333;
   font-weight: 700;
   border-color: #b8b8b8 !important;
   text-align: left;
+}
+/* Все ячейки тела — на непрозрачном фоне (значения не «просвечивают» через
+   hover-подсветку antd), текст контрастный. */
+.receipt-preview .ant-table-tbody > tr > td {
+  background: #ffffff !important;
+  color: #222222 !important;
+}
+.receipt-preview .ant-table-tbody > tr:hover > td {
+  background: #eafaf0 !important;
 }
 .receipt-head-group {
   text-align: center !important;
@@ -63,8 +72,15 @@ a {
 }
 .receipt-row-total td {
   background: #e6ffea !important;
-  color: #666666;
+  color: #111111;
   font-weight: 700;
+}
+/* На узких экранах квитанция не «разъезжается» за ширину окна: внутренняя
+   таблица прокручивается по горизонтали, поля карточки чуть меньше. */
+@media (max-width: 640px) {
+  .receipt-preview {
+    padding: 16px 10px !important;
+  }
 }
 
 /* --- Режим просмотра формы: текст в disabled-полях остаётся контрастным, а фон

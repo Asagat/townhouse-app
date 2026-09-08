@@ -50,6 +50,7 @@ import {
     type StoredColumnSettings,
 } from "../auth/preferences";
 import { getColumnsForResource } from "../config/columns";
+import { cellAlignStyle, headerAlignStyle } from "../config/columnAlign";
 import { allResources } from "../config/menu";
 import {
     getDefaultResourceFilters,
@@ -996,7 +997,11 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             // Без всплывающей подсказки сортировки: оверлей antd над заголовком
             // перекрывает кнопки панели записи (например «Просмотр») над таблицей.
             showSorterTooltip: false,
-            onHeaderCell: () => headerResizeProps("id", setWidth),
+            onHeaderCell: (): any => ({
+                ...headerResizeProps("id", setWidth),
+                style: headerAlignStyle(),
+            }),
+            onCell: (): any => ({ style: cellAlignStyle("id") }),
             // Сортировка по умолчанию — на «Периоде» (см. выше); стрелку на ID не ставим.
             ...(defaultSortDescPeriod ? {} : { defaultSortOrder: 'descend' as const }),
         },
@@ -1022,10 +1027,14 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 // Без всплывающей подсказки сортировки: оверлей antd над заголовком
                 // перекрывает кнопки панели записи над таблицей.
                 showSorterTooltip: false,
-                onHeaderCell: () => ({
+                onHeaderCell: (): any => ({
                     ...headerResizeProps(col.key, setWidth),
-                    ...(sortable ? { style: { cursor: 'pointer' } } : {}),
+                    style: {
+                        ...headerAlignStyle(),
+                        ...(sortable ? { cursor: "pointer" } : {}),
+                    },
                 }),
+                onCell: (): any => ({ style: cellAlignStyle(col.key) }),
                 // Подсветка сортировки по умолчанию для регистра начислений.
                 ...(defaultSortDescPeriod && col.key === 'accrual_date'
                     ? { defaultSortOrder: 'descend' as const }

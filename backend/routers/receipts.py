@@ -394,12 +394,18 @@ def get_receipt_pdf(
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
             media_type="application/pdf",
-            headers={"Content-Disposition": f"inline; filename=\"{filename}\""},
+            headers={
+                "Content-Disposition": f"inline; filename=\"{filename}\"",
+                "Content-Length": str(len(pdf_bytes)),
+            },
         )
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\"",
+            "Content-Length": str(len(pdf_bytes)),
+        },
     )
 
 
