@@ -96,6 +96,15 @@ export const AccrualsCalculationModal = ({
     const [showTariffNotes, setShowTariffNotes] = useState(false);
     const navigate = useNavigate();
 
+    // Единица №3: внесённые «ставки месяца» (другая ставка на выбранный месяц),
+    // отправляются как draft_tariffs на сервер при сохранении.
+    const [draftTariffs, setDraftTariffs] = useState<
+        Array<{ services_type_id: number; price: number; comment: string }>
+    >([]);
+    const [draftSvc, setDraftSvc] = useState<number | undefined>(undefined);
+    const [draftPrice, setDraftPrice] = useState<number | undefined>(undefined);
+    const [draftReason, setDraftReason] = useState<string>("");
+
     const { refetch, isFetching } = useCustom<{ rows: AccrualPreviewRow[] }>({
         url: `${apiUrl}/accruals_register/calculate`,
         method: "get",
@@ -162,6 +171,10 @@ export const AccrualsCalculationModal = ({
             setRows([]);
             setSelectedKeys([]);
             setComment("");
+            setDraftTariffs([]);
+            setDraftSvc(undefined);
+            setDraftPrice(undefined);
+            setDraftReason("");
             fetchDocumentDetails();
         } else {
             const n = dayjs();
@@ -170,6 +183,10 @@ export const AccrualsCalculationModal = ({
             setRows([]);
             setSelectedKeys([]);
             setPendingSelection(null);
+            setDraftTariffs([]);
+            setDraftSvc(undefined);
+            setDraftPrice(undefined);
+            setDraftReason("");
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, isEditMode, documentId]);
@@ -198,6 +215,13 @@ export const AccrualsCalculationModal = ({
             services_type_id: row.services_type_id,
         }));
 
+        // 2.18: месячное подтверждение — если оператор внёс другие ставки месяца.
+        const draft_tariffs = draftTariffs.map((d) => ({
+            services_type_id: d.services_type_id,
+            price: d.price,
+            comment: d.comment,
+        }));
+
         // Отправляем только идентификаторы выбранных строк — сумма, потребление, тариф и показания
         // будут пересчитаны на сервере на момент сохранения.
         if (isEditMode) {
@@ -209,6 +233,7 @@ export const AccrualsCalculationModal = ({
                         accrual_date: `${year}-${String(month).padStart(2, "0")}-01`,
                         selections,
                         comment: comment.trim() || null,
+                        draft_tariffs,
                     },
                 },
                 {
@@ -233,7 +258,7 @@ export const AccrualsCalculationModal = ({
                 {
                     url: `${apiUrl}/accruals_register/generate`,
                     method: "post",
-                    values: { year, month, selections },
+                    values: { year, month, selections, draft_tariffs },
                 },
                 {
                     onSuccess: (response) => {
@@ -468,6 +493,89 @@ export const AccrualsCalculationModal = ({
                         columns={tariffNotesColumns}
                         scroll={{ y: 200 }}
                     />
+                    <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <Select
+                            placeholder="Услуга"
+                            style={{ width: 220 }}
+                            value={draftSvc}
+                            onChange={(v) => setDraftSvc(v)}
+                            options={serviceTariffs.map((t) => ({
+                                value: t.services_type_id,
+                                label: t.service_label,
+                            }))}
+                        />
+                        <InputNumber
+                            placeholder="Новая ставка месяца (₸)"
+                            min={0}
+                            style={{ width: 170 }}
+                            value={draftPrice}
+                            onChange={(v) => setDraftPrice(v === null || v === undefined ? undefined : Number(v))}
+                        />
+                        <Input.TextArea
+                            rows={1}
+                            style={{ width: 280 }}
+                            placeholder="Примечание (причина изменения)"
+                            value={draftReason}
+                            onChange={(e) => setDraftReason(e.target.value)}
+                        />
+                        <Button
+                            size="small"
+                            type="primary"
+                            disabled={!(draftSvc && draftPrice)}
+                            onClick={() => {
+                                if (!draftSvc || !draftReason.trim()) {
+                                    message.error(
+                                        draftSvc && draftPrice
+                                            ? "Укажите Примечание (причину изменения ставки)"
+                                            : "Выберите услугу и введите ставку месяца",
+                                    );
+                                    return;
+                                }
+                                setDraftTariffs((prev) => {
+                                    const rest = prev.filter((d) => d.services_type_id !== draftSvc);
+                                    return [
+                                        ...rest,
+                                        {
+                                            services_type_id: draftSvc,
+                                            price: Number(draftPrice),
+                                            comment: draftReason.trim(),
+                                        },
+                                    ];
+                                });
+                                setDraftPrice(undefined);
+                                setDraftReason("");
+                                setDraftSvc(undefined);
+                            }}
+                        >
+                            Ввести как ставку месяца
+                        </Button>
+                    </div>
+                    {draftTariffs.length > 0 && (
+                        <div style={{ marginTop: 8 }}>
+                            <Space wrap>
+                                {draftTariffs.map((d) => {
+                                    const lbl =
+                                        serviceTariffs.find((t) => t.services_type_id === d.services_type_id)?.service_label ??
+                                        `услуга #${d.services_type_id}`;
+                                    return (
+                                        <Tag
+                                            key={d.services_type_id}
+                                            closable
+                                            color="geekblue"
+                                            onClose={(e) => {
+                                                e.preventDefault();
+                                                setDraftTariffs((prev) =>
+                                                    prev.filter((x) => x.services_type_id !== d.services_type_id),
+                                                );
+                                            }}
+                                        >
+                                            {lbl}: {formatMoney(d.price)} — {d.comment.slice(0, 30)}
+                                        </Tag>
+                                    );
+                                })}
+                            </Space>
+                        </div>
+                    )}
                     <div style={{ marginTop: 8, textAlign: "right" }}>
                         <Button
                             size="small"
