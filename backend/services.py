@@ -296,15 +296,16 @@ TARIFF_STATUS_ARCHIVED = "archived"
 
 
 def retire_tariff_predecessors(
-    db: Session, services_type_id: int, is_oneoff: bool, exclude_tariff_id: int
+    db: Session, services_type_id: int, exclude_tariff_id: int
 ) -> int:
-    """Помечает «Архивным» действующие тарифы той же группы, что и новый.
+    """Помечает «Архивным» действующие тарифы того же вида услуги, что и новый (2.18).
 
-    Группа = (вид услуги, признак разовости): новый регулярный тариф вытесняет
-    предыдущие регулярные того же вида (и аналогично для разовых), чтобы в группе
-    всегда был ровно один «Действующий» — последний по дате. Расчёт начислений
-    от статуса не зависит (он идёт по valid_from/is_oneoff), поэтому архивация
-    безопасна для уже созданных начислений и исторических периодов.
+    Единая лента тарифов по срокам действия: у одного вида услуги «Действующими»
+    остаётся последний (по дате) тариф; предыдущие действующие помечаются
+    «Архивными», когда вводится новый тариф этого вида. Признака разовости больше
+    нет — группой является только вид услуги. Расчёт начислений от статуса не
+    зависит (он идёт по valid_from/valid_to), поэтому архивация безопасна для уже
+    созданных начислений и исторических периодов.
 
     Возвращает количество помеченных тарифов.
     """
@@ -312,7 +313,6 @@ def retire_tariff_predecessors(
         db.query(Tariff)
         .filter(
             Tariff.services_type_id == services_type_id,
-            Tariff.is_oneoff == is_oneoff,
             Tariff.id != exclude_tariff_id,
             Tariff.status == TARIFF_STATUS_ACTIVE,
         )
@@ -326,53 +326,57 @@ def retire_tariff_predecessors(
 
 
 def validate_tariff_invariants(db: Session, tariff: Tariff) -> None:
-    """Серверные правила для «разовых» тарифов на месяц (2.18)
+    """Серверные правила единой ленты тарифов по срокам (2.18).
 
-    1) «Примечание» (comment) у разового тарифа обязательно — объяснить причину разового
-       сбора (без него остаётся непонятно, почему месяц собрали не по регулярной ставке).
-    2) Не может быть двух «Действующих» разовых тарифов одного вида услуги на один месяц
-       valid_from: разовый — единая замена ставки месяца (правильная операция — один
-       тариф с итоговой суммой, а не несколько начислений одного месяца).
+    Правила месяца применяются к «закрытым» тарифам периода (valid_to задан):
+    1) «Примечание» у тарифа-периода обязательно — объяснить причину, почему месяц
+       собран не по открытой базовой ставке (досбор/повышение на месяц и т.п.).
+    2) Не может быть двух «Действующих» закрытых тарифов периода одного вида услуги
+       с пересекающимися сроками действия: тариф периода — единая ставка на свой
+       срок (правильная операция — один тариф с итоговой суммой, а не несколько
+       перекрывающих записей). Открытая база (valid_to = NULL) правил месяца не
+       несёт и при комментарии не обязательна.
 
     Бросает HTTPException(422) при нарушении. Источник истины — бэкенд.
     """
-    if not tariff.is_oneoff:
+    if not tariff.valid_to:  # открытая базовая ставка
+        return
+    if tariff.status == TARIFF_STATUS_ARCHIVED:
         return
 
     if not (tariff.comment or "").strip():
         raise HTTPException(
             status_code=422,
             detail=(
-                "У разового тарифа обязательно заполните «Примечание» — "
-                "объясните причину разового сбора."
+                "У тарифа периода (с датой «Действует до») обязательно заполните "
+                "«Примечание» — объясните причину ставки на этот период."
             ),
         )
 
-    if tariff.status != TARIFF_STATUS_ACTIVE or tariff.valid_from is None:
+    if tariff.valid_from is None or tariff.valid_from >= tariff.valid_to:
         return
-    d = tariff.valid_from
-    month_start = date(d.year, d.month, 1)
-    month_end = date(d.year, d.month, calendar.monthrange(d.year, d.month)[1])
+    vf = tariff.valid_from
+    vt = tariff.valid_to
     clash = (
         db.query(Tariff)
         .filter(
             Tariff.services_type_id == tariff.services_type_id,
-            Tariff.is_oneoff == True,  # noqa: E712
+            Tariff.valid_to != None,  # noqa: E711
             Tariff.status == TARIFF_STATUS_ACTIVE,
-            Tariff.valid_from >= month_start,
-            Tariff.valid_from <= month_end,
+            Tariff.valid_from < vt,
+            Tariff.valid_to > vf,
             Tariff.id != tariff.id,
         )
         .first()
     )
     if clash is not None:
-        month_label = f"{MONTH_NAMES_RU[d.month - 1]} {d.year}"
+        period_label = f"{MONTH_NAMES_RU[clash.valid_from.month - 1]} {clash.valid_from.year}"
         raise HTTPException(
             status_code=422,
             detail=(
-                f"На {month_label} для этого вида услуги уже есть «Действующий» разовый "
-                f"тариф {float(clash.price)} ₸. Оформите разовый сбор единым тарифом "
-                "(итоговой суммой), а не несколькими начислениями одного месяца."
+                f"На {period_label} для этого вида услуги уже есть «Действующий» тариф "
+                f"периода {float(clash.price):g} ₸. Оформите ставку периода единой записью "
+                "(итоговой суммой), а не несколькими перекрывающими тарифами."
             ),
         )
 
@@ -463,7 +467,6 @@ def apply_month_tariff_drafts(
             valid_from=month_start,
             valid_to=month_end,
             comment=comment,
-            is_oneoff=False,
         )
         t.status = TARIFF_STATUS_ACTIVE
         db.add(t)
@@ -562,18 +565,16 @@ def resolve_tariff_for_accrual_period(
 
     У услуги в любой момент действует ровно один «ответственный» тариф периода.
       Приоритет:
-      1) закрытый месячный тариф-период (valid_to задан), покрывающий месяц начисления
-         (конверсионный «канон» повышенной ставки с valid_from <= period_end и
-          valid_to >= первый день месяца);
-      2) открытая (valid_to IS NULL) актуальная ставка с valid_from <= period_end;
-      3) legacy-фоллбэк (прод до миграции 0017/0018, где разовая ставка хранилась
-         признаком is_oneoff): действующий разовый, чей valid_from — в месяце period_end.
+      1) закрытый тариф-период (valid_to задан), покрывающий месяц начисления
+         (с valid_from <= period_end и valid_to >= первый день месяца);
+      2) открытая (valid_to IS NULL) актуальная ставка с valid_from <= period_end.
+
+    Признака разовости (is_oneoff) больше нет — единая запись «ставка + срок».
     """
     year, month = period_end.year, period_end.month
     month_start = date(year, month, 1)
-    month_end = date(year, month, calendar.monthrange(year, month)[1])
 
-    # 1) закрытый месячный тариф-период (конверсионный канон на месяц)
+    # 1) закрытый тариф-период, покрывающий месяц начисления
     closed = (
         db.query(Tariff)
         .filter(
@@ -589,28 +590,12 @@ def resolve_tariff_for_accrual_period(
         return closed
 
     # 2) открытая ставка (актуальная база услуги)
-    reg = (
+    return (
         db.query(Tariff)
         .filter(
             Tariff.services_type_id == services_type_id,
             Tariff.valid_to == None,  # noqa: E711
             Tariff.valid_from <= period_end,
-            Tariff.is_oneoff == False,  # noqa: E712
-        )
-        .order_by(Tariff.valid_from.desc(), Tariff.id.desc())
-        .first()
-    )
-    if reg is not None:
-        return reg
-
-    # 3) legacy (прод до конверсии): разовый-месячный тариф с valid_from в месяце period_end
-    return (
-        db.query(Tariff)
-        .filter(
-            Tariff.services_type_id == services_type_id,
-            Tariff.is_oneoff == True,  # noqa: E712
-            Tariff.valid_from >= month_start,
-            Tariff.valid_from <= month_end,
         )
         .order_by(Tariff.valid_from.desc(), Tariff.id.desc())
         .first()
@@ -630,8 +615,8 @@ def calculate_accrual_for_account_service(
     if not apartment:
         return None
 
-    # 2.18: месяц берёт «разовый» тариф (если он задан на месяц period_end) и лишь
-    # при его отсутствии — последний регулярный (см. resolve_tariff_for_accrual_period).
+    # 2.18: ставку месяца даёт тариф периода (закрытый на месяц) либо, при его
+    # отсутствии, открытая текущая ставка услуги (см. resolve_tariff_for_accrual_period).
     tariff = resolve_tariff_for_accrual_period(db, service_type.id, period_end)
 
     if tariff is None:
@@ -688,7 +673,6 @@ def calculate_accrual_for_account_service(
             "services_type_id_label": service_type.services_type,
             "tariff_id": tariff.id,
             "tariff_id_label": f"{float(tariff.price)} ₸ × {square} м²",
-            "tariff_is_oneoff": bool(tariff.is_oneoff),
             "current_reading_id": current_reading_id,
             "past_reading_value": past_reading,
             "current_reading_value": current_reading,
@@ -706,7 +690,6 @@ def calculate_accrual_for_account_service(
             "services_type_id_label": service_type.services_type,
             "tariff_id": tariff.id,
             "tariff_id_label": f"{float(tariff.price)} ₸",
-            "tariff_is_oneoff": bool(tariff.is_oneoff),
             "current_reading_id": current_reading_id,
             "past_reading_value": past_reading,
             "current_reading_value": current_reading,
@@ -725,7 +708,6 @@ def calculate_accrual_for_account_service(
         "services_type_id_label": service_type.services_type,
         "tariff_id": tariff.id,
         "tariff_id_label": f"{float(tariff.price)} ₸ × {consumption}",
-        "tariff_is_oneoff": bool(tariff.is_oneoff),
         "current_reading_id": current_reading_id,
         "past_reading_value": past_reading,
         "current_reading_value": current_reading,

@@ -233,7 +233,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         },
         {"name": "price", "label": "Цена", "type": "decimal", "required": True},
         {"name": "valid_from", "label": "Действует с", "type": "date", "required": True},
-        {"name": "is_oneoff", "label": "Разовый (заменяет регулярную ставку на месяц действия)", "type": "boolean", "required": False},
+        {"name": "valid_to", "label": "Действует до (пусто = текущая ставка)", "type": "date", "required": False},
         {"name": "comment", "label": "Примечание", "type": "text", "required": False},
     ],
     "meters": [

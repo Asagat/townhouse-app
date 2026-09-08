@@ -89,47 +89,39 @@ def test_meter_tariff_uses_consumption(db, account_factory):
     assert result["amount"] == 10.0 * 60.0  # тариф × потребление
 
 
-def test_oneoff_on_period_takes_priority_over_regular(db, account_factory):
-    """ 2.18: разовый тариф услуги действует на месяц своего valid_from
-    и подменяет регулярный ровно в этом месяце; в соседние месяцы начисляется
-    регулярный. (Раньше разовый вовсе исключался из месячного расчёта — поэтому
-    спец-сбор «уходил в долг»: показывался регулярный тариф.)"""
-    rec = account_factory("rof")
+def test_period_tariff_covering_month_takes_priority_over_open(db, account_factory):
+    """ 2.18: закрытый тариф-период услуги действует на тот месяц, который он
+    покрывает своими valid_from..valid_to, и подменяет открытую базовую ставку
+    ровно в этом месяце; в соседние месяцы начисляется открытая база. (Признака
+    разовости больше нет — ставка = запись «ставка + срок».)"""
+    rec = account_factory("rper")
     ttype = _tariff_type(db, "Фиксированный")
-    svc = ServiceType(services_type="__test_Однораз", priority=0, tariff_type_id=ttype.id)
+    svc = ServiceType(services_type="__test_ПериодЗамена", priority=0, tariff_type_id=ttype.id)
     db.add(svc)
     db.flush()
 
-    # Регулярный тариф услуги (обычная месячная ставка).
+    # Открытая база услуги (регулярная ставка, valid_to = NULL).
     regular = Tariff(services_type_id=svc.id,
-                     price=100, valid_from=date(2000, 1, 1), is_oneoff=False)
+                     price=100, valid_from=date(2000, 1, 1))
     db.add(regular)
-    # Разовый тариф той же услуги на апрель 2018 (замена ставки месяца).
-    oneoff = Tariff(services_type_id=svc.id,
-                    price=5000, valid_from=date(2018, 4, 15), is_oneoff=True)
-    db.add(oneoff)
+    # Закрытый тариф-период той же услуги на апрель 2018 (замена ставки месяца).
+    period = Tariff(services_type_id=svc.id,
+                    price=5000, valid_from=date(2018, 4, 1), valid_to=date(2018, 4, 30))
+    db.add(period)
     db.flush()
     db.commit()
     acc = db.get(Account, rec["account_id"])
 
-    # Месяц, на который задан разовый (апрель 2018) — начисляем по разовому.
+    # Месяц, покрытый закрытым тарифом периода (апрель 2018) — начисляем по нему.
     svc_obj = db.get(ServiceType, svc.id)
     in_month = A.calculate_accrual_for_account_service(db, acc, svc_obj, date(2018, 4, 30))
     assert in_month is not None
-    assert in_month["tariff_id"] == oneoff.id   # выбран разовый, не регулярный
+    assert in_month["tariff_id"] == period.id  # выбран закрытый периода, не открытая база
     assert in_month["amount"] == 5000.0
-    assert in_month["tariff_is_oneoff"] is True
 
-    # Соседний месяц без разового (май 2018) — снова регулярный тариф.
-    other_month = A.calculate_accrual_for_account_service(db, acc, svc_obj, date(2018, 5, 31))
-    assert other_month is not None
-    assert other_month["tariff_id"] == regular.id  # регулярный вернулся
-    assert other_month["amount"] == 100.0
-    assert other_month["tariff_is_oneoff"] is False
-
-    # Разовый на будущую дату из другого месяца не «перехватывает» позже идущие
-    # месяцы (даже если valid_from ещё не наступил для начисляемого месяца).
-    jan_2019 = A.calculate_accrual_for_account_service(db, acc, svc_obj, date(2019, 1, 31))
-    assert jan_2019 is not None
-    assert jan_2019["tariff_id"] == regular.id
-    assert jan_2019["amount"] == 100.0
+    # Соседние месяцы без закрытого периода (май 2018, январь 2019) — открытая база.
+    for d in (date(2018, 5, 31), date(2019, 1, 31)):
+        other_month = A.calculate_accrual_for_account_service(db, acc, svc_obj, d)
+        assert other_month is not None
+        assert other_month["tariff_id"] == regular.id  # вернулась открытая база
+        assert other_month["amount"] == 100.0

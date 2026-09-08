@@ -78,6 +78,7 @@ const DATE_KEYS: string[] = [
     "reading_date",
     "accrual_date",
     "valid_from",
+    "valid_to",
     "installed_at",
     "writeoff_date",
 ];
@@ -89,7 +90,7 @@ const DATETIME_KEYS: string[] = [
     "issued_at",
 ];
 
-const BOOL_KEYS: string[] = ["is_active", "is_oneoff"];
+const BOOL_KEYS: string[] = ["is_active"];
 
 // Значения выбора для enum-колонок. value — как ХРАНИТСЯ в БД (для нативных
 // PG-enum это имя члена: in_cash/out_cash/…), label — как показывается в UI

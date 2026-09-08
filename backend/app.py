@@ -585,15 +585,15 @@ async def create_resource_item(
         ) from exc
     db.refresh(item)
 
-    # Тарифы: новый тариф становится «Действующим» в своей группе (вид услуги +
-    # признак разовости), предыдущие действующие той же группы — «Архивными».
+    # Тарифы (2.18): новый тариф становится «Действующим» по своему виду услуги,
+    # предыдущие действующие того же вида — «Архивными».
     if resource == "tariffs":
         if payload.get("status") == TARIFF_STATUS_ARCHIVED:
             item.status = TARIFF_STATUS_ARCHIVED
         else:
             item.status = "active"
             retire_tariff_predecessors(
-                db, item.services_type_id, bool(item.is_oneoff), exclude_tariff_id=item.id
+                db, item.services_type_id, exclude_tariff_id=item.id
             )
         db.commit()
         db.refresh(item)
@@ -660,20 +660,20 @@ async def update_resource_item(
     if "amount" in payload:
         _require_positive_document_amount(resource, item.amount)
 
-    # Тарифы: если тариф «Действующий» и меняется его группа (вид услуги/разовость) —
-    # вытесняем прежних действующих в новой группе (сам тариф остаётся действующим).
+    # Тарифы (2.18): если «Действующий» тариф переносится на другой вид услуги —
+    # вытесняем прежних действующих нового вида (сам тариф остаётся действующим).
     if resource == "tariffs":
         raw_status = payload.get("status")
         if raw_status == TARIFF_STATUS_ARCHIVED:
             item.status = TARIFF_STATUS_ARCHIVED
         elif item.status != TARIFF_STATUS_ARCHIVED and (
-            "services_type_id" in payload or "is_oneoff" in payload
+            "services_type_id" in payload
         ):
             retire_tariff_predecessors(
-                db, item.services_type_id, bool(item.is_oneoff), exclude_tariff_id=item.id
+                db, item.services_type_id, exclude_tariff_id=item.id
             )
-        # 2.18: серверная проверка правил «разовых» тарифов по финальному значению
-        # записи (при изменении цены/месяца/признака/примечания).
+        # 2.18: серверная проверка правил тарифов периода по финальному значению
+        # записи (сроки действия, обязательное «Примечание» у закрытого тарифа).
         validate_tariff_invariants(db, item)
 
     # Аудит: фиксируем автора последнего изменения (п. 2.9).

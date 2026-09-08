@@ -159,6 +159,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'price', label: 'Цена', format: formatMoney },
         { key: 'unit', label: 'Ед. изм.' },
         { key: 'valid_from', label: 'Действует с', format: formatDate },
+        { key: 'valid_to', label: 'Действует до', format: formatDate },
         {
             key: 'status',
             label: 'Статус',
@@ -166,11 +167,6 @@ export const columnsConfig: Record<string, Column[]> = {
         },
         { key: 'services_type.services_type', label: 'Вид услуги' },
         { key: 'tariff_type.name', label: 'Тип тарифа' },
-        {
-            key: 'is_oneoff',
-            label: 'Периодичность',
-            format: (v: any) => (v ? 'Разовый' : 'Регулярный'),
-        },
         { key: 'comment', label: 'Примечание' },
     ],
 
@@ -241,7 +237,7 @@ export const formFieldConfig: Record<string, string[]> = {
     accounts_register: ['account_id', 'services_type_id', 'income', 'expense', 'balance_after'],
     services_type: ['services_type', 'tariff_type_id', 'unit', 'priority'],
     tariff_types: ['name'],
-    tariffs: ['services_type_id', 'price', 'valid_from', 'is_oneoff', 'comment'],
+    tariffs: ['services_type_id', 'price', 'valid_from', 'valid_to', 'comment'],
     meters: ['serial_number', 'apartment_id', 'services_type_id', 'installed_at'],
     meter_readings: ['apartment_id', 'services_type_id', 'reading', 'reading_date'],
     meter_reading_documents: ['title', 'reading_date', 'services_type_id'],

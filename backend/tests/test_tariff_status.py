@@ -1,13 +1,12 @@
 # backend/tests/test_tariff_status.py
-"""Статус тарифа «Действующий/Архивный».
+"""Статус тарифа «Действующий/Архивный» и правила единой ленты по срокам (2.18).
 
-При создании нового тарифа предыдущие «Действующие» той же группы
-(вид услуги + признак разовости) помечаются «Архивными», новый становится
-«Действующим». Регулярные и разовые тарифы одной услуги независимы
-(разовый спец-сбор не вытесняет регулярную ставку и наоборот).
+Признака разовости (is_oneoff) больше нет: у одного вида услуги «Действующим»
+остаётся последний созданный тариф; предыдущие «Действующие» того же вида
+помечаются «Архивными». Закрытый тариф-период (с valid_to) обязан иметь
+«Примечание» и не может пересекаться по срокам с другим «Действующим» тарифом
+периода того же вида услуги.
 """
-
-from datetime import date
 
 from fastapi.testclient import TestClient
 
@@ -33,27 +32,28 @@ def _make_service(db, name: str) -> int:
     return svc.id
 
 
-def test_create_tariff_archives_previous_in_group(db, user_factory):
+def test_create_open_tariff_archives_previous_of_service(db, user_factory):
+    """Открытый тариф одного вида услуги вытесняет предыдущие «Действующие» того
+    же вида (единая лента: статус теперь считается по виду услуги без разряда)."""
     admin = user_factory("tfstatus", UserRole.admin)
-    svc_id = _make_service(db, "__test_Статус")
+    svc_id = _make_service(db, "__test_СтатусЛента")
     db.commit()
     client = TestClient(app)
     h = _headers(admin)
 
-    def create(price, valid_from, oneoff=False, comment=None):
+    def create(price, valid_from, comment=None, valid_to=None):
         payload = {
             "services_type_id": svc_id,
             "price": price,
             "valid_from": valid_from,
-            "is_oneoff": oneoff,
         }
+        if valid_to is not None:
+            payload["valid_to"] = valid_to
+            if comment is None:
+                comment = "причина периода"
         if comment is not None:
             payload["comment"] = comment
-        resp = client.post(
-            "/api/tariffs",
-            headers=h,
-            json=payload,
-        )
+        resp = client.post("/api/tariffs", headers=h, json=payload)
         assert resp.status_code == 201, resp.text
         return resp.json()
 
@@ -62,68 +62,67 @@ def test_create_tariff_archives_previous_in_group(db, user_factory):
         assert resp.status_code == 200, resp.text
         return resp.json()["status"]
 
-    # Регулярные тарифы одной услуги: новый вытесняет предыдущий.
+    # Открытые ставки одного вида услуги: новая вытесняет предыдущую.
     t1 = create(100, "2026-01-01")
     assert t1["status"] == "active"
     t2 = create(200, "2026-06-01")
     assert t2["status"] == "active"
     assert get_status(t1["id"]) == "archived"
 
-    # Разовый тариф той же услуги не трогает регулярные (и наоборот).
-    # Примечание у разового обязательно (2.18) — передаём его.
-    one1 = create(5000, "2026-02-01", oneoff=True, comment="разовый февраль")
-    assert one1["status"] == "active"
-    assert get_status(t2["id"]) == "active"
-
-    # Второй разовый тариф архивирует первый разовый (внутри своей группы).
-    one2 = create(6000, "2026-09-01", oneoff=True, comment="разовый сентябрь")
-    assert one2["status"] == "active"
-    assert get_status(one1["id"]) == "archived"
-    assert get_status(t2["id"]) == "active"
+    # Любой следующий тариф того же вида (в т.ч. закрытый период) вытесняет
+    # прежнего «Действующего» — признака разовости больше нет.
+    t3 = create(300, "2026-07-01", comment="замена месяца июль", valid_to="2026-07-31")
+    assert get_status(t3["id"]) == "active"
+    assert get_status(t2["id"]) == "archived"
 
 
-def test_oneoff_rules_comment_and_unique_per_month(db, user_factory):
-    """2.18: разовый тариф — обязательное «Примечание» и единственный «Действующий»
-    разовый на месяц одного вида услуги (нельзя собрать месяц несколькими разовыми)."""
+def test_period_tariff_rules_comment_and_overlap(db, user_factory):
+    """Закрытый тариф-период: обязательное «Примечание» и запрет пересечения сроков
+    c другим «Действующим» тарифом периода того же вида услуги."""
     admin = user_factory("tsrules", UserRole.admin)
-    svc_id = _make_service(db, "__test_РазовПравила")
+    svc_id = _make_service(db, "__test_ПериодПравила")
     db.commit()
     client = TestClient(app)
     h = _headers(admin)
 
-    def post(price, valid_from, oneoff, comment=None):
+    def post(price, valid_from, valid_to, comment=None):
         payload = {
             "services_type_id": svc_id,
             "price": price,
             "valid_from": valid_from,
-            "is_oneoff": oneoff,
+            "valid_to": valid_to,
         }
         if comment is not None:
             payload["comment"] = comment
         return client.post("/api/tariffs", headers=h, json=payload)
 
-    # Разовый без «Примечания» — отклоняем.
-    r = post(5000, "2026-03-01", True)
+    # Закрытый тариф периода без «Примечания» — отклоняем.
+    r = post(5000, "2026-03-01", "2026-03-31")
     assert r.status_code == 422, r.text
 
-    # Разовый на март с примечанием — создаётся.
-    r = post(5000, "2026-03-10", True, comment="замена ставки март, детская площадка")
+    # Закрытый тариф периода с примечанием — создаётся.
+    r = post(5000, "2026-03-01", "2026-03-31", comment="замена ставки март, детская площадка")
     assert r.status_code == 201, r.text
     march = r.json()
     assert march["status"] == "active"
 
-    # Второй «Действующий» разовый той же услуги на тот же месяц (март) — запрещён:
-    # оператор должен оформить единым разовым тарифом с итоговой суммой.
-    r = post(2000, "2026-03-25", True, comment="второй разовый март")
+    # Пересекающийся с ним по срокам тариф периода (март) — запрещён: оператор
+    # должен оформить ставку периода единой записью с итоговой суммой.
+    r = post(2000, "2026-03-15", "2026-03-31", comment="второй март")
     assert r.status_code == 422, r.text
-    assert "единым тарифом" in r.json()["detail"]
+    assert "единой записью" in r.json()["detail"]
 
-    # Разовый на другой месяц — допустим.
-    r = post(9000, "2026-06-01", True, comment="разовый июнь")
+    # Непересекающийся тариф периода (июнь) — допустим.
+    r = post(9000, "2026-06-01", "2026-06-30", comment="июнь")
     assert r.status_code == 201, r.text
 
-    # Регулярный и разовый на один месяц сосуществуют (разовый — замена ставки
-    # именно этого месяца; регулярный продолжает действовать на остальные).
-    r = post(100, "2026-03-01", False)
+    # Открытая (без valid_to) ставка той же услуги не требует примечания и не
+    # пересекается по срокам с закрытыми периодами — допустимa.
+    payload = {
+        "services_type_id": svc_id,
+        "price": 100,
+        "valid_from": "2026-01-01",
+    }
+    r = client.post("/api/tariffs", headers=h, json=payload)
     assert r.status_code == 201, r.text
     assert r.json()["status"] == "active"

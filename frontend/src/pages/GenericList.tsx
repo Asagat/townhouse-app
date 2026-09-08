@@ -126,7 +126,7 @@ const sortMapping: Record<string, string> = {
     'price': 'price',
     'unit': 'unit',
     'valid_from': 'valid_from',
-    'is_oneoff': 'is_oneoff',
+    'valid_to': 'valid_to',
     'serial_number': 'serial_number',
     'installed_at': 'installed_at',
     'full_name': 'full_name',
