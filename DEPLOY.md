@@ -3,6 +3,13 @@
 Документированный процесс установки/обновления окружения.
 Принцип: **весь код и схема — только через git; настройки и секреты — только через `.env`.**
 
+> **Актуальная модель эксплуатации (08.09.2026).** Серверов `staging`/`production` на выделенных VPS нет:
+> проект работает в локальном docker-стеке на домашнем ПК, обновление/распространение между рабочими ПК —
+> дампами БД через зеркальную синхронизацию (`scripts/dump_to_sync.sh`/`refresh_from_backups.sh`, §7.2–7.5),
+> git/GitHub — источник/бэкап. SSH-выкат на сервер (`deploy.yml`/`.github/actions/deploy`) **удалён** и к текущей
+> эксплуатации не применяется; разделы ниже про VPS (`setup_vps.sh`/§10) — справочные на случай будущего
+> выделенного хост-сервера.
+
 ---
 
 ## 1. Переменные окружения (.env)
@@ -749,11 +756,12 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 
 ---
 
-## 10. CI/CD: автопроверка и деплой (GitHub Actions)
+## 10. CI/CD: автопроверка и подготовка образов (GitHub Actions)
 
-> Задача 3.3 роадмапа. Код, успешно прошедший все проверки, автоматически
-> подготавливается к релизу (docker-образы, релизный тег) или выкатывается на
-> сервер. Ветка main — git-центричная модель: прод = проверенный CI коммит в main.
+> Задача 3.3 роадмапа. Код, успешно прошедший проверки, автоматически публикуется как docker-образы
+> (push/тег). **Автоматический SSH-выкат на сервер не используется** (08.09.2026): `deploy.yml` и
+> `.github/actions/deploy/` удалены — серверов `staging`/`production` нет. Распространение между ПК —
+> дампами БД. Ниже — справочно о выкате `deploy_vps.sh` на случай будущего VPSхост-сервера.
 
 ### 10.1 Что в репозитории
 
@@ -761,9 +769,9 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 |---|---|
 | `.github/workflows/ci.yml` | Автопроверка на push/PR в `main`. Job `backend`: disposable-сервис `postgres:16` → `alembic upgrade head` → `init_data.py` → `python -m pytest tests/ -q` (`DATABASE_URL` и `AUTH_SECRET_KEY` задаются на job). Job `frontend`: `npm ci` → `npm run build` (= tsc + vite).
 | `.github/workflows/docker-build.yml` | Авто-сборка и публикация docker-образов (`backend/Dockerfile`, `frontend/Dockerfile`) в `ghcr.io/asagat/townhouse-app-{backend,frontend}`: push в `main` → тег `main`; релизный тег `v*` → semver-теги (`v1.2.3`, `1.2`); можно запустить вручную. Образы — для docker-compose-установок (домашние ПК и т.п.).
-| `.github/workflows/deploy.yml` + `.github/actions/deploy/` | Выкат на сервер по SSH: вручную (окружение `staging`/`production` + ref) или автоматически по релизному тегу `v*` → `production`. На сервере выполняется `scripts/deploy_vps.sh <ref>`. Деплой разрешён только если для коммита есть **успешный** прогон CI (проверка в action).
+| ~~`.github/workflows/deploy.yml` + `.github/actions/deploy/`~~ | **Удалены (08.09.2026)** — SSH-выкат на сервер был по тегу `v*` → `production` или вручную; серверов `staging`/`production` нет. При появлении хост-сервера процедуру можно восстановить по этому разделу. |
 
-На сервере `scripts/deploy_vps.sh <ref>` делает: `git fetch` + фиксация кода на `ref` (workflow передаёт **SHA проверенного CI коммита**) → `alembic upgrade head` → `init_data.py` → `create_user.py` → **сборка фронтенда** (`npm ci`/`npm install` → `npm run build`; статика в `frontend/dist`, её отдаёт nginx) → перезапуск systemd-сервиса `townhouse-backend`.
+На сервере `scripts/deploy_vps.sh <ref>` делает: `git fetch` + фиксация кода на `ref` (workflow передаёт **SHA проверенного CI коммита**) → `alembic upgrade head` → `init_data.py` → `create_user.py` → **сборка фронтенда** (`npm ci`/`npm install` → `npm run build`; статика в `frontend/dist`, её отдаёт nginx) → перезапуск systemd-сервиса `townhouse-backend`. *(Актуально только при наличии VPS-хоста; в текущей локальной модели не используется.)*
 
 ### 10.2 Настройка (один раз)
 
@@ -844,11 +852,15 @@ CI оставался зелёным.
   связанной с живыми данными (см. `conftest.py`: автоочистка тестовых сущностей;
   задачу ТД-3 роадмапа).
 
-### 10.6 Статус настройки на GitHub (09.2026) — памятка, с чего продолжить
+### 10.6 Статус настройки на GitHub (09–08.2026) — памятка, с чего продолжить
 
 > **Где будут тестовый (`staging`) и продовый (`production`) серверы — решение
 > отложено.** Этот раздел фиксирует, что уже сделано и что вернуть, когда серверы
 > появятся. Управление — через `gh` (авторизован как `Asagat`).
+>
+> **Актуально (08.09.2026):** `deploy.yml`/`.github/actions/deploy` удалены, окружения
+> `staging`/`production` и связанные deployment-записи вычищены (серверов нет). Остаются
+> `ci.yml` и `docker-build.yml`. Возврат к выкату — при появлении хост-сервера по таблице ниже.
 
 **Уже сделано:**
 
