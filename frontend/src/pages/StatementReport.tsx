@@ -125,7 +125,7 @@ export const StatementReport = () => {
             key: "amount",
             align: "right" as const,
             width: 110,
-            render: (v: number, r: MovementRow) => {
+            render: (_v: number, r: MovementRow) => {
                 const shown = -r.amount;
                 return (
                     <Typography.Text style={{ color: shown > 0 ? "#3f8600" : shown < 0 ? "#cf1322" : undefined }}>

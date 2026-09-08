@@ -89,6 +89,7 @@ import { ReceiptViewModal } from "../components/receipts/ReceiptViewModal";
 import { WriteOffsModal } from "../components/writeoffs/WriteOffsModal";
 import { WriteoffViewModal } from "../components/writeoffs/WriteoffViewModal";
 import type { SortOrder } from "antd/es/table/interface";
+import type { ColumnsType, ColumnType } from "antd/es/table";
 import { BRAND } from "../config/colors";
 import { canCreate, canEdit, canDelete } from "../auth/can";
 import { useColumnSettings } from "../hooks/useColumnSettings";
@@ -225,7 +226,9 @@ const kindForColumn = (resourceName: string, key: string) =>
 const draftFromCrudFilters = (resourceName: string, filters: CrudFilter[]) => {
     const draft: Record<string, any> = {};
     for (const f of filters) {
-        if (!f.field) continue;
+        // Предохранитель типов: CrudFilter = LogicalFilter | ConditionalFilter
+        // (условный фильтр «или» не имеет поля). Работаем только с логическими.
+        if (!("field" in f) || !f.field) continue;
         const kind = kindForColumn(resourceName, String(f.field));
         const prev = draft[f.field] ?? {};
         if (f.operator === "contains") {
@@ -985,7 +988,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             isMeterReadingDocuments ||
             roleCanWrite);
 
-    const tableColumns = [
+    const tableColumns: ColumnsType<any> = [
         {
             title: "ID",
             dataIndex: "id",
@@ -1005,7 +1008,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             // Сортировка по умолчанию — на «Периоде» (см. выше); стрелку на ID не ставим.
             ...(defaultSortDescPeriod ? {} : { defaultSortOrder: 'descend' as const }),
         },
-        ...displayColumns.map((col) => {
+        ...displayColumns.map((col): ColumnType<any> => {
             const sortable = isSortableField(col.key);
             const isNested = col.key.includes('.');
             return {

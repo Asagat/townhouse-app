@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { Button, Card, Col, DatePicker, Grid, Row, Space, Statistic, Table, Typography } from "antd";
 import { EyeOutlined, FilePdfOutlined } from "@ant-design/icons";
-import dayjs from "dayjs";
+import dayjs, { type Dayjs } from "dayjs";
 import { ReceiptViewModal } from "../receipts/ReceiptViewModal";
 import { authedFetch, openAuthorizedPdf } from "../../auth/http";
 import { formatPhone } from "../../config/formatters";
@@ -389,7 +389,7 @@ export const CabinetView = ({
                                 width: 110,
                                 // Для наглядности жителю знак инвертирован (только отображение):
                                 // начисление — «−» (растёт долг), приход/оплата — «+».
-                                render: (v: number, r: MovementRow) => {
+                                render: (_v: number, r: MovementRow) => {
                                     const shown = -r.amount;
                                     return (
                                         <Typography.Text
