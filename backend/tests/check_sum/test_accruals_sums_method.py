@@ -34,8 +34,8 @@ try:
 except Exception:  # pragma: no cover
     openpyxl = None  # type: ignore
 
-_BACKEND_DIR = Path(__file__).resolve().parents[1]
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _source_path() -> Path | None:

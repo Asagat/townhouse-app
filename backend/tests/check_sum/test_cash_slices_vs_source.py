@@ -11,7 +11,6 @@
 как обычная операция. Если файла-источника / openpyxl нет — тест пропускается.
 """
 
-import importlib.util
 import os
 from collections import defaultdict
 from decimal import Decimal
@@ -25,8 +24,7 @@ try:
 except Exception:  # pragma: no cover
     openpyxl = None  # type: ignore
 
-_BACKEND_DIR = Path(__file__).resolve().parents[1]
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _source_path() -> Path | None:
@@ -54,11 +52,6 @@ def checker(db):
         pytest.skip("БД без кассы — сверка не применима")
     wb = openpyxl.load_workbook(src, read_only=True, data_only=True)
     return wb, db
-
-
-def _src_needed(wb):
-    return None
-
 
 
 

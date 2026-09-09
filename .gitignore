@@ -34,6 +34,8 @@ backend/migrations/output/*.sql
 # Выхлоп реимпорта (export_stage.py <out>) — генерируется локально
 backend/stage_dump*.xlsx
 *.dump
+# Временное копирование файла-исходника в контейнер для тестов/рассчёта (проверки check_sum)
+backend/_migs.xlsx
 
 # OS
 .DS_Store

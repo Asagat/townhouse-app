@@ -22,8 +22,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-_BACKEND_DIR = Path(__file__).resolve().parents[1]
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 try:
     import openpyxl  # noqa: F401

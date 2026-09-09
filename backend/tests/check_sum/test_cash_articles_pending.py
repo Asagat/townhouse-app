@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 pytestmark = pytest.mark.xfail(reason="маппинг «статьи кассы ↔ БД» требует трактовки владельца",
                                strict=False, raises=None)
