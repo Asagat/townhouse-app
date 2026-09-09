@@ -47,9 +47,13 @@ const TEXT_KEYS: string[] = [
     // подписи enum/выбора, показанные словами
     "status",
     "kind",
+    "kind_label",
     "transaction_type",
     "doc_kind",
     "is_active_label",
+    // названия услуг и другие человекочитаемые подписи ЛК/движений
+    "service_name",
+    "service",
     // вложенные человекочитаемые названия справочников
     "owner.full_name",
     "owner.phone",

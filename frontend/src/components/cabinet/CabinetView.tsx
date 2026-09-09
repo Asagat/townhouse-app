@@ -5,11 +5,11 @@
 //   - в просмотре администратора (pages/AdminCabinet) — по выбранному счёту (mode='account').
 
 import { useEffect, useState } from "react";
-import { Button, Card, Col, DatePicker, Grid, Row, Space, Statistic, Table, Typography } from "antd";
-import { EyeOutlined, FilePdfOutlined } from "@ant-design/icons";
-import dayjs, { type Dayjs } from "dayjs";
-import { ReceiptViewModal } from "../receipts/ReceiptViewModal";
+import { Button, Card, Col, DatePicker, Row, Space, Statistic, Table, Typography } from "antd";
+import { FilePdfOutlined } from "@ant-design/icons";
+import dayjs from "dayjs";
 import { authedFetch, openAuthorizedPdf } from "../../auth/http";
+import { cellAlignStyle, headerAlignStyle } from "../../config/columnAlign";
 import { formatPhone } from "../../config/formatters";
 
 export interface StatementMetrics {
@@ -115,23 +115,18 @@ export const CabinetView = ({
     houseExpenses?: boolean;
 }) => {
     const houseExpensesEnabled = houseExpenses === true;
-    const [viewId, setViewId] = useState<number | undefined>(undefined);
-    // На мобильном «Просмотр квитанции» в виде широкой HTML-«PDF» не показываем —
-    // остаётся только кнопка «PDF» (скачивание документа).
-    const mobile = Grid.useBreakpoint().md === false;
-    const m = statement?.metrics;
     const accountId = statement?.account?.id;
 
     // --- Движения по счёту (2.3 + Б15): период + таблица + PDF выписки. ---
     const [movements, setMovements] = useState<MovementRow[]>([]);
     const [movementMetrics, setMovementMetrics] = useState<MovementMetrics | null>(null);
     const [movementsLoading, setMovementsLoading] = useState(false);
-    // Период движений по умолчанию — текущий месяц (с 1-го по конец месяца).
+    // Период движений по умолчанию — последние 30 дней (компактный сценарий ЛК).
     const [fromDate, setFromDate] = useState<string | undefined>(
-        dayjs().startOf("month").format("YYYY-MM-DD"),
+        dayjs().subtract(30, "day").format("YYYY-MM-DD"),
     );
     const [toDate, setToDate] = useState<string | undefined>(
-        dayjs().endOf("month").format("YYYY-MM-DD"),
+        dayjs().format("YYYY-MM-DD"),
     );
 
     const movementBase =
@@ -181,50 +176,54 @@ export const CabinetView = ({
     };
 
     const receiptCols = [
-        { title: "Период", dataIndex: "period", key: "period", render: (_: unknown, r: ReceiptRow) => periodLabel(r) },
-        { title: "Квартира", dataIndex: "apartment_number", key: "apartment_number" },
-        { title: "Собственник", dataIndex: "owner_name", key: "owner_name" },
-        { title: "К оплате", dataIndex: "payable_amount", key: "payable_amount", align: "right" as const, render: (v: number) => fmt(v) },
+        {
+            title: "Период",
+            dataIndex: "period",
+            key: "period",
+            render: (_: unknown, r: ReceiptRow) => periodLabel(r),
+            onHeaderCell: (): any => ({ style: headerAlignStyle() }),
+            onCell: (): any => ({ style: cellAlignStyle("period") }),
+        },
+        {
+            title: "К оплате",
+            dataIndex: "payable_amount",
+            key: "payable_amount",
+            render: (v: number) => fmt(v),
+            onHeaderCell: (): any => ({ style: headerAlignStyle() }),
+            onCell: (): any => ({ style: cellAlignStyle("payable_amount") }),
+        },
         {
             title: "Действия",
             key: "actions",
-            width: mobile ? 110 : 220,
+            width: 110,
+            align: "center" as const,
+            onHeaderCell: (): any => ({ style: headerAlignStyle() }),
             render: (_: unknown, r: ReceiptRow) => (
-                <Space>
-                    {!mobile && (
-                        <Button size="small" onClick={() => setViewId(r.id)}>
-                            <EyeOutlined /> Просмотр
-                        </Button>
-                    )}
-                    <Button
-                        size="small"
-                        type="primary"
-                        onClick={() =>
-                            openAuthorizedPdf(
-                                `${apiUrl}/receipt_documents/${r.id}/pdf`,
-                                `receipt_${r.id}.pdf`,
-                            )
-                        }
-                    >
-                        <FilePdfOutlined /> PDF
-                    </Button>
-                </Space>
+                <Button
+                    size="small"
+                    type="primary"
+                    onClick={() =>
+                        openAuthorizedPdf(
+                            `${apiUrl}/receipt_documents/${r.id}/pdf`,
+                            `receipt_${r.id}.pdf`,
+                        )
+                    }
+                >
+                    <FilePdfOutlined /> PDF
+                </Button>
             ),
         },
     ];
 
-    // --- Блок «Расходы по кассе» (в ЛК жителя и в админ-просмотре) ---
-    const [expRange, setExpRange] = useState<[Dayjs, Dayjs] | null>(() => [
-        dayjs().startOf("month"),
-        dayjs().endOf("month"),
-    ]);
+    // --- Блок «Общедомовые расходы» (в ЛК жителя и в админ-просмотре): ---
+    // всегда за последние 30 дней, без выбора периода.
     const [expData, setExpData] = useState<{ articles: { name: string; expense: number }[]; total: number } | null>(null);
     useEffect(() => {
         if (!houseExpensesEnabled) return;
         let cancelled = false;
-        authedFetch(
-            `${apiUrl}/me/house_expenses?from_date=${(expRange?.[0] ?? dayjs().startOf("month")).format("YYYY-MM-DD")}&to_date=${(expRange?.[1] ?? dayjs().endOf("month")).format("YYYY-MM-DD")}`,
-        )
+        const from = dayjs().subtract(30, "day").format("YYYY-MM-DD");
+        const to = dayjs().format("YYYY-MM-DD");
+        authedFetch(`${apiUrl}/me/house_expenses?from_date=${from}&to_date=${to}`)
             .then(async (r) => (r.ok ? r.json() : null))
             .then((d: any) => {
                 if (!cancelled) setExpData(d ?? null);
@@ -234,11 +233,11 @@ export const CabinetView = ({
             });
         return () => { cancelled = true; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [houseExpensesEnabled, expRange, apiUrl]);
+    }, [houseExpensesEnabled, apiUrl]);
 
     return (
         <div>
-            {statement && m && (
+            {statement && (
                 <Card title={`Лицевой счёт ${statement.account.account_number}`} style={{ marginBottom: 16 }}>
                     <Space direction="vertical" style={{ width: "100%" }}>
                         {statement.apartment && (
@@ -250,59 +249,6 @@ export const CabinetView = ({
                             <Typography.Text>{`Собственник: ${statement.owner.full_name}, ${formatPhone(statement.owner.phone)}`}</Typography.Text>
                         )}
                     </Space>
-                    <Table
-                        rowKey="metrics"
-                        size="small"
-                        pagination={false}
-                        dataSource={[{ metrics: "", ...m }]}
-                        columns={[
-                            { title: "Начислено", dataIndex: "accrued_total", key: "accrued_total", align: "right" as const, render: (v: number) => fmt(v) },
-                            { title: "Внесено на счёт", dataIndex: "available", key: "available", align: "right" as const, render: (v: number) => fmt(v) },
-                            { title: "Списано", dataIndex: "paid_total", key: "paid_total", align: "right" as const, render: (v: number) => fmt(v) },
-                            {
-                                title: "Долг",
-                                dataIndex: "debt_total",
-                                key: "debt_total",
-                                align: "right" as const,
-                                render: (v: number) => <Typography.Text style={{ color: v > 0 ? "#cf1322" : "#3f8600" }}>{fmt(v)}</Typography.Text>,
-                            },
-                            { title: "Остаток на счёте", dataIndex: "overpayment", key: "overpayment", align: "right" as const, render: (v: number) => fmt(v) },
-                        ]}
-                    />
-                </Card>
-            )}
-
-            {houseExpensesEnabled && (
-                <Card
-                    title="Расходы по кассе"
-                    style={{ marginBottom: 16 }}
-                    extra={
-                        <Space wrap>
-                            <DatePicker.RangePicker
-                                format="DD.MM.YYYY"
-                                value={expRange as any}
-                                onChange={(v) => setExpRange(v as any)}
-                                allowClear={false}
-                            />
-                        </Space>
-                    }
-                >
-                    <Table
-                        rowKey="name"
-                        size="small"
-                        pagination={false}
-                        dataSource={expData?.articles ?? []}
-                        locale={{ emptyText: "Расходов за выбранный период нет" }}
-                        columns={[
-                            { title: "Статья расхода", dataIndex: "name", key: "name" },
-                            { title: "Сумма", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => fmt(v) },
-                        ]}
-                        footer={() => (
-                            <Typography.Text strong>
-                                Итого расходов: {fmt(expData?.total ?? 0)}
-                            </Typography.Text>
-                        )}
-                    />
                 </Card>
             )}
 
@@ -314,10 +260,21 @@ export const CabinetView = ({
                         pagination={false}
                         dataSource={statement.services}
                         columns={[
-                            { title: "Услуга", dataIndex: "service_name", key: "service_name" },
-                            { title: "Начислено", dataIndex: "accrued", key: "accrued", align: "right", render: (v: number) => fmt(v) },
-                            { title: "Списано", dataIndex: "paid", key: "paid", align: "right", render: (v: number) => fmt(v) },
-                            { title: "Долг", dataIndex: "debt", key: "debt", align: "right", render: (v: number) => fmt(v) },
+                            {
+                                title: "Услуга",
+                                dataIndex: "service_name",
+                                key: "service_name",
+                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
+                                onCell: (): any => ({ style: cellAlignStyle("service_name") }),
+                            },
+                            {
+                                title: "Долг",
+                                dataIndex: "debt",
+                                key: "debt",
+                                render: (v: number) => fmt(v),
+                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
+                                onCell: (): any => ({ style: cellAlignStyle("debt") }),
+                            },
                         ]}
                     />
                 </Card>
@@ -353,14 +310,14 @@ export const CabinetView = ({
                 >
                     {movementMetrics && (
                         <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
-                            <Col span={8}>
-                                <Card size="small"><Statistic title="Начислено" value={movementMetrics.accrued} precision={2} valueStyle={{ fontSize: 15 }} /></Card>
+                            <Col xs={24} md={8}>
+                                <Card size="small"><Statistic title="Начислено за период" value={movementMetrics.accrued} precision={2} valueStyle={{ fontSize: 15 }} /></Card>
                             </Col>
-                            <Col span={8}>
-                                <Card size="small"><Statistic title="Списано" value={movementMetrics.paid} precision={2} valueStyle={{ fontSize: 15 }} /></Card>
+                            <Col xs={24} md={8}>
+                                <Card size="small"><Statistic title="Оплачено за период" value={movementMetrics.paid} precision={2} valueStyle={{ fontSize: 15 }} /></Card>
                             </Col>
-                            <Col span={8}>
-                                <Card size="small"><Statistic title="Долг" value={movementMetrics.debt} precision={2} valueStyle={{ fontSize: 15, color: movementMetrics.debt > 0 ? "#cf1322" : "#3f8600" }} /></Card>
+                            <Col xs={24} md={8}>
+                                <Card size="small"><Statistic title="Долг на конец периода" value={movementMetrics.debt} precision={2} valueStyle={{ fontSize: 15, color: movementMetrics.debt > 0 ? "#cf1322" : "#3f8600" }} /></Card>
                             </Col>
                         </Row>
                     )}
@@ -370,22 +327,36 @@ export const CabinetView = ({
                         loading={movementsLoading}
                         dataSource={movements}
                         pagination={{ pageSize: 20, showSizeChanger: true }}
-                        scroll={{ y: 420 }}
+                        scroll={{ x: "max-content", y: 420 }}
                         columns={[
-                            { title: "Дата", dataIndex: "date", key: "date", width: 90, render: (v: string | null) => fmtDate(v) },
-                            { title: "Вид", dataIndex: "kind_label", key: "kind_label", width: 110 },
-                            { title: "Услуга", dataIndex: "service", key: "service" },
                             {
-                                title: "Основание",
-                                dataIndex: "document",
-                                key: "document",
-                                render: (v: string | null) => v ?? "—",
+                                title: "Дата",
+                                dataIndex: "date",
+                                key: "date",
+                                width: 90,
+                                render: (v: string | null) => fmtDate(v),
+                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
+                                onCell: (): any => ({ style: cellAlignStyle("date") }),
+                            },
+                            {
+                                title: "Вид",
+                                dataIndex: "kind_label",
+                                key: "kind_label",
+                                width: 140,
+                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
+                                onCell: (): any => ({ style: cellAlignStyle("kind_label") }),
+                            },
+                            {
+                                title: "Услуга",
+                                dataIndex: "service",
+                                key: "service",
+                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
+                                onCell: (): any => ({ style: cellAlignStyle("service") }),
                             },
                             {
                                 title: "Сумма",
                                 dataIndex: "amount",
                                 key: "amount",
-                                align: "right" as const,
                                 width: 110,
                                 // Для наглядности жителю знак инвертирован (только отображение):
                                 // начисление — «−» (растёт долг), приход/оплата — «+».
@@ -402,14 +373,17 @@ export const CabinetView = ({
                                         </Typography.Text>
                                     );
                                 },
+                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
+                                onCell: (): any => ({ style: cellAlignStyle("amount") }),
                             },
                             {
                                 title: "Долг",
                                 dataIndex: "balance_after",
                                 key: "balance_after",
-                                align: "right" as const,
                                 width: 110,
                                 render: (v: number) => fmt(v),
+                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
+                                onCell: (): any => ({ style: cellAlignStyle("balance_after") }),
                             },
                         ]}
                         locale={{ emptyText: "Движений за выбранный период нет" }}
@@ -430,11 +404,39 @@ export const CabinetView = ({
                 />
             </Card>
 
-            <ReceiptViewModal
-                open={viewId !== undefined}
-                receiptId={viewId}
-                onClose={() => setViewId(undefined)}
-            />
+            {houseExpensesEnabled && (
+                <Card title="Общедомовые расходы" style={{ marginTop: 16 }}>
+                    <Table
+                        rowKey="name"
+                        size="small"
+                        pagination={false}
+                        dataSource={expData?.articles ?? []}
+                        locale={{ emptyText: "Расходов за последние 30 дней нет" }}
+                        columns={[
+                            {
+                                title: "Статья расхода",
+                                dataIndex: "name",
+                                key: "name",
+                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
+                                onCell: (): any => ({ style: cellAlignStyle("name") }),
+                            },
+                            {
+                                title: "Сумма",
+                                dataIndex: "expense",
+                                key: "expense",
+                                render: (v: number) => fmt(v),
+                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
+                                onCell: (): any => ({ style: cellAlignStyle("expense") }),
+                            },
+                        ]}
+                        footer={() => (
+                            <Typography.Text strong>
+                                Итого расходов: {fmt(expData?.total ?? 0)}
+                            </Typography.Text>
+                        )}
+                    />
+                </Card>
+            )}
         </div>
     );
 };
