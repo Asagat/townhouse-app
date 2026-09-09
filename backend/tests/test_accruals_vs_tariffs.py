@@ -23,6 +23,8 @@
 from sqlalchemy import text
 import pytest
 
+from services import calculate_accruals_preview
+
 FIXED = "Фиксированный"
 AREA = "По площади"
 METER = "По счетчику"
@@ -102,3 +104,46 @@ def test_march2024_fund_uses_closed_tariff_9560(db):
           AND abs(a.amount - 9560.0) > 0.005
     """)).scalar()
     assert not mismatch, "По Фонду за март-2024 есть начисления, не равные тарифу 9560"
+
+
+def test_accruals_preview_skips_accounts_later_opened(db):
+    """Месячный превью учитывает opened_at (вариант A/вперёд).
+
+    За период до открытия л/с счёт не должен появляться в месячном превью (иначе при
+    пересоздании месячного он был бы «раскидан» на ещё не введённый л/с); с месяца
+    открытия (opened_at <= конца месяца) — появляется. Данные открытия:
+    кв4 (account_id=4) = 2017-12 ; кв8 (id=8) = 2017-11 ; кв1 (id=1) = 2017-10.
+    Работает только на импортированной БД (accounts.opened_at заполнен).
+    """
+    has_open = db.execute(text("SELECT COUNT(*) FROM accounts WHERE opened_at IS NOT NULL")).scalar()
+    if not has_open:
+        pytest.skip("accounts.opened_at не заполнен (БД без миграции 0020/импортированной истории)")
+
+    from datetime import date
+
+    from models import Account
+    from services import _account_open_for_period, calculate_accruals_preview
+
+    def open_by_month(year: int, month: int):
+        end = date(year, month, 28)
+        return {
+            a.account_number
+            for a in db.query(Account).filter(Account.is_active == True).all()
+            if _account_open_for_period(a, end)
+        }
+
+    # До открытия кв4/кв8 в превью месяца их нет.
+    oct_2017 = open_by_month(2017, 10)
+    assert "LS-0004" not in oct_2017, "кв4 не должна попадать в месячный превью до её открытия (2017-12)"
+    assert "LS-0008" not in oct_2017, "кв8 не должна попадать в месячный превью до её открытия (2017-11)"
+
+    # С месяца открытия счёт появляется: кв8 с 2017-11, кв4 с 2017-12.
+    assert "LS-0008" in open_by_month(2017, 11)
+    dec_2017 = open_by_month(2017, 12)
+    assert "LS-0008" in dec_2017
+    assert "LS-0004" in dec_2017
+
+    # Сверка с фактическим превью: account_id в строках не содержит позже открытых.
+    preview_rows = calculate_accruals_preview(db, 2017, 10)
+    acc_ids = {r["account_id"] for r in preview_rows}
+    assert 4 not in acc_ids and 8 not in acc_ids, f"превью за 2017-10 не должно включать кв4/кв8 (ids={sorted(acc_ids)})"

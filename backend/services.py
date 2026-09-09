@@ -716,6 +716,18 @@ def calculate_accrual_for_account_service(
     }
 
 
+def _account_open_for_period(account: Account, period_end: date) -> bool:
+    """Открыт ли л/с на начисляемый месяц (учёт opened_at, вариант A/вперёд).
+
+    opened_at NULL (например, у только что созданного или старого счёта без истории)
+    считаем «открыт» — не отсекаем. Если задан — счёт попадает в месячный документ
+    только при opened_at <= period_end.
+    """
+    if account.opened_at is None:
+        return True
+    return account.opened_at <= period_end
+
+
 def build_accrual_register_items(
     db: Session,
     document: AccrualDocument,
@@ -727,12 +739,17 @@ def build_accrual_register_items(
     Строит список строк AccrualsRegister для выбранных пар (account_id, services_type_id),
     пересчитывая каждую на сервере. Используется и при создании,
     и при редактировании документа начислений.
+
+    Учитывает дату открытия счёта (opened_at): счёт, открытый ПОСЛЕ конца периода,
+    в месячный документ не попадает (правило не-по-всем = перс).
     """
     items = []
     for account_id, services_type_id in requested_pairs:
         account = db.query(Account).filter(Account.id == account_id, Account.is_active == True).first()
         service_type = db.query(ServiceType).filter(ServiceType.id == services_type_id).first()
         if not account or not service_type:
+            continue
+        if not _account_open_for_period(account, period_end):
             continue
 
         calculated = calculate_accrual_for_account_service(db, account, service_type, period_end)
@@ -821,7 +838,11 @@ def _service_name(db: Session, services_type_id) -> str:
 def calculate_accruals_preview(db: Session, year: int, month: int) -> list[dict[str, Any]]:
     period_end = date(year, month, calendar.monthrange(year, month)[1])
 
-    accounts = db.query(Account).filter(Account.is_active == True).all()
+    accounts = [
+        a
+        for a in db.query(Account).filter(Account.is_active == True).all()
+        if _account_open_for_period(a, period_end)
+    ]
     service_types = db.query(ServiceType).all()
 
     rows = []

@@ -141,6 +141,9 @@ class Account(Base):
     account_name = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
+    # Дата открытия/ввода лицевого счёта (правило не-по-всем = перс; вариант ii =
+    # дата первого начисления л/с). NULL у аккаунтов без начислений.
+    opened_at = Column(Date, nullable=True)
 
     apartment = relationship("Apartment", back_populates="accounts")
     transactions = relationship("Transaction", back_populates="account", passive_deletes=True)
