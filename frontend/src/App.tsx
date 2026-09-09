@@ -11,7 +11,7 @@ import {
     Navigate,
 } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
-import { ConfigProvider, Spin } from "antd";
+import { ConfigProvider, Grid, Spin } from "antd";
 import ruRU from "antd/locale/ru_RU";
 import "dayjs/locale/ru";
 import "antd/dist/reset.css";
@@ -51,6 +51,12 @@ const resourceForRoute = (key: string) => {
 const ProtectedLayout = () => {
     const { data, isLoading } = useIsAuthenticated();
     const authenticated = data?.authenticated === true;
+    const screens = Grid.useBreakpoint();
+    // На телефоне отступы страницы минимальные — контент по всей ширине экрана.
+    const pagePadding = screens.md ? 40 : 12;
+    // У жителя единственный раздел — «Мой кабинет»: боковая панель навигации
+    // не нужна (его действия вынесены вниз страницы ЛК — см. ResidentCabinet).
+    const hideSidebar = getIdentity()?.role === "resident";
 
     if (isLoading) {
         return (
@@ -63,9 +69,17 @@ const ProtectedLayout = () => {
         return <Navigate to="/login" replace />;
     }
     return (
-        <div style={{ display: "flex", minHeight: "100vh" }}>
-            <Sidebar />
-            <div style={{ flex: 1, padding: "40px", background: "#f2f8f3" }}>
+        <div style={{ display: "flex", minHeight: "100vh", width: "100%" }}>
+            {!hideSidebar && <Sidebar />}
+            <div
+                style={{
+                    flex: 1,
+                    minWidth: 0,
+                    padding: pagePadding,
+                    boxSizing: "border-box",
+                    background: "#f2f8f3",
+                }}
+            >
                 <Outlet />
             </div>
         </div>

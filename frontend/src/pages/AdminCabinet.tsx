@@ -76,8 +76,6 @@ export const AdminCabinet = () => {
         loadAccount(value);
     };
 
-    const selectedAccount = accounts.find((a) => a.value === selectedId);
-
     return (
         <div>
             <Typography.Title level={4} style={{ marginTop: 0 }}>
@@ -118,7 +116,6 @@ export const AdminCabinet = () => {
                     apiUrl={apiUrl}
                     mode="account"
                     receiptsTitle="Квитанции жителя"
-                    userLabel={selectedAccount ? selectedAccount.label : undefined}
                 />
             )}
         </div>

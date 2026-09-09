@@ -254,6 +254,35 @@ def build_account_movements(db: Session, account_id: int,
     apartment = account.apartment
     owner = apartment.owner if apartment else None
 
+    # --- Регистр денежных средств по л/с (cash_register): для жителя это его
+    # фактические платежи — дата, касса/счёт, сумма (источник строк блока «Деньги»). ---
+    cash_params: dict = {"a": account_id}
+    cash_period = ""
+    if frm is not None:
+        cash_period += " AND cr.operation_date >= :frm"
+        cash_params["frm"] = frm
+    if to is not None:
+        cash_period += " AND cr.operation_date <= :to"
+        cash_params["to"] = to
+    cash_rows = db.execute(text(
+        "SELECT cr.operation_date, cr.income, cr.expense, cp.name AS cash_point "
+        "FROM cash_register cr "
+        "LEFT JOIN transactions tx ON tx.id = cr.transaction_id "
+        "LEFT JOIN cash_points cp ON cp.id = tx.cash_point_id "
+        "WHERE cr.account_id = :a" + cash_period + " "
+        "ORDER BY cr.operation_date, cr.id"
+    ), cash_params).fetchall()
+    cash_movements = []
+    for cr in cash_rows:
+        m = cr._mapping
+        inc = float(m["income"] or 0.0)
+        exp = float(m["expense"] or 0.0)
+        cash_movements.append({
+            "date": m["operation_date"].strftime("%Y-%m-%d") if m["operation_date"] else None,
+            "cash_point": m["cash_point"] or "—",
+            "amount": round(inc - exp, 2),
+        })
+
     # --- Сводка за период (для блока «Движения»: Начислено/Внесено/Списано/Долг). ---
     def _sum_sql(expr: str, table: str, extra: str = "") -> float:
         sql = (f"SELECT COALESCE(SUM({expr}),0) FROM {table} "
@@ -308,6 +337,7 @@ def build_account_movements(db: Session, account_id: int,
             "debt": round(max(0.0, hist_accrued - hist_paid), 2),
         },
         "movements": movements,
+        "cash_movements": cash_movements,
         "closing": round(float(movements[-1]["balance_after"]), 2) if movements else 0.0,
     }
 

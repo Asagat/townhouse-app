@@ -5,11 +5,10 @@
 //   - в просмотре администратора (pages/AdminCabinet) — по выбранному счёту (mode='account').
 
 import { useEffect, useState } from "react";
-import { Button, Card, Col, DatePicker, Row, Space, Statistic, Table, Typography } from "antd";
+import { Button, Card, Col, DatePicker, Row, Select, Space, Statistic, Tooltip, Typography } from "antd";
 import { FilePdfOutlined } from "@ant-design/icons";
-import dayjs from "dayjs";
+import dayjs, { type Dayjs } from "dayjs";
 import { authedFetch, openAuthorizedPdf } from "../../auth/http";
-import { cellAlignStyle, headerAlignStyle } from "../../config/columnAlign";
 import { formatPhone } from "../../config/formatters";
 
 export interface StatementMetrics {
@@ -47,14 +46,10 @@ export interface ReceiptRow {
     payable_amount: number;
 }
 
-export interface MovementRow {
+export interface CashMovementRow {
     date: string | null;
-    kind: string;
-    kind_label: string;
-    service: string;
+    cash_point: string;
     amount: number;
-    balance_after: number;
-    document: string | null;
 }
 
 export interface MovementMetrics {
@@ -81,7 +76,7 @@ const fmt = (v: number | null | undefined): string => {
 const periodLabel = (receipt: ReceiptRow): string => {
     const name = MONTH_NAMES[receipt.period_month - 1] ?? "";
     const cap = name ? name.charAt(0).toUpperCase() + name.slice(1) : String(receipt.period_month);
-    return `${cap} ${receipt.period_year}`;
+    return `${cap}, ${receipt.period_year}`;
 };
 
 const fmtDate = (iso?: string | null): string => {
@@ -95,39 +90,70 @@ const fmtSigned = (v: number): string => {
     return (num >= 0 ? "+" : "−") + fmt(Math.abs(num));
 };
 
+// Единый стиль крупных денежных сумм в списках ЛК (кегль как в «Общедомовых расходах»).
+const SUM_FONT = {
+    fontSize: "clamp(22px, 6vw, 30px)",
+    fontWeight: 700 as const,
+    lineHeight: 1.2,
+    whiteSpace: "nowrap",
+};
+
 export const CabinetView = ({
     statement,
     receipts,
     apiUrl,
-    userLabel,
-    receiptsTitle = "Мои квитанции",
+    receiptsTitle = "Квитанции",
     mode = "me",
     houseExpenses,
 }: {
     statement: StatementData | null;
     receipts: ReceiptRow[];
     apiUrl: string;
-    userLabel?: string;
     receiptsTitle?: string;
     /** me — данные «моего» счёта (эндпоинты /me), account — по выбранному счёту. */
     mode?: "me" | "account";
-    /** Показывать блок «Расходы по кассе» (в ЛК жителя и админ-просмотре). */
+    /** Показывать блок «Расходы по кассе» (в ЛК жителя и в админ-просмотре). */
     houseExpenses?: boolean;
 }) => {
     const houseExpensesEnabled = houseExpenses === true;
     const accountId = statement?.account?.id;
 
-    // --- Движения по счёту (2.3 + Б15): период + таблица + PDF выписки. ---
-    const [movements, setMovements] = useState<MovementRow[]>([]);
+    // --- Блок «Деньги»: период + метрики + список Регистра денежных средств + PDF. ---
+    const [movements, setMovements] = useState<CashMovementRow[]>([]);
     const [movementMetrics, setMovementMetrics] = useState<MovementMetrics | null>(null);
-    const [movementsLoading, setMovementsLoading] = useState(false);
-    // Период движений по умолчанию — последние 30 дней (компактный сценарий ЛК).
+    const [, setMovementsLoading] = useState(false);
+    // --- Общий период страницы: стандартные пресеты или «За период» (свои даты). ---
+    type PeriodPreset = "3m" | "prev_month" | "cur_month" | "custom";
+    const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("3m");
+    // Период по умолчанию — текущий и два предыдущих месяца («За 3 месяца»).
     const [fromDate, setFromDate] = useState<string | undefined>(
-        dayjs().subtract(30, "day").format("YYYY-MM-DD"),
+        dayjs().startOf("month").subtract(2, "month").format("YYYY-MM-DD"),
     );
     const [toDate, setToDate] = useState<string | undefined>(
-        dayjs().format("YYYY-MM-DD"),
+        dayjs().endOf("month").format("YYYY-MM-DD"),
     );
+    const applyPeriodPreset = (p: PeriodPreset) => {
+        setPeriodPreset(p);
+        if (p === "custom") return; // даты выбираются вручную ниже
+        const now = dayjs();
+        let from: Dayjs;
+        let to: Dayjs;
+        switch (p) {
+            case "cur_month":
+                from = now.startOf("month");
+                to = now.endOf("month");
+                break;
+            case "prev_month":
+                from = now.startOf("month").subtract(1, "month");
+                to = now.endOf("month").subtract(1, "month");
+                break;
+            default: // "3m"
+                from = now.startOf("month").subtract(2, "month");
+                to = now.endOf("month");
+        }
+        setFromDate(from.format("YYYY-MM-DD"));
+        setToDate(to.format("YYYY-MM-DD"));
+    };
 
     const movementBase =
         mode === "me" ? `${apiUrl}/me/movements` : `${apiUrl}/accounts/${accountId}/movements`;
@@ -152,12 +178,12 @@ export const CabinetView = ({
         const q = rangeParams();
         authedFetch(q ? `${movementBase}?${q}` : movementBase)
             .then(async (r) => {
-                if (!r.ok) return { movements: [] as MovementRow[] };
+                if (!r.ok) return { cash_movements: [] as CashMovementRow[] };
                 return r.json();
             })
             .then((d: any) => {
                 if (!cancelled) {
-                    setMovements((d?.movements ?? []) as MovementRow[]);
+                    setMovements((d?.cash_movements ?? []) as CashMovementRow[]);
                     setMovementMetrics((d?.metrics ?? null) as MovementMetrics | null);
                 }
             })
@@ -175,55 +201,18 @@ export const CabinetView = ({
         openAuthorizedPdf(q ? `${pdfBase}?${q}` : pdfBase, `statement_${accountId}.pdf`);
     };
 
-    const receiptCols = [
-        {
-            title: "Период",
-            dataIndex: "period",
-            key: "period",
-            render: (_: unknown, r: ReceiptRow) => periodLabel(r),
-            onHeaderCell: (): any => ({ style: headerAlignStyle() }),
-            onCell: (): any => ({ style: cellAlignStyle("period") }),
-        },
-        {
-            title: "К оплате",
-            dataIndex: "payable_amount",
-            key: "payable_amount",
-            render: (v: number) => fmt(v),
-            onHeaderCell: (): any => ({ style: headerAlignStyle() }),
-            onCell: (): any => ({ style: cellAlignStyle("payable_amount") }),
-        },
-        {
-            title: "Действия",
-            key: "actions",
-            width: 110,
-            align: "center" as const,
-            onHeaderCell: (): any => ({ style: headerAlignStyle() }),
-            render: (_: unknown, r: ReceiptRow) => (
-                <Button
-                    size="small"
-                    type="primary"
-                    onClick={() =>
-                        openAuthorizedPdf(
-                            `${apiUrl}/receipt_documents/${r.id}/pdf`,
-                            `receipt_${r.id}.pdf`,
-                        )
-                    }
-                >
-                    <FilePdfOutlined /> PDF
-                </Button>
-            ),
-        },
-    ];
-
     // --- Блок «Общедомовые расходы» (в ЛК жителя и в админ-просмотре): ---
     // всегда за последние 30 дней, без выбора периода.
     const [expData, setExpData] = useState<{ articles: { name: string; expense: number }[]; total: number } | null>(null);
     useEffect(() => {
         if (!houseExpensesEnabled) return;
         let cancelled = false;
-        const from = dayjs().subtract(30, "day").format("YYYY-MM-DD");
-        const to = dayjs().format("YYYY-MM-DD");
-        authedFetch(`${apiUrl}/me/house_expenses?from_date=${from}&to_date=${to}`)
+        // «Общедомовые расходы» показываются за общий выбранный период страницы.
+        const p = new URLSearchParams();
+        if (fromDate) p.set("from_date", fromDate);
+        if (toDate) p.set("to_date", toDate);
+        const q = p.toString();
+        authedFetch(q ? `${apiUrl}/me/house_expenses?${q}` : `${apiUrl}/me/house_expenses`)
             .then(async (r) => (r.ok ? r.json() : null))
             .then((d: any) => {
                 if (!cancelled) setExpData(d ?? null);
@@ -233,7 +222,16 @@ export const CabinetView = ({
             });
         return () => { cancelled = true; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [houseExpensesEnabled, apiUrl]);
+    }, [houseExpensesEnabled, apiUrl, fromDate, toDate]);
+
+    // --- Квитанции/списки: видимый период = общий выбранный период (fromDate/toDate). ---
+    const visibleReceipts = receipts.filter((r) => {
+        const start = dayjs(new Date(r.period_year, r.period_month - 1, 1)).startOf("month");
+        const end = start.endOf("month");
+        if (fromDate && end < dayjs(fromDate).startOf("day")) return false;
+        if (toDate && start > dayjs(toDate).endOf("day")) return false;
+        return true;
+    });
 
     return (
         <div>
@@ -252,189 +250,265 @@ export const CabinetView = ({
                 </Card>
             )}
 
+            {statement && accountId !== undefined && (
+                <Card size="small" style={{ marginBottom: 16 }}>
+                    <Space wrap>
+                        <Typography.Text strong style={{ fontSize: 17 }}>Период:</Typography.Text>
+                        <Select
+                            value={periodPreset}
+                            onChange={applyPeriodPreset}
+                            style={{ width: 200 }}
+                            options={[
+                                { value: "3m", label: "За 3 месяца" },
+                                { value: "prev_month", label: "За прошлый месяц" },
+                                { value: "cur_month", label: "За текущий месяц" },
+                                { value: "custom", label: "За период" },
+                            ]}
+                        />
+                        {periodPreset === "custom" && (
+                            <>
+                                <DatePicker
+                                    format="DD.MM.YYYY"
+                                    placeholder="Дата начала"
+                                    allowClear
+                                    value={fromDate ? dayjs(fromDate) : null}
+                                    onChange={(d) => setFromDate(d ? d.format("YYYY-MM-DD") : undefined)}
+                                />
+                                <DatePicker
+                                    format="DD.MM.YYYY"
+                                    placeholder="Дата конца"
+                                    allowClear
+                                    value={toDate ? dayjs(toDate) : null}
+                                    onChange={(d) => setToDate(d ? d.format("YYYY-MM-DD") : undefined)}
+                                />
+                            </>
+                        )}
+                    </Space>
+                </Card>
+            )}
+
             {statement && statement.services && statement.services.length > 0 && (
-                <Card title="Детализация по услугам" style={{ marginBottom: 16 }}>
-                    <Table
-                        rowKey="services_type_id"
-                        size="small"
-                        pagination={false}
-                        dataSource={statement.services}
-                        columns={[
-                            {
-                                title: "Услуга",
-                                dataIndex: "service_name",
-                                key: "service_name",
-                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
-                                onCell: (): any => ({ style: cellAlignStyle("service_name") }),
-                            },
-                            {
-                                title: "Долг",
-                                dataIndex: "debt",
-                                key: "debt",
-                                render: (v: number) => fmt(v),
-                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
-                                onCell: (): any => ({ style: cellAlignStyle("debt") }),
-                            },
-                        ]}
-                    />
+                <Card title="Услуги" style={{ marginBottom: 16 }}>
+                    {movementMetrics && (
+                        <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
+                            <Col xs={24} md={8}>
+                                <Card size="small"><Statistic title="Начислено за период" value={movementMetrics.accrued} precision={2} valueStyle={{ fontSize: 19 }} /></Card>
+                            </Col>
+                            <Col xs={24} md={8}>
+                                <Card size="small"><Statistic title="Оплачено за период" value={movementMetrics.paid} precision={2} valueStyle={{ fontSize: 19 }} /></Card>
+                            </Col>
+                            <Col xs={24} md={8}>
+                                <Card size="small"><Statistic title="Долг на конец периода" value={movementMetrics.debt} precision={2} valueStyle={{ fontSize: 19, color: movementMetrics.debt > 0 ? "#cf1322" : "#3f8600" }} /></Card>
+                            </Col>
+                        </Row>
+                    )}
+                    {statement.services.map((s, i) => (
+                        <div
+                            key={s.services_type_id}
+                            style={{
+                                padding: "12px 0",
+                                borderBottom:
+                                    i < statement.services.length - 1 ? "1px solid #e8e8e8" : "none",
+                            }}
+                        >
+                            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <Typography.Text style={{ fontSize: 18, fontWeight: 600 }}>
+                                        {s.service_name}
+                                    </Typography.Text>
+                                    <div
+                                        style={{
+                                            ...SUM_FONT,
+                                            color: s.debt > 0 ? "#cf1322" : "#1f1f1f",
+                                        }}
+                                    >
+                                        {fmt(s.debt)}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
                 </Card>
             )}
 
             {statement && accountId !== undefined && (
-                <Card
-                    title="Движения по счёту"
-                    style={{ marginBottom: 16 }}
-                    extra={
-                        <Space wrap>
-                            <DatePicker.RangePicker
-                                allowEmpty={[true, true]}
-                                format="DD.MM.YYYY"
-                                value={
-                                    fromDate || toDate
-                                        ? [
-                                              fromDate ? dayjs(fromDate) : null,
-                                              toDate ? dayjs(toDate) : null,
-                                          ]
-                                        : undefined
-                                }
-                                onChange={(dates) => {
-                                    setFromDate(dates?.[0]?.format("YYYY-MM-DD"));
-                                    setToDate(dates?.[1]?.format("YYYY-MM-DD"));
+                <Card title="Деньги" style={{ marginBottom: 16 }}>
+                    {movements.length === 0 ? (
+                        <Typography.Text type="secondary">
+                            Денежных операций за выбранный период нет
+                        </Typography.Text>
+                    ) : (
+                        movements.map((mv, i) => (
+                            <div
+                                key={`${mv.date ?? ""}-${i}`}
+                                style={{
+                                    padding: "12px 0",
+                                    borderBottom:
+                                        i < movements.length - 1 ? "1px solid #e8e8e8" : "none",
                                 }}
-                            />
-                            <Button icon={<FilePdfOutlined />} disabled={!accountId} onClick={handlePdf}>
-                                Выписка PDF
-                            </Button>
-                        </Space>
-                    }
-                >
-                    {movementMetrics && (
-                        <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
-                            <Col xs={24} md={8}>
-                                <Card size="small"><Statistic title="Начислено за период" value={movementMetrics.accrued} precision={2} valueStyle={{ fontSize: 15 }} /></Card>
-                            </Col>
-                            <Col xs={24} md={8}>
-                                <Card size="small"><Statistic title="Оплачено за период" value={movementMetrics.paid} precision={2} valueStyle={{ fontSize: 15 }} /></Card>
-                            </Col>
-                            <Col xs={24} md={8}>
-                                <Card size="small"><Statistic title="Долг на конец периода" value={movementMetrics.debt} precision={2} valueStyle={{ fontSize: 15, color: movementMetrics.debt > 0 ? "#cf1322" : "#3f8600" }} /></Card>
-                            </Col>
-                        </Row>
-                    )}
-                    <Table<MovementRow>
-                        rowKey={(r, i) => `${r.date ?? ""}-${r.kind}-${i}`}
-                        size="small"
-                        loading={movementsLoading}
-                        dataSource={movements}
-                        pagination={{ pageSize: 20, showSizeChanger: true }}
-                        scroll={{ x: "max-content", y: 420 }}
-                        columns={[
-                            {
-                                title: "Дата",
-                                dataIndex: "date",
-                                key: "date",
-                                width: 90,
-                                render: (v: string | null) => fmtDate(v),
-                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
-                                onCell: (): any => ({ style: cellAlignStyle("date") }),
-                            },
-                            {
-                                title: "Вид",
-                                dataIndex: "kind_label",
-                                key: "kind_label",
-                                width: 140,
-                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
-                                onCell: (): any => ({ style: cellAlignStyle("kind_label") }),
-                            },
-                            {
-                                title: "Услуга",
-                                dataIndex: "service",
-                                key: "service",
-                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
-                                onCell: (): any => ({ style: cellAlignStyle("service") }),
-                            },
-                            {
-                                title: "Сумма",
-                                dataIndex: "amount",
-                                key: "amount",
-                                width: 110,
-                                // Для наглядности жителю знак инвертирован (только отображение):
-                                // начисление — «−» (растёт долг), приход/оплата — «+».
-                                render: (_v: number, r: MovementRow) => {
-                                    const shown = -r.amount;
-                                    return (
-                                        <Typography.Text
+                            >
+                                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <Typography.Text strong style={{ fontSize: 18 }}>
+                                            {fmtDate(mv.date)}
+                                        </Typography.Text>
+                                        <div
                                             style={{
+                                                ...SUM_FONT,
                                                 color:
-                                                    shown > 0 ? "#3f8600" : shown < 0 ? "#cf1322" : undefined,
+                                                    mv.amount > 0
+                                                        ? "#3f8600"
+                                                        : mv.amount < 0
+                                                          ? "#cf1322"
+                                                          : "#1f1f1f",
                                             }}
                                         >
-                                            {fmtSigned(shown)}
-                                        </Typography.Text>
-                                    );
-                                },
-                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
-                                onCell: (): any => ({ style: cellAlignStyle("amount") }),
-                            },
-                            {
-                                title: "Долг",
-                                dataIndex: "balance_after",
-                                key: "balance_after",
-                                width: 110,
-                                render: (v: number) => fmt(v),
-                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
-                                onCell: (): any => ({ style: cellAlignStyle("balance_after") }),
-                            },
-                        ]}
-                        locale={{ emptyText: "Движений за выбранный период нет" }}
-                    />
+                                            {fmtSigned(mv.amount)}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                    <div style={{ textAlign: "center", marginTop: 12 }}>
+                        <Tooltip title="PDF">
+                            <Button
+                                type="primary"
+                                aria-label="PDF"
+                                icon={<FilePdfOutlined style={{ fontSize: 24 }} />}
+                                disabled={!accountId}
+                                onClick={handlePdf}
+                                style={{
+                                    width: 53,
+                                    height: 53,
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                }}
+                            />
+                        </Tooltip>
+                    </div>
                 </Card>
             )}
 
-            <Card
-                title={receiptsTitle}
-                extra={userLabel ? <Typography.Text type="secondary">{userLabel}</Typography.Text> : undefined}
-            >
-                <Table
-                    rowKey="id"
-                    size="small"
-                    dataSource={receipts}
-                    columns={receiptCols}
-                    locale={{ emptyText: "Квитанций пока нет" }}
-                />
+            <Card title={receiptsTitle} style={{ marginBottom: 16 }}>
+                {visibleReceipts.length === 0 ? (
+                    <Typography.Text type="secondary">Квитанций за выбранный период нет</Typography.Text>
+                ) : (
+                    visibleReceipts.map((r, idx) => (
+                        <div
+                            key={r.id}
+                            style={{
+                                padding: "14px 0",
+                                borderBottom:
+                                    idx < visibleReceipts.length - 1 ? "1px solid #e8e8e8" : "none",
+                            }}
+                        >
+                            <div
+                                style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 16,
+                                }}
+                            >
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <Typography.Text strong style={{ fontSize: 18 }}>
+                                        {periodLabel(r)}
+                                    </Typography.Text>
+                                    <div
+                                        style={{
+                                            marginTop: 4,
+                                            ...SUM_FONT,
+                                            color: "#1f1f1f",
+                                        }}
+                                    >
+                                        {fmt(r.payable_amount)}
+                                    </div>
+                                </div>
+                                <Tooltip title="PDF">
+                                    <Button
+                                        type="primary"
+                                        aria-label="PDF"
+                                        icon={<FilePdfOutlined style={{ fontSize: 24 }} />}
+                                        onClick={() =>
+                                            openAuthorizedPdf(
+                                                `${apiUrl}/receipt_documents/${r.id}/pdf`,
+                                                `receipt_${r.id}.pdf`,
+                                            )
+                                        }
+                                        style={{
+                                            width: 53,
+                                            height: 53,
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            flexShrink: 0,
+                                        }}
+                                    />
+                                </Tooltip>
+                            </div>
+                        </div>
+                    ))
+                )}
             </Card>
 
             {houseExpensesEnabled && (
                 <Card title="Общедомовые расходы" style={{ marginTop: 16 }}>
-                    <Table
-                        rowKey="name"
-                        size="small"
-                        pagination={false}
-                        dataSource={expData?.articles ?? []}
-                        locale={{ emptyText: "Расходов за последние 30 дней нет" }}
-                        columns={[
-                            {
-                                title: "Статья расхода",
-                                dataIndex: "name",
-                                key: "name",
-                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
-                                onCell: (): any => ({ style: cellAlignStyle("name") }),
-                            },
-                            {
-                                title: "Сумма",
-                                dataIndex: "expense",
-                                key: "expense",
-                                render: (v: number) => fmt(v),
-                                onHeaderCell: (): any => ({ style: headerAlignStyle() }),
-                                onCell: (): any => ({ style: cellAlignStyle("expense") }),
-                            },
-                        ]}
-                        footer={() => (
-                            <Typography.Text strong>
-                                Итого расходов: {fmt(expData?.total ?? 0)}
-                            </Typography.Text>
-                        )}
-                    />
+                    {!expData || expData.articles.length === 0 ? (
+                        <Typography.Text type="secondary">Расходов за выбранный период нет</Typography.Text>
+                    ) : (
+                        <>
+                            {expData.articles.map((a, idx) => (
+                                <div
+                                    key={a.name}
+                                    style={{
+                                        padding: "12px 0",
+                                        borderBottom:
+                                            idx < expData.articles.length - 1
+                                                ? "1px solid #e8e8e8"
+                                                : "none",
+                                    }}
+                                >
+                                    <div
+                                        style={{
+                                            display: "flex",
+                                            alignItems: "baseline",
+                                            justifyContent: "space-between",
+                                            gap: 16,
+                                        }}
+                                    >
+                                        <Typography.Text style={{ fontSize: 17 }}>
+                                            {a.name}
+                                        </Typography.Text>
+                                        <Typography.Text
+                                            style={{ ...SUM_FONT, textAlign: "right" }}
+                                        >
+                                            {fmt(a.expense)}
+                                        </Typography.Text>
+                                    </div>
+                                </div>
+                            ))}
+                            <div
+                                style={{
+                                    padding: "16px 0",
+                                    marginTop: 8,
+                                    borderTop: "1px solid #e8e8e8",
+                                    borderBottom: "1px solid #e8e8e8",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    gap: 16,
+                                }}
+                            >
+                                <Typography.Text strong style={{ fontSize: 18 }}>
+                                    Итого расходов
+                                </Typography.Text>
+                                <Typography.Text strong style={{ ...SUM_FONT, textAlign: "right" }}>
+                                    {fmt(expData.total)}
+                                </Typography.Text>
+                            </div>
+                        </>
+                    )}
                 </Card>
             )}
         </div>

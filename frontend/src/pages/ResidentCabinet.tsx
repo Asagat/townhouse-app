@@ -1,16 +1,20 @@
 // frontend/src/pages/ResidentCabinet.tsx
 // Личный кабинет жителя: сводка по ЛС + список своих квитанций (просмотр/PDF).
+// Боковой панели у жителя нет — внизу страницы кнопки «Главная»/«Настройки»/«Выход».
 
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Spin, Typography } from "antd";
-import { useApiUrl } from "@refinedev/core";
+import { useNavigate } from "react-router-dom";
+import { Alert, Button, ConfigProvider, Spin, Typography, message } from "antd";
+import { HomeOutlined, LogoutOutlined, SettingOutlined } from "@ant-design/icons";
+import { useApiUrl, useLogout } from "@refinedev/core";
 import { authedFetch } from "../auth/http";
-import { getIdentity } from "../auth/token";
 import { CabinetView } from "../components/cabinet/CabinetView";
 import type { ReceiptRow, StatementData } from "../components/cabinet/CabinetView";
 
 export const ResidentCabinet = () => {
     const apiUrl = useApiUrl();
+    const navigate = useNavigate();
+    const { mutate: logout } = useLogout();
     const [statement, setStatement] = useState<StatementData | null>(null);
     const [receipts, setReceipts] = useState<ReceiptRow[]>([]);
     const [loading, setLoading] = useState(true);
@@ -43,8 +47,6 @@ export const ResidentCabinet = () => {
 
     useEffect(() => { load(); }, [load]);
 
-    const identity = getIdentity();
-
     if (loading) {
         return (
             <div style={{ textAlign: "center", padding: 80 }}>
@@ -54,19 +56,74 @@ export const ResidentCabinet = () => {
     }
 
     return (
-        <div>
-            <Typography.Title level={4} style={{ marginTop: 0 }}>
-                Личный кабинет
-            </Typography.Title>
-            {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
-            <CabinetView
-                statement={statement}
-                receipts={receipts}
-                houseExpenses={true}
-                apiUrl={apiUrl}
-                userLabel={`Пользователь: ${identity?.full_name || identity?.username || ""}`}
-            />
-        </div>
+        // Шрифты ЛК крупнее базовых (удобно читать с телефона) — локальный ConfigProvider
+        // переопределяет только это поддерево; остальные разделы не затронуты.
+        <ConfigProvider theme={{ token: { fontSize: 17 } }}>
+            <div>
+                <Typography.Title level={4} style={{ marginTop: 0 }}>
+                    Личный кабинет
+                </Typography.Title>
+                {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
+                <CabinetView
+                    statement={statement}
+                    receipts={receipts}
+                    houseExpenses={true}
+                    apiUrl={apiUrl}
+                />
+
+                <div
+                    style={{
+                        marginTop: 24,
+                        paddingTop: 16,
+                        borderTop: "1px solid #d9d9d9",
+                        display: "flex",
+                        justifyContent: "center",
+                        gap: 12,
+                    }}
+                >
+                    {[
+                        {
+                            key: "home",
+                            icon: <HomeOutlined />,
+                            label: "Главная",
+                            onClick: () => navigate("/"),
+                        },
+                        {
+                            key: "settings",
+                            icon: <SettingOutlined />,
+                            label: "Настройки",
+                            onClick: () => message.info("Раздел «Настройки» появится позже"),
+                        },
+                        {
+                            key: "logout",
+                            icon: <LogoutOutlined />,
+                            label: "Выход",
+                            danger: true,
+                            onClick: () => logout(),
+                        },
+                    ].map((b) => (
+                        <Button
+                            key={b.key}
+                            danger={b.danger}
+                            onClick={b.onClick}
+                            style={{
+                                width: 88,
+                                height: 72,
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: 6,
+                                borderRadius: 14,
+                            }}
+                        >
+                            <span style={{ fontSize: 20, lineHeight: 1 }}>{b.icon}</span>
+                            <span style={{ fontSize: 13, lineHeight: 1 }}>{b.label}</span>
+                        </Button>
+                    ))}
+                </div>
+            </div>
+        </ConfigProvider>
     );
 };
 
