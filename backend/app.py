@@ -756,6 +756,7 @@ from routers.receipts import router as receipts_router
 from routers.others import router as others_router
 from routers.preferences import router as preferences_router
 from routers.reports import router as reports_router
+from routers.dashboard import router as dashboard_router
 # Реэкспорт для обратной совместимости: тесты импортируют `build_account_statement` из `app`.
 from routers.others import build_account_statement
 
@@ -769,4 +770,5 @@ app.include_router(receipts_router)
 app.include_router(others_router)
 app.include_router(preferences_router)
 app.include_router(reports_router)
+app.include_router(dashboard_router)
 app.include_router(api_router)

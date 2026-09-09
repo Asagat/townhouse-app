@@ -27,12 +27,14 @@ import { CashReport } from "./pages/CashReport";
 import { ExpenseReport } from "./pages/ExpenseReport";
 import { DebtorsReport } from "./pages/DebtorsReport";
 import { StatementReport } from "./pages/StatementReport";
+import { Dashboard } from "./pages/Dashboard";
 import { authProvider } from "./auth/authProvider";
 import { apiUrl, http } from "./auth/http";
 import { filterCategoriesByRole } from "./auth/menuAccess";
 import { AUTH_EVENT, getIdentity } from "./auth/token";
 
 const resourceForRoute = (key: string) => {
+    if (key === "dashboard") return <Dashboard />;
     if (key === "users") return <Users />;
     if (key === "cabinet") return <ResidentCabinet />;
     if (key === "cabinet_admin") return <AdminCabinet />;

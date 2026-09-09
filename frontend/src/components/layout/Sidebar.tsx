@@ -1,4 +1,4 @@
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useLogout, useGetIdentity } from "@refinedev/core";
 import { Button, Tooltip } from "antd";
 import { LogoutOutlined, UserOutlined } from "@ant-design/icons";
@@ -47,8 +47,47 @@ export const Sidebar = () => {
             <SidebarHeader isCollapsed={isCollapsed} onToggle={toggleSidebar} />
 
             <nav style={{ flex: 1, overflow: "hidden" }}>
-                {categories.map((category) =>
-                    isCollapsed ? (
+                {categories.map((category) => {
+                    const isSingle = category.items.length === 1;
+                    if (!isCollapsed && isSingle) {
+                        const item = category.items[0];
+                        const isActive = location.pathname === `/${item.key}`;
+                        return (
+                            <Link
+                                key={item.key}
+                                to={`/${item.key}`}
+                                style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 12,
+                                    padding: "10px 24px",
+                                    fontSize: 15,
+                                    color: isActive ? COLORS.textActive : COLORS.textMuted,
+                                    fontWeight: isActive ? 600 : 500,
+                                    background: isActive ? COLORS.hoverBg : "transparent",
+                                    transition: "background 0.15s ease",
+                                    userSelect: "none",
+                                }}
+                                onMouseEnter={(e) => {
+                                    if (!isActive) e.currentTarget.style.background = COLORS.hoverBg;
+                                }}
+                                onMouseLeave={(e) => {
+                                    if (!isActive) e.currentTarget.style.background = "transparent";
+                                }}
+                            >
+                                <i
+                                    className={item.icon}
+                                    style={{
+                                        width: 16,
+                                        textAlign: "center",
+                                        color: isActive ? COLORS.accent : COLORS.iconMuted,
+                                    }}
+                                />
+                                <span style={{ whiteSpace: "nowrap" }}>{item.label}</span>
+                            </Link>
+                        );
+                    }
+                    return isCollapsed ? (
                         <SidebarCollapsedCategory
                             key={category.title}
                             category={category}
@@ -62,8 +101,8 @@ export const Sidebar = () => {
                             isOpen={openCategories[category.title]}
                             onToggle={() => toggleCategory(category.title)}
                         />
-                    ),
-                )}
+                    );
+                })}
             </nav>
 
             <div

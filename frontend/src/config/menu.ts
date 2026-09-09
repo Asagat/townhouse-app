@@ -4,6 +4,16 @@ export type Category = { title: string; items: ResourceItem[] };
 
 export const categories: Category[] = [
     {
+        title: "Главная",
+        items: [
+            {
+              key: "dashboard",
+              label: "Главная",
+              icon: "fa-solid fa-gauge-high",
+            },
+        ],
+    },
+    {
         title: "1. Документы",
         items: [
             {

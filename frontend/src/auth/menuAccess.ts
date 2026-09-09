@@ -18,6 +18,9 @@ export const ROLE_OPTIONS_LABELS: Record<string, string> = {
 // Квитанции/Кассы кассиру НЕ показываем.
 // Контролер — только показания (+ квартиры/счета/контрагенты/счетчики для выбора).
 export const resourceRoles: Record<string, string[]> = {
+    // Главная (бухгалтерские роли; житель входит в свой кабинет)
+    dashboard: ["admin", "operator", "cashier", "auditor"],
+
     // Документы
     payments: ["admin", "operator", "cashier"],
     accrual_documents: ["admin", "operator"],
