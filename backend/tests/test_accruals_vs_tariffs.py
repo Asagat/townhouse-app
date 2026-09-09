@@ -21,6 +21,7 @@
 """
 
 from sqlalchemy import text
+import pytest
 
 FIXED = "Фиксированный"
 AREA = "По площади"
@@ -67,7 +68,24 @@ def test_regular_accruals_match_tariff_formulas(db):
 
 
 def test_march2024_fund_uses_closed_tariff_9560(db):
-    """март-2024 «Фонд развития»: действует тариф-период 9560 и начисление равно 9560."""
+    """март-2024 «Фонд развития»: действует тариф-период 9560 и начисление равно 9560.
+
+    Проверка имеет смысл только на БД с импортированной историей (есть начисления
+    за март-2024 по «Фонду»). На пустой/свежей БД (disposable-CI после alembic +
+    init_data, без истории) таких данных нет — тест пропускается, как и контрольные
+    сверки с файлом-источником.
+    """
+    # Наличие исторического начисления «Фонда» за март-2024 — признак импортированных данных.
+    has_march = db.execute(text("""
+        SELECT EXISTS (
+            SELECT 1 FROM accruals_register a
+            JOIN services_type sv ON sv.id=a.services_type_id
+            WHERE sv.services_type='Фонд развития' AND a.accrual_date='2024-03-01'
+        )
+    """)).scalar()
+    if not has_march:
+        pytest.skip("Нет начислений «Фонда» за март-2024 (БД без импортированной истории)")
+
     tariff = db.execute(text("""
         SELECT id, price, status FROM tariffs
         WHERE valid_from <= '2024-03-31' AND valid_to >= '2024-03-01'
