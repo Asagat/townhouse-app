@@ -70,9 +70,8 @@ fi
 # Выбор по встроенной в имя метке времени (townhouse_ГГГГММДД_ЧЧММСС.sql),
 # а не по mtime: при синхронизации (Synology Drive) mtime ненадёжен.
 # Внимание: файл ролей (townhouse_roles_*.sql) тоже подходит под townhouse_*.sql —
-# поэтому данные и роли выбираем раздельными масками.
+# поэтому данные выбираем маской без ролей.
 DATA="$(ls "$SRC_DIR"/townhouse_*.sql 2>/dev/null | grep -v '/townhouse_roles_' | sort | tail -1 || true)"
-ROLES="$(ls "$SRC_DIR"/townhouse_roles_*.sql 2>/dev/null | sort | tail -1 || true)"
 if [ -z "${DATA:-}" ]; then
   echo "⚠️  В '$SRC_DIR' нет дампов townhouse_*.sql — жду первой синхронизации."
   exit 0
@@ -93,7 +92,7 @@ fi
 echo "=============================================================="
 echo " Зеркальное обновление БД из дампов:"
 echo "   источник : $SRC_DIR"
-echo "   данные  : $DATA_NAME${ROLES:+ (+ $(basename "$ROLES"))}"
+echo "   данные  : $DATA_NAME (роли не применяются)"
 echo "   маркер  : ${LAST:-<не было>}"
 if [ "$DRY" -eq 1 ]; then
   echo " --dry-run: план готов, БД НЕ трогаю."
@@ -109,12 +108,13 @@ if [ "$YES" -eq 0 ]; then
 fi
 
 # ---- импорт данных (полная замена) ----------------------------------------
-if [ -n "${ROLES:-}" ]; then
-  "$SCRIPT_DIR/restore_townhouse.sh" all --fresh --yes "$DATA" "$ROLES"
-else
-  echo ">> Файл ролей не найден — импортирую только данные."
-  "$SCRIPT_DIR/restore_townhouse.sh" data --fresh --yes "$DATA"
-fi
+# Роли при зеркальном импорте НЕ применяем: роль townhouse_user на зеркале уже
+# создана из .env (docker-compose) / при первичной настройке (§7.3), а дамп ролей
+# с основного ПК содержит ALTER ROLE ... PASSWORD — он перезаписал бы пароль роли
+# на пароль того ПК, и локальный backend потерял бы доступ. Первичная настройка
+# ролей на новой машине — вручную через scripts/restore_townhouse.sh roles ...
+echo ">> Роли пропущены — импортирую только данные."
+"$SCRIPT_DIR/restore_townhouse.sh" data --fresh --yes "$DATA"
 
 # ---- догон схемы до кода (если код новее дампа) ---------------------------
 # Окружение бэкенда выбирается автоматически: .venv (нативный запуск, snowflake)
