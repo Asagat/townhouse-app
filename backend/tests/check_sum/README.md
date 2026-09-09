@@ -16,6 +16,7 @@
 | `test_registers_settlements_vs_cash.py` | **Взаиморасчёты** `accounts_register.expense` (= погашение долга от жительских взносов) vs «Касса-Приход» жителей: итог, по квартире, по месяцу, месяц × квартира |
 | `test_control_sums_vs_source.py` | Базовые общие итоги регистров vs файл: начисления (по квартире/итог/число строк) и касса (расход итог; приход по квартире нетто сторно; приход итог) — независимая базовая сверка |
 | `test_cash_articles_pending.py` | **(xfail)** пункт «приход по статьям» — отложен: Код_Статья/Код_Аналитика файла не имеет прямого перс-соответствия статьям `analytic_articles` БД либо услугам долга `accounts_register` (платёж распределяется автоматически). Ждёт трактовку владельца; см. комментарии в файле. |
+| `test_registers_services_vs_writeoff_model.py` | **Остатки по услугам vs модель переливов**: фактический `accounts_register.expense` по услугам (и остатки `income − expense`) должен в точности воспроизводиться моделью приоритетного распределения (деньги счёта → долги услуг по `services_type.priority`, Фонд последним). Источник долгов — `accruals_register`, деньги — `cash_register` (как `rebuild_accounts_register`). Расхождение = счёт не пересчитан после изменения начислений (лечится `migrations/resync_accounts_register_to_accruals.py`). |
 
 Вспомогательный модуль агрегирования начислений — `backend/migrations/accruals_sum_check.py`
 (класс `AccrualsSumCheck`, standalone CLI `python migrations/accruals_sum_check.py`).
@@ -39,5 +40,7 @@ MIGRATION_SRC_XLSX=/path/Миграция\ данных\ FTH.xlsx \
 
 ## Ожидаемое поведение сборки
 
-Прогон директории: `8 passed, 1 xpassed`. Пункт «по статьям кассы» (xfail)
-проходит как xpass, пока трактовка не выбрана.
+Прогон директории: `13 passed, 1 skipped, 1 xpassed`. Пункт «по статьям кассы» (xfail)
+проходит как xpass, пока трактовка не выбрана. «Остатки по услугам vs модель переливов»
+(`test_registers_services_vs_writeoff_model.py`) — строгий: при рассинхроне регистра с
+первичкой падает с перечнем счетов/услуг (лечится пересчётом `rebuild_accounts_register`).
