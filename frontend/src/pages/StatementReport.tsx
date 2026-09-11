@@ -21,6 +21,7 @@ import { ReloadOutlined, FilePdfOutlined } from "@ant-design/icons";
 import dayjs, { Dayjs } from "dayjs";
 import { useList } from "@refinedev/core";
 import { authedFetch, apiUrl, openAuthorizedPdf } from "../auth/http";
+import { formatDate, formatMoney } from "../config/formatters";
 
 interface MovementRow {
     date: string | null;
@@ -50,20 +51,10 @@ interface StmtData {
     closing: number;
 }
 
-const fmt = (v: number | null | undefined): string => {
-    const num = Number(v ?? 0);
-    let n = num, prefix = "";
-    if (!Number.isFinite(n)) return "0,00";
-    if (n < 0) { prefix = "-"; n = Math.abs(n); }
-    const [i, f] = n.toFixed(2).split(".");
-    return `${prefix}${i.replace(/\B(?=(\d{3})+(?!\d))/g, " ")}${f ? "," + f : ""}`;
-};
 const fmtSigned = (v: number): string => {
-    const s = fmt(Math.abs(v));
-    return v > 0 ? `+${s}` : v < 0 ? `-${s}` : "0,00";
+    if (!v) return formatMoney(0);
+    return (v > 0 ? "+" : "−") + formatMoney(Math.abs(v));
 };
-const fmtDate = (v: string | null): string =>
-    v ? dayjs(v).format("DD.MM.YYYY") : "—";
 
 export const StatementReport = () => {
     const [accountId, setAccountId] = useState<number | undefined>(undefined);
@@ -115,7 +106,7 @@ export const StatementReport = () => {
     };
 
     const cols = [
-        { title: "Дата", dataIndex: "date", key: "date", width: 90, render: (v: string | null) => fmtDate(v) },
+        { title: "Дата", dataIndex: "date", key: "date", width: 90, render: (v: string | null) => formatDate(v) },
         { title: "Вид", dataIndex: "kind_label", key: "kind_label", width: 120 },
         { title: "Услуга", dataIndex: "service", key: "service", render: (v: string | null) => v ?? "—" },
         { title: "Основание", dataIndex: "document", key: "document", render: (v: string | null) => v ?? "—" },
@@ -140,7 +131,7 @@ export const StatementReport = () => {
             key: "balance_after",
             align: "right" as const,
             width: 110,
-            render: (v: number) => <Typography.Text>{fmt(v)}</Typography.Text>,
+            render: (v: number) => <Typography.Text>{formatMoney(v)}</Typography.Text>,
         },
     ];
 

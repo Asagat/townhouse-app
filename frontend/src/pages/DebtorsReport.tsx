@@ -7,6 +7,7 @@ import { Card, Table, Spin, Alert, Statistic, Space, Typography, Button, DatePic
 import { ReloadOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { authedFetch, apiUrl, openAuthorizedPdf } from "../auth/http";
+import { formatMoney } from "../config/formatters";
 
 interface DebtorRow {
     account_id: number;
@@ -27,14 +28,6 @@ interface DebtorsData {
     as_of?: string | null;
 }
 
-const fmt = (v: number | null | undefined): string => {
-    const num = Number(v ?? 0);
-    let n = num, prefix = "";
-    if (!Number.isFinite(n)) return "0,00";
-    if (n < 0) { prefix = "-"; n = Math.abs(n); }
-    const [i, f] = n.toFixed(2).split(".");
-    return `${prefix}${i.replace(/\B(?=(\d{3})+(?!\d))/g, " ")}${f ? "," + f : ""}`;
-};
 
 export const DebtorsReport = () => {
     // «На дату»: если дата выбрана — долг считается по состоянию на конец этого дня;
@@ -71,10 +64,10 @@ export const DebtorsReport = () => {
         { title: "№ квартиры", dataIndex: "apartment_number", key: "apartment_number", render: (v: number | null) => v ?? "—" },
         { title: "Лицевой счёт", dataIndex: "account_number", key: "account_number" },
         { title: "Собственник", dataIndex: "owner_name", key: "owner_name", render: (v: string | null) => v ?? "—" },
-        { title: "Начислено", dataIndex: "accrued", key: "accrued", align: "right" as const, render: (v: number) => fmt(v) },
-        { title: "Оплачено", dataIndex: "paid", key: "paid", align: "right" as const, render: (v: number) => fmt(v) },
-        { title: "Переплата", dataIndex: "overpayment", key: "overpayment", align: "right" as const, render: (v: number) => (v ? fmt(v) : "—") },
-        { title: "Долг", dataIndex: "debt", key: "debt", align: "right" as const, render: (v: number) => <Typography.Text style={{ color: v > 0 ? "#cf1322" : "#3f8600" }}>{fmt(v)}</Typography.Text> },
+        { title: "Начислено", dataIndex: "accrued", key: "accrued", align: "right" as const, render: (v: number) => formatMoney(v) },
+        { title: "Оплачено", dataIndex: "paid", key: "paid", align: "right" as const, render: (v: number) => formatMoney(v) },
+        { title: "Переплата", dataIndex: "overpayment", key: "overpayment", align: "right" as const, render: (v: number) => (v ? formatMoney(v) : "—") },
+        { title: "Долг", dataIndex: "debt", key: "debt", align: "right" as const, render: (v: number) => <Typography.Text style={{ color: v > 0 ? "#cf1322" : "#3f8600" }}>{formatMoney(v)}</Typography.Text> },
     ];
 
     return (

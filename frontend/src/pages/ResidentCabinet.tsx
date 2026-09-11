@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Button, ConfigProvider, Spin, Typography, message } from "antd";
+import { Alert, Button, Spin, Typography, message } from "antd";
 import { HomeOutlined, LogoutOutlined, SettingOutlined } from "@ant-design/icons";
 import { useApiUrl, useLogout } from "@refinedev/core";
 import { authedFetch } from "../auth/http";
@@ -56,20 +56,18 @@ export const ResidentCabinet = () => {
     }
 
     return (
-        // Шрифты ЛК крупнее базовых (удобно читать с телефона) — локальный ConfigProvider
-        // переопределяет только это поддерево; остальные разделы не затронуты.
-        <ConfigProvider theme={{ token: { fontSize: 17 } }}>
-            <div>
-                <Typography.Title level={4} style={{ marginTop: 0 }}>
-                    Личный кабинет
-                </Typography.Title>
-                {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
-                <CabinetView
-                    statement={statement}
-                    receipts={receipts}
-                    houseExpenses={true}
-                    apiUrl={apiUrl}
-                />
+        // Крупный шрифт ЛК задаёт сам CabinetView (единый вид в ЛК и админ-просмотре).
+        <div>
+            <Typography.Title level={4} style={{ marginTop: 0 }}>
+                Личный кабинет
+            </Typography.Title>
+            {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
+            <CabinetView
+                statement={statement}
+                receipts={receipts}
+                houseExpenses={true}
+                apiUrl={apiUrl}
+            />
 
                 <div
                     style={{
@@ -122,8 +120,7 @@ export const ResidentCabinet = () => {
                         </Button>
                     ))}
                 </div>
-            </div>
-        </ConfigProvider>
+        </div>
     );
 };
 

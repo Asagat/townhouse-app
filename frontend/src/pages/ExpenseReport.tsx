@@ -7,6 +7,7 @@ import { ReloadOutlined } from "@ant-design/icons";
 import dayjs, { Dayjs } from "dayjs";
 import { useList } from "@refinedev/core";
 import { authedFetch, apiUrl, openAuthorizedPdf } from "../auth/http";
+import { formatMoney } from "../config/formatters";
 
 const { RangePicker } = DatePicker;
 
@@ -28,14 +29,6 @@ interface ExpenseData {
     count: number;
 }
 
-const fmt = (v: number | null | undefined): string => {
-    const num = Number(v ?? 0);
-    let n = num, prefix = "";
-    if (!Number.isFinite(n)) return "0,00";
-    if (n < 0) { prefix = "-"; n = Math.abs(n); }
-    const [i, f] = n.toFixed(2).split(".");
-    return `${prefix}${i.replace(/\B(?=(\d{3})+(?!\d))/g, " ")}${f ? "," + f : ""}`;
-};
 
 export const ExpenseReport = () => {
     const [range, setRange] = useState<[Dayjs, Dayjs] | null>(() => [
@@ -97,7 +90,7 @@ export const ExpenseReport = () => {
 
     const articleCols = [
         { title: "Статья расхода", dataIndex: "name", key: "name" },
-        { title: "Сумма", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => fmt(v) },
+        { title: "Сумма", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => formatMoney(v) },
     ];
 
     const movementCols = [
@@ -106,7 +99,7 @@ export const ExpenseReport = () => {
         { title: "Статья", dataIndex: "article_name", key: "article_name", render: (v: string | null) => v ?? "—" },
         { title: "Контрагент", dataIndex: "contractor_name", key: "contractor_name", render: (v: string | null) => v ?? "—" },
         { title: "Лицевой счёт", dataIndex: "account_number", key: "account_number", render: (v: string | null) => v ?? "—" },
-        { title: "Сумма", dataIndex: "amount", key: "amount", align: "right" as const, render: (v: number) => fmt(v) },
+        { title: "Сумма", dataIndex: "amount", key: "amount", align: "right" as const, render: (v: number) => formatMoney(v) },
     ];
 
     return (

@@ -7,6 +7,7 @@ import { ReloadOutlined } from "@ant-design/icons";
 import dayjs, { Dayjs } from "dayjs";
 import { useList } from "@refinedev/core";
 import { authedFetch, apiUrl, openAuthorizedPdf } from "../auth/http";
+import { formatMoney } from "../config/formatters";
 
 const { RangePicker } = DatePicker;
 
@@ -40,14 +41,6 @@ interface ReportData {
     movements: MovementRow[];
 }
 
-const fmt = (v: number | null | undefined): string => {
-    const num = Number(v ?? 0);
-    let n = num, prefix = "";
-    if (!Number.isFinite(n)) return "0,00";
-    if (n < 0) { prefix = "-"; n = Math.abs(n); }
-    const [i, f] = n.toFixed(2).split(".");
-    return `${prefix}${i.replace(/\B(?=(\d{3})+(?!\d))/g, " ")}${f ? "," + f : ""}`;
-};
 
 export const CashReport = () => {
     const [range, setRange] = useState<[Dayjs, Dayjs] | null>(() => [
@@ -111,10 +104,10 @@ export const CashReport = () => {
 
     const pointCols = [
         { title: "Касса", dataIndex: "cash_point_name", key: "cash_point_name" },
-        { title: "Остаток на начало", dataIndex: "opening", key: "opening", align: "right" as const, render: (v: number) => fmt(v) },
-        { title: "Приход", dataIndex: "income", key: "income", align: "right" as const, render: (v: number) => fmt(v) },
-        { title: "Расход", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => fmt(v) },
-        { title: "Остаток на конец", dataIndex: "closing", key: "closing", align: "right" as const, render: (v: number) => fmt(v) },
+        { title: "Остаток на начало", dataIndex: "opening", key: "opening", align: "right" as const, render: (v: number) => formatMoney(v) },
+        { title: "Приход", dataIndex: "income", key: "income", align: "right" as const, render: (v: number) => formatMoney(v) },
+        { title: "Расход", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => formatMoney(v) },
+        { title: "Остаток на конец", dataIndex: "closing", key: "closing", align: "right" as const, render: (v: number) => formatMoney(v) },
     ];
 
     const movementCols = [
@@ -124,8 +117,8 @@ export const CashReport = () => {
         { title: "Лицевой счёт", dataIndex: "account_number", key: "account_number", render: (v: string | null) => v ?? "—" },
         { title: "Статья", dataIndex: "article_name", key: "article_name", render: (v: string | null) => v ?? "—" },
         { title: "Контрагент", dataIndex: "contractor_name", key: "contractor_name", render: (v: string | null) => v ?? "—" },
-        { title: "Приход", dataIndex: "income", key: "income", align: "right" as const, render: (v: number) => fmt(v) },
-        { title: "Расход", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => fmt(v) },
+        { title: "Приход", dataIndex: "income", key: "income", align: "right" as const, render: (v: number) => formatMoney(v) },
+        { title: "Расход", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => formatMoney(v) },
     ];
 
     return (

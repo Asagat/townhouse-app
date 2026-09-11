@@ -5,11 +5,11 @@
 //   - в просмотре администратора (pages/AdminCabinet) — по выбранному счёту (mode='account').
 
 import { useEffect, useState } from "react";
-import { Button, Card, Col, DatePicker, Row, Select, Space, Statistic, Tooltip, Typography } from "antd";
+import { Button, Card, Col, ConfigProvider, DatePicker, Row, Select, Space, Statistic, Tooltip, Typography } from "antd";
 import { FilePdfOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { authedFetch, openAuthorizedPdf } from "../../auth/http";
-import { formatPhone } from "../../config/formatters";
+import { formatDate, formatMoney, formatPeriod, formatPhone } from "../../config/formatters";
 
 export interface StatementMetrics {
     accrued_total: number;
@@ -52,6 +52,16 @@ export interface CashMovementRow {
     amount: number;
 }
 
+interface AccountMovementRow {
+    date: string | null;
+    kind: "accrual" | "payment" | "writeoff" | string;
+    kind_label: string;
+    service: string;
+    amount: number;
+    balance_after: number;
+    document: string | null;
+}
+
 export interface MovementMetrics {
     accrued: number;
     paid: number;
@@ -59,43 +69,34 @@ export interface MovementMetrics {
     debt: number;
 }
 
-const MONTH_NAMES = [
-    "январь", "февраль", "март", "апрель", "май", "июнь",
-    "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
-];
-
-const fmt = (v: number | null | undefined): string => {
-    let num = Number(v ?? 0);
-    if (!Number.isFinite(num)) num = 0;
-    let n = num, prefix = "";
-    if (n < 0) { prefix = "-"; n = Math.abs(n); }
-    const [i, f] = n.toFixed(2).split(".");
-    return `${prefix}${i.replace(/\B(?=(\d{3})+(?!\d))/g, " ")}${f ? "," + f : ""}`;
-};
-
-const periodLabel = (receipt: ReceiptRow): string => {
-    const name = MONTH_NAMES[receipt.period_month - 1] ?? "";
-    const cap = name ? name.charAt(0).toUpperCase() + name.slice(1) : String(receipt.period_month);
-    return `${cap}, ${receipt.period_year}`;
-};
-
-const fmtDate = (iso?: string | null): string => {
-    if (!iso) return "—";
-    const s = String(iso);
-    return s.length >= 10 ? `${s.slice(8, 10)}.${s.slice(5, 7)}.${s.slice(0, 4)}` : s;
-};
-
+// Денежная сумма со знаком «+/−» для движений по счёту; формат чисел — общий
+// `formatMoney` (2 знака, запятая, без знака валюты). Ноль — без знака.
 const fmtSigned = (v: number): string => {
     const num = Number(v ?? 0);
-    return (num >= 0 ? "+" : "−") + fmt(Math.abs(num));
+    if (!Number.isFinite(num) || num === 0) return formatMoney(0);
+    return (num > 0 ? "+" : "−") + formatMoney(Math.abs(num));
 };
 
-// Единый стиль крупных денежных сумм в списках ЛК (кегль как в «Общедомовых расходах»).
+// Единый стиль денежных сумм в списках ЛК: заметный, но уже не «баннер» —
+// кегль адаптивный (от 17px на узком экране до 22px на широком), среднее начертание.
 const SUM_FONT = {
-    fontSize: "clamp(22px, 6vw, 30px)",
-    fontWeight: 700 as const,
-    lineHeight: 1.2,
+    fontSize: "clamp(17px, 4vw, 22px)",
+    fontWeight: 600 as const,
+    lineHeight: 1.25,
     whiteSpace: "nowrap",
+};
+
+// Единый стиль подписей-строк внутри блоков ЛК. Эталон — отчёт «Общедомовые
+// расходы»: обычный вес (без «полужирного» акцента), кегль 17px, слева.
+const ROW_LABEL = {
+    fontSize: 17,
+    fontWeight: 400 as const,
+};
+
+// Стиль строки-итога: та же подпись, но подчёркнута как сумма.
+const ROW_TOTAL_LABEL = {
+    fontSize: 17,
+    fontWeight: 600 as const,
 };
 
 export const CabinetView = ({
@@ -118,8 +119,9 @@ export const CabinetView = ({
     const houseExpensesEnabled = houseExpenses === true;
     const accountId = statement?.account?.id;
 
-    // --- Блок «Деньги»: период + метрики + список Регистра денежных средств + PDF. ---
-    const [movements, setMovements] = useState<CashMovementRow[]>([]);
+    // --- Блок «Движения»: период + метрики + движения по счёту + PDF. ---
+    const [movements, setMovements] = useState<AccountMovementRow[]>([]);
+    const [cashMovements, setCashMovements] = useState<CashMovementRow[]>([]);
     const [movementMetrics, setMovementMetrics] = useState<MovementMetrics | null>(null);
     const [, setMovementsLoading] = useState(false);
     // --- Общий период страницы: стандартные пресеты или «За период» (свои даты). ---
@@ -170,6 +172,7 @@ export const CabinetView = ({
     useEffect(() => {
         if (!accountId) {
             setMovements([]);
+            setCashMovements([]);
             setMovementMetrics(null);
             return;
         }
@@ -178,12 +181,13 @@ export const CabinetView = ({
         const q = rangeParams();
         authedFetch(q ? `${movementBase}?${q}` : movementBase)
             .then(async (r) => {
-                if (!r.ok) return { cash_movements: [] as CashMovementRow[] };
+                if (!r.ok) return { movements: [], cash_movements: [] };
                 return r.json();
             })
             .then((d: any) => {
                 if (!cancelled) {
-                    setMovements((d?.cash_movements ?? []) as CashMovementRow[]);
+                    setMovements((d?.movements ?? []) as AccountMovementRow[]);
+                    setCashMovements((d?.cash_movements ?? []) as CashMovementRow[]);
                     setMovementMetrics((d?.metrics ?? null) as MovementMetrics | null);
                 }
             })
@@ -234,7 +238,10 @@ export const CabinetView = ({
     });
 
     return (
-        <div>
+        // Единый вид ЛК и в кабинете жителя, и в админ-просмотре: крупный шрифт
+        // задаётся здесь (а не в странице), чтобы оба режима выглядели одинаково.
+        <ConfigProvider theme={{ token: { fontSize: 17 } }}>
+            <div>
             {statement && (
                 <Card title={`Лицевой счёт ${statement.account.account_number}`} style={{ marginBottom: 16 }}>
                     <Space direction="vertical" style={{ width: "100%" }}>
@@ -292,13 +299,13 @@ export const CabinetView = ({
                     {movementMetrics && (
                         <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
                             <Col xs={24} md={8}>
-                                <Card size="small"><Statistic title="Начислено за период" value={movementMetrics.accrued} precision={2} valueStyle={{ fontSize: 19 }} /></Card>
+                                <Card size="small"><Statistic title="Начислено за период" value={movementMetrics.accrued} formatter={formatMoney} valueStyle={{ fontSize: 19 }} /></Card>
                             </Col>
                             <Col xs={24} md={8}>
-                                <Card size="small"><Statistic title="Оплачено за период" value={movementMetrics.paid} precision={2} valueStyle={{ fontSize: 19 }} /></Card>
+                                <Card size="small"><Statistic title="Оплачено за период" value={movementMetrics.paid} formatter={formatMoney} valueStyle={{ fontSize: 19 }} /></Card>
                             </Col>
                             <Col xs={24} md={8}>
-                                <Card size="small"><Statistic title="Долг на конец периода" value={movementMetrics.debt} precision={2} valueStyle={{ fontSize: 19, color: movementMetrics.debt > 0 ? "#cf1322" : "#3f8600" }} /></Card>
+                                <Card size="small"><Statistic title="Долг на конец периода" value={movementMetrics.debt} formatter={formatMoney} valueStyle={{ fontSize: 19, color: movementMetrics.debt > 0 ? "#cf1322" : "#3f8600" }} /></Card>
                             </Col>
                         </Row>
                     )}
@@ -311,19 +318,18 @@ export const CabinetView = ({
                                     i < statement.services.length - 1 ? "1px solid #e8e8e8" : "none",
                             }}
                         >
-                            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <Typography.Text style={{ fontSize: 18, fontWeight: 600 }}>
-                                        {s.service_name}
-                                    </Typography.Text>
-                                    <div
-                                        style={{
-                                            ...SUM_FONT,
-                                            color: s.debt > 0 ? "#cf1322" : "#1f1f1f",
-                                        }}
-                                    >
-                                        {fmt(s.debt)}
-                                    </div>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+                                <Typography.Text style={{ ...ROW_LABEL, minWidth: 0 }}>
+                                    {s.service_name}
+                                </Typography.Text>
+                                <div
+                                    style={{
+                                        ...SUM_FONT,
+                                        textAlign: "right",
+                                        color: s.debt > 0 ? "#cf1322" : "#1f1f1f",
+                                    }}
+                                >
+                                    {formatMoney(s.debt)}
                                 </div>
                             </div>
                         </div>
@@ -332,10 +338,10 @@ export const CabinetView = ({
             )}
 
             {statement && accountId !== undefined && (
-                <Card title="Деньги" style={{ marginBottom: 16 }}>
+                <Card title="Движения" style={{ marginBottom: 16 }}>
                     {movements.length === 0 ? (
                         <Typography.Text type="secondary">
-                            Денежных операций за выбранный период нет
+                            Движений за выбранный период нет
                         </Typography.Text>
                     ) : (
                         movements.map((mv, i) => (
@@ -347,28 +353,75 @@ export const CabinetView = ({
                                         i < movements.length - 1 ? "1px solid #e8e8e8" : "none",
                                 }}
                             >
-                                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                        <Typography.Text strong style={{ fontSize: 18 }}>
-                                            {fmtDate(mv.date)}
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+                                    <div style={{ minWidth: 0 }}>
+                                        <Typography.Text style={{ ...ROW_LABEL, display: "block" }}>
+                                            {formatDate(mv.date)} — {mv.kind_label}
                                         </Typography.Text>
-                                        <div
-                                            style={{
-                                                ...SUM_FONT,
-                                                color:
-                                                    mv.amount > 0
-                                                        ? "#3f8600"
-                                                        : mv.amount < 0
-                                                          ? "#cf1322"
-                                                          : "#1f1f1f",
-                                            }}
-                                        >
-                                            {fmtSigned(mv.amount)}
-                                        </div>
+                                        <Typography.Text type="secondary" style={{ fontSize: 15 }}>
+                                            {mv.service}
+                                        </Typography.Text>
+                                    </div>
+                                    <div
+                                        style={{
+                                            ...SUM_FONT,
+                                            textAlign: "right",
+                                            color:
+                                                mv.amount > 0
+                                                    ? "#cf1322"
+                                                    : mv.amount < 0
+                                                      ? "#3f8600"
+                                                      : "#1f1f1f",
+                                        }}
+                                    >
+                                        {fmtSigned(mv.amount)}
                                     </div>
                                 </div>
                             </div>
                         ))
+                    )}
+                    <div
+                        style={{
+                            padding: "14px 0 0",
+                            marginTop: 8,
+                            borderTop: "1px solid #e8e8e8",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 16,
+                        }}
+                    >
+                        <Typography.Text style={ROW_TOTAL_LABEL}>
+                            Внесено в кассу за период
+                        </Typography.Text>
+                        <Typography.Text style={{ ...SUM_FONT, textAlign: "right" }}>
+                            {formatMoney(
+                                cashMovements.reduce((sum, c) => sum + (c.amount || 0), 0),
+                            )}
+                        </Typography.Text>
+                    </div>
+                    {cashMovements.length > 0 && (
+                        <div style={{ marginTop: 8 }}>
+                            {cashMovements.map((c, i) => (
+                                <div
+                                    key={`${c.date ?? ""}-${i}`}
+                                    style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "space-between",
+                                        gap: 16,
+                                        padding: "6px 0",
+                                    }}
+                                >
+                                    <Typography.Text type="secondary" style={{ fontSize: 15 }}>
+                                        {formatDate(c.date)} — {c.cash_point}
+                                    </Typography.Text>
+                                    <Typography.Text type="secondary" style={{ fontSize: 15, textAlign: "right" }}>
+                                        {formatMoney(c.amount)}
+                                    </Typography.Text>
+                                </div>
+                            ))}
+                        </div>
                     )}
                     <div style={{ textAlign: "center", marginTop: 12 }}>
                         <Tooltip title="PDF">
@@ -412,18 +465,18 @@ export const CabinetView = ({
                                 }}
                             >
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                    <Typography.Text strong style={{ fontSize: 18 }}>
-                                        {periodLabel(r)}
+                                    <Typography.Text style={ROW_LABEL}>
+                                        {formatPeriod(`${r.period_year}-${String(r.period_month).padStart(2, "0")}`)}
                                     </Typography.Text>
-                                    <div
-                                        style={{
-                                            marginTop: 4,
-                                            ...SUM_FONT,
-                                            color: "#1f1f1f",
-                                        }}
-                                    >
-                                        {fmt(r.payable_amount)}
-                                    </div>
+                                </div>
+                                <div
+                                    style={{
+                                        ...SUM_FONT,
+                                        textAlign: "right",
+                                        color: "#1f1f1f",
+                                    }}
+                                >
+                                    {formatMoney(r.payable_amount)}
                                 </div>
                                 <Tooltip title="PDF">
                                     <Button
@@ -477,13 +530,13 @@ export const CabinetView = ({
                                             gap: 16,
                                         }}
                                     >
-                                        <Typography.Text style={{ fontSize: 17 }}>
+                                        <Typography.Text style={ROW_LABEL}>
                                             {a.name}
                                         </Typography.Text>
                                         <Typography.Text
                                             style={{ ...SUM_FONT, textAlign: "right" }}
                                         >
-                                            {fmt(a.expense)}
+                                            {formatMoney(a.expense)}
                                         </Typography.Text>
                                     </div>
                                 </div>
@@ -500,18 +553,19 @@ export const CabinetView = ({
                                     gap: 16,
                                 }}
                             >
-                                <Typography.Text strong style={{ fontSize: 18 }}>
+                                <Typography.Text style={ROW_TOTAL_LABEL}>
                                     Итого расходов
                                 </Typography.Text>
-                                <Typography.Text strong style={{ ...SUM_FONT, textAlign: "right" }}>
-                                    {fmt(expData.total)}
+                                <Typography.Text style={{ ...SUM_FONT, fontWeight: 600, textAlign: "right" }}>
+                                    {formatMoney(expData.total)}
                                 </Typography.Text>
                             </div>
                         </>
                     )}
                 </Card>
             )}
-        </div>
+            </div>
+        </ConfigProvider>
     );
 };
 

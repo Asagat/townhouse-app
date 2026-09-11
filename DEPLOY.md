@@ -408,6 +408,44 @@ graph LR
 - HTTPS при необходимости терминируется на NAS Synology (сертификат DSM) — см. §7.1;
   на самом ПК nginx слушает только HTTP, сертификата на ПК нет.
 
+**Известная проблема: «Outdated Optimize Dep» / страница не открывается (09.2026).**
+
+`townhouse-frontend` использует анонимный том под `/app/node_modules` (см. compose, строка
+`- /app/node_modules`), поэтому зависимости внутри контейнера живут **отдельно** от хостовых
+`frontend/node_modules`. Если этот том неполный (например, из него выпали dev-зависимости
+вроде `vitest`), то при каждом старте Vite видит «lockfile has changed», пишет
+`Re-optimizing dependencies…` и сбрасывает prebundle-кэш. В этом состоянии запросы к
+`/node_modules/.vite/deps/*` возвращают `504 Outdated Optimize Dep`, а импорт такой
+библиотеки (напр. `@dnd-kit/core`) валит всю страницу — внешне это выглядит как «страница
+не обновляется / блок пуст», хотя бэкенд отдаёт данные.
+
+Что делать при таких симптомах:
+
+```bash
+# 1) Перезапустить dev-сервер фронтенда (Vite пересоберёт prebundle):
+docker compose restart frontend
+
+# 2) Если не помогло — переустановить зависимости внутри контейнера:
+docker compose exec -T frontend npm install          # для dev-стека допустимо
+#    или полностью пересоздать анонимный том node_modules:
+docker compose rm -sf frontend && docker compose up -d --build frontend
+```
+
+Проверка, что проблема ушла (должно вернуть код 200, не 504):
+
+```bash
+docker compose exec -T frontend sh -c \
+  'wget -q -O /dev/null "http://127.0.0.1:5173/node_modules/.vite/deps/@dnd-kit_core.js"; echo $?'
+```
+
+Диагностика «пустого блока на странице»: разрез между «данных нет» и «страница не
+отрисовалась» снимается одним запросом к API (см. §7.2 — порты проброшены на хост):
+
+```bash
+curl -s "http://127.0.0.1:8000/api/me/movements?from_date=2026-01-01&to_date=2026-09-30" \
+  -H "Authorization: Bearer <token>"
+```
+
 **После переписывания истории git (09.2026, вычистка секрета):**
 
 Если клон `corsus` «разошёлся» с удалённой `main` (история переписана на GitHub,

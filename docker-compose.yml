@@ -38,6 +38,10 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:?...ADMIN_PASSWORD не задан в .env}
     volumes:
       - ./backend:/app:z
+    # Dev-стек (том ./backend смонтирован): авто-перезагрузка uvicorn, чтобы правки
+    # кода сразу были активны без ручного restart контейнера. Прод — systemd-юнит
+    # без --reload (см. DEPLOY §5), этот compose для прод-длительного не используется.
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app"]
 
   frontend:
     build:
