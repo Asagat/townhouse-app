@@ -108,8 +108,13 @@ jobs:
   # НА ХОСТЕ (node) и не проверяет Dockerfile: ранее прод-образ фронтенда не собирался
   # из-за прав /app при USER node, а fix этого не ловил. Образы только собираются
   # (push: false) — публикация остаётся за docker-build.yml.
-  images:
-    name: Images · сборка прод-образов (без публикации)
+  # ВНИМАНИЕ: имя МАТРИЧНОГО job'а GitHub дополняет суффиксом «(значения матрицы)»
+  # (напр. «... (frontend, frontend/Dockerfile.prod)»), поэтому сам он required-чеком
+  # в branch protection стать НЕ может — записанное базовое имя «висит» вечно expected
+  # и не выполняется никогда. Поэтому required-чеком делаем сводный нематричный
+  # job `images` ниже (needs: images-build) с фиксированным именем.
+  images-build:
+    name: Images · сборка (matrix)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -154,3 +159,18 @@ jobs:
           # Контейнер обязан быть running (не рестарт-луп).
           test "$(docker inspect -f '{{.State.Running}}' th-fe-ci)" = "true"
           docker logs th-fe-ci 2>&1 | tail -20
+
+  # Сводный job с ФИКСИРОВАННЫМ именем — это и есть required check
+  # «Images · сборка прод-образов (без публикации)» в branch protection.
+  # always(): job обязан отработать и упасть, если любая сборка/смоук упали
+  # (у skipped-чека branch protection статус «не пройден»).
+  images:
+    name: Images · сборка прод-образов (без публикации)
+    runs-on: ubuntu-latest
+    needs: [images-build]
+    if: always()
+    steps:
+      - name: Проверить результат сборки образов
+        run: |
+          echo "images-build: ${{ needs.images-build.result }}"
+          test "${{ needs.images-build.result }}" = "success"
