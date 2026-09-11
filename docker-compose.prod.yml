@@ -38,9 +38,10 @@ services:
       - townhouse
 
   backend:
-    # Тег фиксируем в .env (например, v1.0.0); без него compose откажется стартовать,
+    # Тег фиксируем в .env (например, 1.0.0 — docker-тег БЕЗ префикса `v`,
+    # git-тег при этом `v1.0.0`); без него compose откажется стартовать,
     # чтобы случайно не подтянуть dev-образ из main.
-    image: ghcr.io/asagat/townhouse-app-backend:${TOWNHOUSE_TAG:?TOWNHOUSE_TAG не задан — укажите релизный тег, напр. v1.0.0}
+    image: ghcr.io/asagat/townhouse-app-backend:${TOWNHOUSE_TAG:?TOWNHOUSE_TAG не задан — укажите docker-тег релиза без `v`, напр. 1.0.0}
     container_name: townhouse-backend
     restart: unless-stopped
     depends_on:
@@ -58,7 +59,7 @@ services:
       - townhouse
 
   frontend:
-    image: ghcr.io/asagat/townhouse-app-frontend:${TOWNHOUSE_TAG:?TOWNHOUSE_TAG не задан — укажите релизный тег, напр. v1.0.0}
+    image: ghcr.io/asagat/townhouse-app-frontend:${TOWNHOUSE_TAG:?TOWNHOUSE_TAG не задан — укажите docker-тег релиза без `v`, напр. 1.0.0}
     container_name: townhouse-frontend
     restart: unless-stopped
     depends_on:

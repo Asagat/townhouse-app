@@ -714,15 +714,20 @@ refresh сообщает «дамп уже применён / новых нет�
 (Vite-сервер) на прод не публикуется. Публикуются:
 
 - push в `main` → тег `main`;
-- релизный тег `v*` → semver-теги `v1.2.3` и `1.2`.
+- релизный тег `v*` → semver-теги `1.2.3` и `1.2`; можно запустить вручную.
 
-На NAS указываем **конкретный релизный тег** в `.env` (`TOWNHOUSE_TAG=v1.0.0`):
+> ⚠️ **Docker-теги — без префикса `v`.** `docker/metadata-action` (semver) снимает `v`:
+> git-тег `v1.0.1` → образы `:1.0.1` и `:1.0`. Именно это значение (без `v`) идёт в
+> `TOWNHOUSE_TAG`; при `TOWNHOUSE_TAG=v1.0.1` `docker compose pull` упадёт с `manifest unknown`.
+
+На NAS указываем **конкретный релизный тег** в `.env` (`TOWNHOUSE_TAG=1.0.0`):
 выкат = смена тега + `up -d`, откат = возврат прежнего тега. Без `TOWNHOUSE_TAG`
 compose намеренно не стартует (защита от случайной подстановки `main`, где может
 оказаться устаревший dev-образ фронтенда).
 
 ```bash
 # Дев-машина: пометить проверенный коммит main релизным тегом
+# (git-тег — с `v`; docker-образы получат теги 1.0.0 и 1.0 — уже без `v`)
 git tag v1.0.0 && git push origin v1.0.0   # запускает сборку semver-образов
 ```
 
@@ -741,7 +746,7 @@ git tag v1.0.0 && git push origin v1.0.0   # запускает сборку sem
    # POSTGRES_PASSWORD — пароль БД: openssl rand -base64 32
    # ADMIN_PASSWORD — пароль админа
    # CORS_ORIGINS=https://fth.sagacloud.synology.me
-   # TOWNHOUSE_TAG=v1.0.0
+   # TOWNHOUSE_TAG=1.0.0              # docker-тег без `v` (git-тег — v1.0.0)
    ```
 
 4. **DSM → Панель управления → Портал входа → Дополнительно → Обратный прокси**:
@@ -869,7 +874,7 @@ curl -s http://localhost:8080/api/auth/me | head -1  # ожидаем 401 (жи�
 #### 6) Обновление версии (по кнопке в Container Manager)
 
 1. Дев-машина: `git tag v1.0.1 && git push origin v1.0.1` (дождаться сборки образа);
-2. На NAS: в `.env` сменить `TOWNHOUSE_TAG=v1.0.1`;
+2. На NAS: в `.env` сменить `TOWNHOUSE_TAG=1.0.1` (docker-тег без `v`);
 3. Container Manager → проект → **«Обновить»** / `docker compose pull && up -d`;
 4. Схема догоняется сама только при наличии миграций в образе — при изменении
    схемы выполнить `alembic upgrade head` (как в шаге В).
@@ -1015,7 +1020,7 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 | Файл | Что делает |
 |---|---|
 | `.github/workflows/ci.yml` | Автопроверка на push/PR в `main`. Job `backend`: disposable-сервис `postgres:16` → `alembic upgrade head` → `init_data.py` → `python -m pytest tests/ -q` (`DATABASE_URL` и `AUTH_SECRET_KEY` задаются на job). Job `frontend`: `npm ci` → `npm run build` (= tsc + vite). Job `images`: сборка **прод-образов** (`frontend/Dockerfile.prod`, `backend/Dockerfile`) без публикации + smoke-тест фронтенд-контейнера (контейнер должен стартовать и отдавать SPA) — ловит ошибки, которые не видны при сборке на хосте (например, права `/app` при `USER node` или падение nginx без рантайм-resolver). |
-| `.github/workflows/docker-build.yml` | Авто-сборка и публикация прод-docker-образов (`backend/Dockerfile`, **`frontend/Dockerfile.prod`** — nginx+dist) в `ghcr.io/asagat/townhouse-app-{backend,frontend}`: push в `main` → тег `main`; релизный тег `v*` → semver-теги (`v1.2.3`, `1.2`); можно запустить вручную. Именно эти образы потребляет прод-стек NAS (`docker-compose.prod.yml`, `TOWNHOUSE_TAG`). |
+| `.github/workflows/docker-build.yml` | Авто-сборка и публикация прод-docker-образов (`backend/Dockerfile`, **`frontend/Dockerfile.prod`** — nginx+dist) в `ghcr.io/asagat/townhouse-app-{backend,frontend}`: push в `main` → тег `main`; релизный тег `v*` → semver-теги `1.2.3` и `1.2` (**без** префикса `v`); можно запустить вручную. Именно эти образы потребляет прод-стек NAS (`docker-compose.prod.yml`, `TOWNHOUSE_TAG` — тоже без `v`). |
 | ~~`.github/workflows/deploy.yml` + `.github/actions/deploy/`~~ | **Удалены (08.09.2026)** — SSH-выкат на сервер был по тегу `v*` → `production` или вручную; серверов `staging`/`production` нет. При появлении хост-сервера процедуру можно восстановить по этому разделу. |
 
 На сервере `scripts/deploy_vps.sh <ref>` делает: `git fetch` + фиксация кода на `ref` (workflow передаёт **SHA проверенного CI коммита**) → `alembic upgrade head` → `init_data.py` → `create_user.py` → **сборка фронтенда** (`npm ci`/`npm install` → `npm run build`; статика в `frontend/dist`, её отдаёт nginx) → перезапуск systemd-сервиса `townhouse-backend`. *(Актуально только при наличии VPS-хоста; в текущей локальной модели не используется.)*
