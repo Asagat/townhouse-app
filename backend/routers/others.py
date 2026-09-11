@@ -221,11 +221,13 @@ def build_account_movements(db: Session, account_id: int,
         "SELECT ar.operation_date, ar.services_type_id,"
         "       COALESCE(ar.income,0) AS inc, COALESCE(ar.expense,0) AS exp,"
         "       ar.balance_after, ar.accrual_id, ar.transaction_id, ar.writeoff_id,"
-        "       st.services_type AS service, tx.title AS tx_title, wo.title AS wo_title "
+        "       st.services_type AS service, tx.title AS tx_title, wo.title AS wo_title,"
+        "       aa.name AS article "
         "FROM accounts_register ar "
         "LEFT JOIN services_type st ON st.id = ar.services_type_id "
         "LEFT JOIN transactions tx ON tx.id = ar.transaction_id "
         "LEFT JOIN writeoff_documents wo ON wo.id = ar.writeoff_id "
+        "LEFT JOIN analytic_articles aa ON aa.id = tx.article_id "
         "WHERE ar.account_id = :a" + period_sql + " "
         "ORDER BY ar.operation_date, ar.id"
     ), params).fetchall()
@@ -248,6 +250,9 @@ def build_account_movements(db: Session, account_id: int,
             "kind": kind,
             "kind_label": kind_label,
             "service": service,
+            # Статья доходов/расходов документа «Приход/Расход» (у начислений/списаний её нет).
+            # В ЛК крупной подписью денежного движения показывается именно статья, а не услуга.
+            "article": m["article"] or None,
             "amount": round(amount, 2),
             "balance_after": round(float(m["balance_after"] or 0.0), 2),
             "document": (m["tx_title"] or m["wo_title"]) or None,

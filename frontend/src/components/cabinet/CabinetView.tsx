@@ -57,6 +57,8 @@ interface AccountMovementRow {
     kind: "accrual" | "payment" | "writeoff" | string;
     kind_label: string;
     service: string;
+    /** Статья доходов/расходов документа «Приход/Расход» (у начислений — null). */
+    article: string | null;
     amount: number;
     balance_after: number;
     document: string | null;
@@ -70,9 +72,10 @@ export interface MovementMetrics {
 }
 
 // --- Строка движения в ЛК: что показывается крупно, а что мелко ---
-// Крупно — вид услуги, по которой идёт движение («Фонд развития»): одинаково
-// и для начисления, и для оплаты/списания.
-const movementTitle = (mv: AccountMovementRow): string => mv.service;
+// Крупно — название движения: у денежных документов («Приход/Расход») это статья
+// доходов/расходов («Поступления от жителей»), остальное — вид услуги («Фонд
+// развития»); у начисления/списания статьи нет, поэтому там остаётся услуга.
+const movementTitle = (mv: AccountMovementRow): string => mv.article ?? mv.service;
 
 // Мелко — вид/название документа: у денежных движений это вид денежного документа
 // («Приход в кассу №10», «Списание задолженностей №…»), у начисления заголовка
