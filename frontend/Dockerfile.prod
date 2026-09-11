@@ -1,0 +1,44 @@
+# Production-образ фронтенда Townhouse ERP.
+#
+# Отличие от dev-Dockerfile (Vite-сервер с HMR): здесь делается production-сборка
+# (npm run build = tsc + vite build), а статика отдаётся nginx внутри этого же
+# контейнера. Прокси /api/ идёт на сервис backend (docker DNS).
+#
+# Используется в docker-compose.prod.yml (NAS Synology / прод-хост).
+# Сборка: docker build -f frontend/Dockerfile.prod frontend
+
+# --- Этап 1: сборка статики ---
+FROM node:20-alpine AS build
+
+WORKDIR /app
+
+# Манифесты + локальные tgz-зависимости (Refine-пакеты ставятся из файлов репозитория).
+COPY --chown=node:node package*.json ./
+COPY --chown=node:node *.tgz ./
+
+# /app создаётся от root — передаём его пользователю node, иначе npm ci не сможет
+# создать node_modules («permissions to access this file»).
+RUN chown -R node:node /app
+USER node
+RUN npm ci
+
+# Исходники. vitest.config.ts здесь НЕ мешает: vite build не подхватывает его.
+COPY --chown=node:node . .
+
+# frontend/.env нужен сборке (VITE_* — только для dev-прокси, в прод не используются:
+# apiUrl = "/api", тот же origin). Создаём из примера, как это делает npm run predev.
+RUN npm run ensure-env && npm run build
+
+# --- Этап 2: раздача статики nginx ---
+FROM nginx:alpine
+
+# Конфиг: SPA try_files + прокси /api/ на backend:8000.
+COPY nginx-container.conf /etc/nginx/conf.d/default.conf
+
+# Собранная статика
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+# healthcheck из docker-compose.prod.yml использует wget (есть в alpine).
+CMD ["nginx", "-g", "daemon off;"]

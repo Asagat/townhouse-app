@@ -689,6 +689,215 @@ refresh сообщает «дамп уже применён / новых нет�
 
 ---
 
+### 7.6 Прод-развёртывание на NAS Synology (Container Manager)
+
+> **Актуальная прод-модель (11.09.2026).** Прод работает как три контейнера в
+> Synology Container Manager: `postgres` + `backend` + `frontend` (nginx внутри
+> образа). Наружу открыт только фронтенд; HTTPS терминируется на DSM
+> («Обратный прокси» → `fth.sagacloud.synology.me` → `http://<NAS>:8080`).
+> Домашний docker-стек на ПК (§7.1–7.5) и зеркала остаются **dev/пред-прод**.
+
+**Файлы прод-стека (в репозитории):**
+
+| Файл | Назначение |
+|---|---|
+| `docker-compose.prod.yml` | 3 сервиса из ghcr-образов; БД — только во внутренней сети, наружу — `APP_PORT`→80 |
+| `frontend/Dockerfile.prod` | multi-stage: `npm run build` → `nginx:alpine` (статика + прокси `/api/`) |
+| `frontend/nginx-container.conf` | SPA `try_files`, `/api/` → `backend:8000`, кэш ассетов |
+| `backend/.dockerignore`, `frontend/.dockerignore` | чтобы в образы не попали дампы/тесты |
+| `deploy/.env.prod.example` | шаблон прод-`.env` (`TOWNHOUSE_TAG`, `CORS_ORIGINS`, секреты) |
+
+#### 1) Образы: релизный тег, а не `main`
+
+Образы публикует `.github/workflows/docker-build.yml`. **Фронтенд собирается из
+`frontend/Dockerfile.prod`** (nginx + собранный `dist`) — dev-`frontend/Dockerfile`
+(Vite-сервер) на прод не публикуется. Публикуются:
+
+- push в `main` → тег `main`;
+- релизный тег `v*` → semver-теги `v1.2.3` и `1.2`.
+
+На NAS указываем **конкретный релизный тег** в `.env` (`TOWNHOUSE_TAG=v1.0.0`):
+выкат = смена тега + `up -d`, откат = возврат прежнего тега. Без `TOWNHOUSE_TAG`
+compose намеренно не стартует (защита от случайной подстановки `main`, где может
+оказаться устаревший dev-образ фронтенда).
+
+```bash
+# Дев-машина: пометить проверенный коммит main релизным тегом
+git tag v1.0.0 && git push origin v1.0.0   # запускает сборку semver-образов
+```
+
+#### 2) Подготовка NAS (один раз)
+
+1. **Container Manager** → «Проект» → «Создать».
+2. Исходники: либо git-клон репозитория, либо загрузка папки проекта в
+   `/volume1/docker/townhouse` (нужны только `docker-compose.prod.yml`,
+   `deploy/.env.prod.example` и `frontend/`, `backend/` — только если собираете
+   образы локально; при использовании ghcr достаточно compose + `.env`).
+3. Скопировать `deploy/.env.prod.example` → `.env` и заполнить секреты:
+
+   ```bash
+   cp deploy/.env.prod.example .env
+   # AUTH_SECRET_KEY — свой:        openssl rand -hex 32
+   # POSTGRES_PASSWORD — пароль БД: openssl rand -base64 32
+   # ADMIN_PASSWORD — пароль админа
+   # CORS_ORIGINS=https://fth.sagacloud.synology.me
+   # TOWNHOUSE_TAG=v1.0.0
+   ```
+
+4. **DSM → Панель управления → Портал входа → Дополнительно → Обратный прокси**:
+
+   | Источник | Назначение |
+   |---|---|
+   | HTTPS, `fth.sagacloud.synology.me`, порт 443 | HTTP, `localhost`, порт `8080` |
+
+   Сертификат — существующий/DSM (Let's Encrypt в DSM). WebSocket не требуется.
+
+> ⚠️ Данные Postgres держим в **именованном volume** (`townhouse_pgdata`), а не в
+> папке общего доступа Synology. Монтирование датакаталога Postgres в домашнюю
+> шару — известный источник ошибок прав/инициализации.
+
+#### 3) Первый запуск БД и схемы
+
+```bash
+# На NAS в каталоге проекта:
+docker compose -f docker-compose.prod.yml --env-file .env up -d postgres
+
+# Схема + справочники + админ (в backend-контейнере):
+docker compose -f docker-compose.prod.yml --env-file .env up -d backend
+docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+docker compose -f docker-compose.prod.yml exec backend python init_data.py
+```
+
+> `POSTGRES_INITDB_ARGS` в compose задаёт `UTF8` + локаль `C.UTF-8`: кириллица в
+> справочниках при `SQL_ASCII` ломается с `UnicodeEncodeError` (см. §3.1).
+
+#### 4) Перенос текущей живой БД (с перенумерацией)
+
+Переносится **живая БД** (дамп со стороны-источника), затем id приводится
+к непрерывной нумерации по ТД-2 роадмапа.
+
+**Шаг А. Снять дамп на источнике** (там, где живёт актуальная БД — corsus):
+
+```bash
+cd townhouse-app
+STAMP=$(date +%Y%m%d_%H%M%S)
+mkdir -p backend/backups
+docker exec townhouse-postgres sh -c \
+  'pg_dump -U townhouse_user -d townhouse --no-owner --no-privileges' \
+  > "backend/backups/townhouse_${STAMP}.sql"
+# роли не нужны: пользователь БД создаётся контейнером из .env
+```
+
+Файл скопировать на NAS (Synology Drive / SCP) в каталог проекта, например
+`backups/townhouse_stamp.sql`.
+
+**Шаг Б. Залить дамп в прод-БД:**
+
+```bash
+cat backups/townhouse_stamp.sql | \
+  docker compose -f docker-compose.prod.yml exec -T postgres \
+  psql -U townhouse_user -d townhouse -v ON_ERROR_STOP=1
+```
+
+**Шаг В. Догнать схему** (дамп может быть старше текущего кода):
+
+```bash
+docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+```
+
+**Шаг Г. Перенумерация (после дампа, до открытия доступа).**
+Выполняется в backend-контейнере; **сначала** — отчёт (dry-run):
+
+```bash
+# отчёт «дыр» (без изменений):
+docker compose -f docker-compose.prod.yml exec backend \
+  python migrations/renumber_all_entities.py
+# план финализации (без изменений):
+docker compose -f docker-compose.prod.yml exec backend \
+  python migrations/renumber_finalize.py --dry-run
+```
+
+Убедившись в отчётах — применить (порядок важен, рубильник одноразовый):
+
+```bash
+docker compose -f docker-compose.prod.yml exec backend \
+  python migrations/renumber_all_entities.py --apply
+docker compose -f docker-compose.prod.yml exec backend \
+  python migrations/renumber_finalize.py
+```
+
+`renumber_all_entities.py`: id всех таблиц → 1..N без дырок (справочники → документы
+→ регистры; перепривязка всех FK + `setval`).
+`renumber_finalize.py`: пересоздание начислений и «Приход/Расход» по хронологии
+(«Начальный остаток» → id=1), пересборка `accounts_register`, перегенерация
+квитанций, контроль `check_register_integrity`.
+
+> ⚠️ **Активные сессии сбрасываются:** JWT хранит `sub = user.id`, а `users` тоже
+> перенумеровывается — все выданные токены станут недействительны, пользователи
+> войдут заново (пароли/логины не меняются).
+
+**Шаг Д. Контрольные суммы** (данные не должны измениться от перенумерации):
+
+```bash
+# начисления: файл ↔ БД, 6 срезов
+docker compose -f docker-compose.prod.yml exec backend \
+  python migrations/accruals_sum_check.py
+```
+
+При наличии на NAS файла-источника (`templates/Миграция данных FTH.xlsx`) можно
+прогнать и полный контроль: `pytest tests/check_sum/ -q` (без файла тесты
+автоматически пропускаются).
+
+**Шаг Е. Пересоздать администратора** (после переноса `users` сохраняются из дампа,
+но пароль проще выставить из `.env`):
+
+```bash
+docker compose -f docker-compose.prod.yml exec backend python create_user.py
+```
+
+#### 5) Запуск фронтенда и проверка
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env up -d frontend
+docker compose -f docker-compose.prod.yml ps
+curl -sI http://localhost:8080/ | head -1        # ожидаем 200
+curl -s http://localhost:8080/api/auth/me | head -1  # ожидаем 401 (живой API)
+```
+
+Открыть `https://fth.sagacloud.synology.me` — должен показаться экран входа.
+
+#### 6) Обновление версии (по кнопке в Container Manager)
+
+1. Дев-машина: `git tag v1.0.1 && git push origin v1.0.1` (дождаться сборки образа);
+2. На NAS: в `.env` сменить `TOWNHOUSE_TAG=v1.0.1`;
+3. Container Manager → проект → **«Обновить»** / `docker compose pull && up -d`;
+4. Схема догоняется сама только при наличии миграций в образе — при изменении
+   схемы выполнить `alembic upgrade head` (как в шаге В).
+
+#### 7) Бэкап БД на NAS
+
+```bash
+STAMP=$(date +%Y%m%d_%H%M%S)
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  pg_dump -U townhouse_user -d townhouse --no-owner --no-privileges \
+  | gzip > "backups/townhouse_prod_${STAMP}.sql.gz"
+```
+
+Хранить за пределами NAS (Synology Hyper Backup / внешний диск) — тот же принцип,
+что в §8. Папку `backups/` в git не коммитить.
+
+**Частые проблемы (NAS):**
+
+| Симптом | Причина / решение |
+|---|---|
+| `backend` перезапускается, лог «connection refused» | БД не healthy: проверить `POSTGRES_USER`/`POSTGRES_DB` в `.env` (healthcheck читает их же) |
+| 502 от DSM «Обратного прокси» | контейнер фронтенда не поднят или слушает не `APP_PORT`; проверить `docker compose ps` |
+| Вход выполняется, но «Пользователь недоступен» | старый JWT после перенумерации `users` — выйти/войти заново |
+| Кириллица в справочниках → `UnicodeEncodeError` | БД создана не в UTF8; пересоздать с `POSTGRES_INITDB_ARGS` (§3.1) |
+| Дамп не заливается: «already exists» | дамп содержит схему; заливать в **пустую** БД (шаг В до заливки не выполнять) |
+
+---
+
 ## 8. Резервное копирование БД (дамп)
 
 Дамп PostgreSQL хранится в **корне проекта** как файл `townhouse_db.sql.gz` (удобно для переноса локаль↔VPS).
@@ -805,8 +1014,8 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 
 | Файл | Что делает |
 |---|---|
-| `.github/workflows/ci.yml` | Автопроверка на push/PR в `main`. Job `backend`: disposable-сервис `postgres:16` → `alembic upgrade head` → `init_data.py` → `python -m pytest tests/ -q` (`DATABASE_URL` и `AUTH_SECRET_KEY` задаются на job). Job `frontend`: `npm ci` → `npm run build` (= tsc + vite).
-| `.github/workflows/docker-build.yml` | Авто-сборка и публикация docker-образов (`backend/Dockerfile`, `frontend/Dockerfile`) в `ghcr.io/asagat/townhouse-app-{backend,frontend}`: push в `main` → тег `main`; релизный тег `v*` → semver-теги (`v1.2.3`, `1.2`); можно запустить вручную. Образы — для docker-compose-установок (домашние ПК и т.п.).
+| `.github/workflows/ci.yml` | Автопроверка на push/PR в `main`. Job `backend`: disposable-сервис `postgres:16` → `alembic upgrade head` → `init_data.py` → `python -m pytest tests/ -q` (`DATABASE_URL` и `AUTH_SECRET_KEY` задаются на job). Job `frontend`: `npm ci` → `npm run build` (= tsc + vite). Job `images`: сборка **прод-образов** (`frontend/Dockerfile.prod`, `backend/Dockerfile`) без публикации + smoke-тест фронтенд-контейнера (контейнер должен стартовать и отдавать SPA) — ловит ошибки, которые не видны при сборке на хосте (например, права `/app` при `USER node` или падение nginx без рантайм-resolver). |
+| `.github/workflows/docker-build.yml` | Авто-сборка и публикация прод-docker-образов (`backend/Dockerfile`, **`frontend/Dockerfile.prod`** — nginx+dist) в `ghcr.io/asagat/townhouse-app-{backend,frontend}`: push в `main` → тег `main`; релизный тег `v*` → semver-теги (`v1.2.3`, `1.2`); можно запустить вручную. Именно эти образы потребляет прод-стек NAS (`docker-compose.prod.yml`, `TOWNHOUSE_TAG`). |
 | ~~`.github/workflows/deploy.yml` + `.github/actions/deploy/`~~ | **Удалены (08.09.2026)** — SSH-выкат на сервер был по тегу `v*` → `production` или вручную; серверов `staging`/`production` нет. При появлении хост-сервера процедуру можно восстановить по этому разделу. |
 
 На сервере `scripts/deploy_vps.sh <ref>` делает: `git fetch` + фиксация кода на `ref` (workflow передаёт **SHA проверенного CI коммита**) → `alembic upgrade head` → `init_data.py` → `create_user.py` → **сборка фронтенда** (`npm ci`/`npm install` → `npm run build`; статика в `frontend/dist`, её отдаёт nginx) → перезапуск systemd-сервиса `townhouse-backend`. *(Актуально только при наличии VPS-хоста; в текущей локальной модели не используется.)*
@@ -838,7 +1047,7 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
    **required reviewers** — ручное подтверждение выката.
 
 4. **Branch protection** для `main`: отметьте job'ы CI (`CI / Backend …`,
-   `CI / Frontend …`) как required checks — тогда в main не попадёт код без зелёного CI.
+   `CI / Frontend …`, `CI / Images …`) как required checks — тогда в main не попадёт код без зелёного CI.
 
 5. **Пакеты ghcr.io** публикуются токеном `GITHUB_TOKEN` — отдельной настройки не требуют.
 

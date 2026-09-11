@@ -1,0 +1,31 @@
+# Контекст сборки backend/ — в образ НЕ должны попадать данные и служебные файлы.
+
+# Бэкапы БД (содержат реальные данные)
+backups/
+*.dump
+*.sql
+dev_backup_*
+prod_backup_*
+prod_users_backup_*
+
+# Выгрузки/исходники переноса данных
+*.xlsx
+*.ods
+*_migs.xlsx
+stage_dump*
+
+# Python-кэш и тесты (тесты гоняются в CI, в образе не нужны)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+
+# Локальные окружения
+.venv/
+venv/
+.env
+.env.*
+
+# ВАЖНО: assets/ (логотип FTH.png для PDF) НЕ исключаем — он нужен в рантайме
+# (receipt_config.LOGO_PATH = "assets/FTH.png").
+!assets/

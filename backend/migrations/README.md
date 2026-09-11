@@ -9,6 +9,42 @@
 Настроено в `backend/alembic/` и `backend/alembic.ini`; URL берётся из окружения
 `DATABASE_URL` через `backend/database.py`.
 
+## Перенумерация id (разово, перед финальным прод-развёртыванием — ТД-2)
+
+Приводит автогенерируемые `id` всех таблиц к непрерывной нумерации с 1, сохраняя
+содержимое. Выполняется на копии/переносе (dev → прод), НЕ в рабочем режиме.
+
+Два шага (оба — с прогоном без изменений):
+
+```bash
+python migrations/renumber_all_entities.py          # отчёт «дыр» (без изменений)
+python migrations/renumber_all_entities.py --apply  # перенумеровать id всех таблиц
+python migrations/renumber_finalize.py --dry-run     # план финализации
+python migrations/renumber_finalize.py               # применить
+```
+
+1. `renumber_all_entities.py` — порядок зависимостей «справочники → документы →
+   регистры», перепривязка всех FK и `setval` по каждой последовательности;
+2. `renumber_finalize.py` — хронология начислений и «Приход/Расход» (`Начальный
+   остаток` → id 1), пересборка `accounts_register`, перегенерация квитанций,
+   контроль `check_register_integrity`.
+
+Полный порядок переноса на прод-сервер — `DEPLOY.md` §7.6.
+
+> ⚠️ Перенумерация `users` делает недействительными выданные JWT (`sub = user.id`) —
+> пользователи войдут заново. Начинать с бэкапа БД.
+
+### Заменённые частные случаи (устарели)
+
+Следующие скрипты ранее делали по отдельности то, что теперь закрыто парой выше.
+Оставлены для точечных сценариев, но для полной перенумерации не использовать:
+
+| Устаревший скрипт | Что делал | Теперь |
+|---|---|---|
+| `migrations/reimport/recreate_and_resync.py` | `RESTART IDENTITY` для начислений/квитанций + хронология | шаг `renumber_finalize.py` |
+| `migrations/reimport/renumber_transactions_chronological.py` | перенумерация «Приход/Расход» по хронологии | шаг `renumber_finalize.py` |
+| `migrations/reimport/reorder_receipts_by_period_apartment.py` | перенумерация квитанций по (период, кв.) | автоматически через перегенерацию квитанций |
+
 ## Базовая ревизия `0000_baseline`
 No-op-ревизия: фиксирует текущее состояние «уже развёрнутой» схемы как точку
 отсчёта Alembic. Существующие legacy-таблицы (users, invoices, counterparties,

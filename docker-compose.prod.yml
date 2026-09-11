@@ -1,0 +1,84 @@
+# Production-стек Townhouse ERP — NAS Synology (Container Manager).
+#
+# Три контейнера: postgres (БД) + backend (FastAPI) + frontend (nginx: SPA + прокси /api).
+# Наружу открывается ТОЛЬКО порт фронтенда; HTTPS терминируется на DSM
+# («Обратный прокси» → fth.sagacloud.synology.me → http://<NAS>:8080).
+#
+# Запуск (в каталоге проекта на NAS):
+#   docker compose -f docker-compose.prod.yml --env-file .env up -d
+#
+# Отличие от корневого docker-compose.yml (dev): образы берутся из ghcr.io
+# (не собираются локально), код НЕ монтируется, бэкенд без --reload.
+
+services:
+  postgres:
+    # Данные — в именованном volume (НЕ в папке общего доступа Synology:
+    # там свои права/семантику, из-за которых Postgres не стартует).
+    image: postgres:16-alpine
+    container_name: townhouse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-townhouse_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD не задан в .env}
+      POSTGRES_DB: ${POSTGRES_DB:-townhouse}
+      # Кодировка/локаль кластера: кириллица требует UTF8 (см. DEPLOY.md §3.1).
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Параметры берём из env — иначе при смене POSTGRES_USER/POSTGRES_DB в .env
+      # healthcheck проверяет несуществующую БД, и backend никогда не дождётся healthy.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-townhouse_user} -d ${POSTGRES_DB:-townhouse}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # Портов наружу НЕТ: БД доступна только контейнерам в сети проекта.
+    networks:
+      - townhouse
+
+  backend:
+    # Тег фиксируем в .env (например, v1.0.0); без него compose откажется стартовать,
+    # чтобы случайно не подтянуть dev-образ из main.
+    image: ghcr.io/asagat/townhouse-app-backend:${TOWNHOUSE_TAG:?TOWNHOUSE_TAG не задан — укажите релизный тег, напр. v1.0.0}
+    container_name: townhouse-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Полный DSN (хост postgres — docker DNS внутри сети проекта).
+      DATABASE_URL: postgresql://${POSTGRES_USER:-townhouse_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD не задан в .env}@postgres:5432/${POSTGRES_DB:-townhouse}
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY не задан в .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS не задан в .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD не задан в .env}
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    networks:
+      - townhouse
+
+  frontend:
+    image: ghcr.io/asagat/townhouse-app-frontend:${TOWNHOUSE_TAG:?TOWNHOUSE_TAG не задан — укажите релизный тег, напр. v1.0.0}
+    container_name: townhouse-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      # Наружу отдаём только фронтенд. 8080 → DSM «Обратный прокси» (HTTPS).
+      - "${APP_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - townhouse
+
+volumes:
+  pgdata:
+    name: townhouse_pgdata
+
+networks:
+  townhouse:
+    name: townhouse

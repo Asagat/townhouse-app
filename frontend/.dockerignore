@@ -1,0 +1,23 @@
+# Контекст сборки frontend/ — минимизируем образ.
+
+# Зависимости и артефакты сборки (ставятся/собираются внутри образа)
+node_modules/
+dist/
+
+# Локальные окружения и кэш
+.env
+.env.local
+.env.*.local
+.vite/
+
+# Тесты и покрытие
+coverage/
+*.test.ts
+*.test.tsx
+src/test/
+vitest.config.ts
+
+# Служебное
+.git/
+.DS_Store
+*.log

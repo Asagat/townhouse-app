@@ -1,16 +1,19 @@
 name: Docker images
 
-# Авто-сборка docker-образов (backend/Dockerfile, frontend/Dockerfile) и публикация
-# в GitHub Container Registry (ghcr.io). См. ROADMAP п. 3.3.
+# Авто-сборка docker-образов и публикация в GitHub Container Registry (ghcr.io).
+# См. ROADMAP п. 3.3.
+#
+# ВАЖНО: для фронтенда публикуется ПРОД-образ (frontend/Dockerfile.prod — nginx +
+# собранный dist), а НЕ dev-Dockerfile (Vite-сервер). Именно эти образы потребляет
+# прод-стек NAS Synology (docker-compose.prod.yml, порт 80).
 #
 # Когда запускается:
 #   - push в main      → образы с тегом main (актуальное состояние ветки);
 #   - релизный тег v*  → образы с semver-тегами ({{version}}, {{major}}.{{minor}});
 #   - вручную (workflow_dispatch).
 #
-# Образы нужны для docker-compose-установок (домашние ПК / будущий сервер на
-# контейнерах). Распространение между рабочими машинами — через дампы БД и
-# образы (см. DEPLOY.md §8), деплой на выделенный VPS-хост здесь не используется.
+# Образы нужны для docker-compose-установок (прод-стек NAS и домашние ПК).
+# Распространение между рабочими машинами — через дампы БД (см. DEPLOY.md §8).
 
 on:
   push:
@@ -33,7 +36,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [backend, frontend]
+        include:
+          - service: backend
+            dockerfile: backend/Dockerfile
+          # Прод-образ фронтенда (multi-stage → nginx). НЕ frontend/Dockerfile:
+          # тот собирает dev-сервер Vite и на проде не работает (ждёт порт 80/nginx).
+          - service: frontend
+            dockerfile: frontend/Dockerfile.prod
 
     steps:
       - name: Checkout
@@ -64,7 +73,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./${{ matrix.service }}
-          file: ./${{ matrix.service }}/Dockerfile
+          file: ./${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
