@@ -195,7 +195,9 @@ def build_account_movements(db: Session, account_id: int,
       - income>0 (accrual_id)  — «Начисление»;
       - expense>0 с writeoff_id — «Списание задолженностей»;
       - expense>0 с transaction — «Оплата» (распределение внесённых денег).
-    Сумма отображается с точки зрения счёта: начисление «+», оплата/списание «−».
+    Сумма отдаётся с точки зрения счёта: начисление «+», оплата/списание «−».
+    В ЛК (`CabinetView`) знаки показываются «глазами жителя» (начисление «−»,
+    оплата/списание «+») — инверсия только на фронтенде, контракт API не меняется.
     """
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:

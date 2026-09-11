@@ -69,6 +69,27 @@ export interface MovementMetrics {
     debt: number;
 }
 
+// --- Строка движения в ЛК: что показывается крупно, а что мелко ---
+// Крупно — вид услуги, по которой идёт движение («Фонд развития»): одинаково
+// и для начисления, и для оплаты/списания.
+const movementTitle = (mv: AccountMovementRow): string => mv.service;
+
+// Мелко — вид/название документа: у денежных движений это вид денежного документа
+// («Приход в кассу №10», «Списание задолженностей №…»), у начисления заголовка
+// документа нет — там остаётся подпись «Начисление». Если документа в данных нет
+// (исторические строки) — откат к подписи вида движения.
+const movementSubtitle = (mv: AccountMovementRow): string =>
+    mv.document ?? mv.kind_label;
+
+// Знаки — «глазами жителя»: начисление увеличивает долг (минус), оплата/списание
+// долг гасят (плюс). API и PDF выписки при этом остаются «по счёту» (начисление
+// «+», оплата/списание «−»), поэтому инвертируем знак только при отображении.
+const residentAmount = (mv: AccountMovementRow): number => -Number(mv.amount ?? 0);
+
+// Цвет суммы по знаку для жителя: минус (долг вырос) — красный, плюс — зелёный.
+const amountColor = (v: number): string =>
+    v > 0 ? "#3f8600" : v < 0 ? "#cf1322" : "#1f1f1f";
+
 // Денежная сумма со знаком «+/−» для движений по счёту; формат чисел — общий
 // `formatMoney` (2 знака, запятая, без знака валюты). Ноль — без знака.
 const fmtSigned = (v: number): string => {
@@ -344,41 +365,39 @@ export const CabinetView = ({
                             Движений за выбранный период нет
                         </Typography.Text>
                     ) : (
-                        movements.map((mv, i) => (
-                            <div
-                                key={`${mv.date ?? ""}-${i}`}
-                                style={{
-                                    padding: "12px 0",
-                                    borderBottom:
-                                        i < movements.length - 1 ? "1px solid #e8e8e8" : "none",
-                                }}
-                            >
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-                                    <div style={{ minWidth: 0 }}>
-                                        <Typography.Text style={{ ...ROW_LABEL, display: "block" }}>
-                                            {formatDate(mv.date)} — {mv.kind_label}
-                                        </Typography.Text>
-                                        <Typography.Text type="secondary" style={{ fontSize: 15 }}>
-                                            {mv.service}
-                                        </Typography.Text>
-                                    </div>
-                                    <div
-                                        style={{
-                                            ...SUM_FONT,
-                                            textAlign: "right",
-                                            color:
-                                                mv.amount > 0
-                                                    ? "#cf1322"
-                                                    : mv.amount < 0
-                                                      ? "#3f8600"
-                                                      : "#1f1f1f",
-                                        }}
-                                    >
-                                        {fmtSigned(mv.amount)}
+                        movements.map((mv, i) => {
+                            const amount = residentAmount(mv);
+                            return (
+                                <div
+                                    key={`${mv.date ?? ""}-${i}`}
+                                    style={{
+                                        padding: "12px 0",
+                                        borderBottom:
+                                            i < movements.length - 1 ? "1px solid #e8e8e8" : "none",
+                                    }}
+                                >
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+                                        <div style={{ minWidth: 0 }}>
+                                            <Typography.Text style={{ ...ROW_LABEL, display: "block" }}>
+                                                {formatDate(mv.date)} — {movementTitle(mv)}
+                                            </Typography.Text>
+                                            <Typography.Text type="secondary" style={{ fontSize: 15 }}>
+                                                {movementSubtitle(mv)}
+                                            </Typography.Text>
+                                        </div>
+                                        <div
+                                            style={{
+                                                ...SUM_FONT,
+                                                textAlign: "right",
+                                                color: amountColor(amount),
+                                            }}
+                                        >
+                                            {fmtSigned(amount)}
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        ))
+                            );
+                        })
                     )}
                     <div
                         style={{

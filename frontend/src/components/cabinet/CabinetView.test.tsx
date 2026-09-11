@@ -3,10 +3,9 @@
 //
 //   1) Подписи строк (услуги, движения, квитанции, статьи расходов) имеют один
 //      и тот же вид — 17px и обычный вес, как в отчёте «Общедомовые расходы».
-//   2) Блок «Движения» показывает движения по счёту (начисления/оплаты) за
-//      выбранный период и отдельной строкой — сумму внесённого в кассу. Раньше
-//      блок назывался «Деньги» и брал ТОЛЬКО кассовые платежи, поэтому в месяце
-//      с начислениями без оплаты выглядел пустым.
+//   2) Блок «Движения»: крупно — вид услуги (и у начисления, и у оплаты),
+//      мелко — вид/название документа («Начисление» / «Приход в кассу №10»);
+//      знаки — «глазами жителя» (начисление с минусом, оплата/списание с плюсом).
 //
 // Сеть подменяется мок-функцией fetch: /me/movements отдаёт заранее заданный
 // набор движений и кассовых операций.
@@ -15,6 +14,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { CabinetView } from "./CabinetView";
 import type { StatementData } from "./CabinetView";
+import { formatMoney } from "../../config/formatters";
 
 const STATEMENT: StatementData = {
     account: { id: 1, account_number: "LS-0001", account_name: "Кв.1" },
@@ -49,10 +49,10 @@ const MOVEMENTS_RESPONSE = {
             date: "2026-03-10",
             kind: "payment",
             kind_label: "Оплата",
-            service: "Вывоз мусора",
+            service: "Фонд развития",
             amount: -500,
             balance_after: 500,
-            document: null,
+            document: "Приход в кассу №10",
         },
     ],
     cash_movements: [{ date: "2026-03-10", cash_point: "Касса", amount: 500 }],
@@ -112,27 +112,48 @@ describe("CabinetView", () => {
             />,
         );
 
-    /** Приводит текст узла к виду без неразрывных пробелов (формат чисел ru-RU). */
-    const plain = (el: Element | null) => (el?.textContent ?? "").replace(/\u00a0/g, " ");
+    /** Приводит текст к виду без узких/неразрывных пробелов (формат чисел ru-RU). */
+    const norm = (s: string) => s.replace(/[\u00a0\u202f\u2009]/g, " ");
+    const plain = (el: Element | null) => norm(el?.textContent ?? "");
 
-    it("блок «Движения» показывает движения по счёту и сумму в кассу за период", async () => {
+    it("блок «Движения»: крупно — вид услуги, мелко — вид документа", async () => {
         renderView();
 
         // Заголовок и содержимое загруженного ответа /me/movements.
         expect(await screen.findByText("Движения")).toBeTruthy();
-        expect(await screen.findByText(/01\.03\.2026 — Начисление/u)).toBeTruthy();
-        expect(await screen.findByText(/10\.03\.2026 — Оплата/u)).toBeTruthy();
 
-        // Итог кассы — отдельная строка (раньше блок звался «Деньги» и брал только платежи).
+        // Начисление: крупно — вид услуги, мелко — подпись документа.
+        expect(await screen.findByText(/01\.03\.2026 — Вывоз мусора/u)).toBeTruthy();
+        expect(await screen.findByText("Начисление")).toBeTruthy();
+
+        // Оплата: крупно — тоже вид услуги, мелко — вид денежного документа
+        // (а не «Оплата» и не услуга вместо документа).
+        expect(await screen.findByText(/10\.03\.2026 — Фонд развития/u)).toBeTruthy();
+        expect(await screen.findByText("Приход в кассу №10")).toBeTruthy();
+
+        // Итог кассы — отдельная строка.
         expect(await screen.findByText("Внесено в кассу за период")).toBeTruthy();
         expect(screen.getByText(/10\.03\.2026 — Касса/u)).toBeTruthy();
+    });
+
+    it("знаки — «глазами жителя»: начисление с минусом, оплата с плюсом", async () => {
+        renderView();
+
+        // Дожидаемся загрузки движений (иначе карточка ещё без строк).
+        await screen.findByText(/01\.03\.2026 — Вывоз мусора/u);
+        const card = screen.getByText("Движения").closest(".ant-card") as HTMLElement;
+        const text = plain(card);
+
+        // Начисление 1000 → «−1 000,00», оплата 500 → «+500,00» (в API знаки обратные).
+        expect(text).toContain(norm("−" + formatMoney(1000)));
+        expect(text).toContain(norm("+" + formatMoney(500)));
     });
 
     it("подписи строк одного вида: 17px и обычный вес (как «Общедомовые расходы»)", async () => {
         const { container } = renderView();
 
         // Ждём, пока данные движений отрисуются (иначе карточки ещё нет).
-        await screen.findByText(/01\.03\.2026 — Начисление/u);
+        await screen.findByText(/01\.03\.2026 — Вывоз мусора/u);
 
         // Подписи-строки, которые должны выглядеть одинаково, — из разных блоков.
         const service = (await screen.findAllByText("Вывоз мусора"))[0];
@@ -152,7 +173,9 @@ describe("CabinetView", () => {
     it("суммы — с 2 знаками и без знака валюты, прижаты вправо", async () => {
         renderView();
 
-        const cashTotal = await screen.findByText("Внесено в кассу за период");
+        // Дожидаемся загрузки кассовых операций (иначе итог ещё 0,00).
+        await screen.findByText(/10\.03\.2026 — Касса/u);
+        const cashTotal = screen.getByText("Внесено в кассу за период");
         const row = cashTotal.parentElement as HTMLElement;
         const value = row.lastElementChild as HTMLElement;
 
