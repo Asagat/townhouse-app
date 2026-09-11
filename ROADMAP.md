@@ -24,8 +24,8 @@
 - [x] **Прод-стек для NAS Synology** (11.09.2026): prod-compose (3 контейнера), prod-Dockerfile
       фронтенда (multi-stage → nginx), `.dockerignore`, шаблон `.env.prod`; перенос живой БД
       с перенумерацией (ТД-2) — скрипты `renumber_all_entities.py`/`renumber_finalize.py`.
-- [ ] (отложено) Автодеплой на NAS из GitHub Actions: выкат сейчас — кнопкой в Container Manager
-      по релизному тегу (вне текущего роадмапа).
+- [ ] (отложено) Автодеплой на NAS из GitHub Actions: выкат сейчас — **вручную из CLI**
+      (`docker compose pull && up -d`) по релизному тегу (вне текущего роадмапа).
 
 ---
 
@@ -130,7 +130,7 @@
 | ID | Задача | Статус / детали |
 |---|--------|-------------------|
 | 3.2 | **Тесты фронтенда (vitest + RTL)** | 🔨 Частично (08.09). Ключевые сценарии: GenericList (рендер, сортировка, модалки) — впереди. Сделано: vitest/RTL добавлены в devDependencies + скрипт `test` (`vitest.config.ts`, jsdom-окружение, `src/test/setup.ts`); реализовано и покрыто тестами правило форматирования колонок (новый `config/columnAlign.ts`, зашит в `GenericList`): заголовки по центру, денежные → справа (2 знака, без `₸`), текстовые → слева, остальные → по центру; RTL-тесты на реальном списке «Приход/Расход» (`src/pages/GenericList.test.tsx`) + юнит-тесты `src/config/columnAlign.test.ts`. Просмотр записи уже: фон `#f5f5f5`/шрифт `#1f1f1f` у полей (`.form-view-mode`), даты `DD.MM.YYYY` (`RecordFormModal`) — осталось покрыть тестами. Продолжение (08.09, вне автотестов): правки интерфейса по «Доработкам» — реализованы п.1–6 (см. журнал PROJECT_STRUCTURE): общий просмотр без редактирования; reference-лейбл вместо id; единая компоновка Users; форматы дат `DD.MM.YYYY` в отчётах по кассе/расходам; срез должников на дату `as_of`; PDF по нажатию скачивается + `Content-Length` (надёжно на iOS). |
-| 3.3 | **CI: автопроверка + подготовка релиза / выкат на прод** | 🔨 Частично (08–11.09.2026): каркас — `ci.yml` (push/PR в main: backend на disposable `postgres:16`; frontend `npm ci` → `npm run build`; **`images`** — сборка прод-образов без публикации + smoke-тест фронт-контейнера) и `docker-build.yml` (образы в ghcr.io: main → `main`, тег `v*` → semver — канал доставки на NAS). **SSH-выкат на серверы снят**: серверов `staging`/`production` нет, `deploy.yml`/`.github/actions/deploy` удалены (08.09.2026). Прод — NAS Synology, выкат кнопкой в Container Manager по релизному тегу (DEPLOY §7.6); автодеплой — отложен. |
+| 3.3 | **CI: автопроверка + подготовка релиза / выкат на прод** | 🔨 Частично (08–11.09.2026): каркас — `ci.yml` (push/PR в main: backend на disposable `postgres:16`; frontend `npm ci` → `npm run build`; **`images`** — сборка прод-образов без публикации + smoke-тест фронт-контейнера) и `docker-build.yml` (образы в ghcr.io: main → `main`, тег `v*` → semver — канал доставки на NAS). **SSH-выкат на серверы снят**: серверов `staging`/`production` нет, `deploy.yml`/`.github/actions/deploy` удалены (08.09.2026). Прод — NAS Synology, выкат **вручную из CLI** (`docker compose pull && up -d`) по релизному тегу (DEPLOY §7.6); кнопки обновления в Container Manager нет; автодеплой — отложен. |
 | 3.4 | **Полный аудит названий документов и всех л/с** | ⏳ Частично: чистка «мусорных» квартир/контрагентов и орфанов выполнена (Б12), `check_register_integrity`/rebuild есть и покрыты тестами. Полный аудит названий документов/всех л/с ещё не проводился. |
 
 ---
