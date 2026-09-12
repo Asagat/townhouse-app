@@ -336,9 +336,44 @@ def validate_tariff_invariants(db: Session, tariff: Tariff) -> None:
        срок (правильная операция — один тариф с итоговой суммой, а не несколько
        перекрывающих записей). Открытая база (valid_to = NULL) правил месяца не
        несёт и при комментарии не обязательна.
+    3) Запрет «двойника»: у одного вида услуги не может быть одновременно открытого
+       тарифа и закрытого тарифа-периода с ОДНОЙ датой начала и ОДНОЙ ценой. Это
+       структурный дубль (так возникали артефакты конверсии 2.18): открытая запись
+       «перекрывает» период навсегда и подставляется в начисления вместо него,
+       потому что `resolve...` поле `status` не читает. Статус в проверке не
+       учитывается: архивный двойник всё равно ломает расчёт.
 
     Бросает HTTPException(422) при нарушении. Источник истины — бэкенд.
     """
+    # 3) Запрет «двойника» (открытая ставка ↔ закрытый тариф-период).
+    if tariff.valid_from is not None and tariff.price is not None:
+        filters = [
+            Tariff.services_type_id == tariff.services_type_id,
+            Tariff.valid_from == tariff.valid_from,
+            Tariff.price == tariff.price,
+        ]
+        if tariff.valid_to is None:
+            filters.append(Tariff.valid_to != None)  # noqa: E711
+        else:
+            filters.append(Tariff.valid_to == None)  # noqa: E711
+        if tariff.id is not None:
+            filters.append(Tariff.id != tariff.id)
+        twin = db.query(Tariff).filter(*filters).first()
+        if twin is not None:
+            period = (
+                f"{twin.valid_from:%d.%m.%Y}"
+                + (f"–{twin.valid_to:%d.%m.%Y}" if twin.valid_to else " (бессрочный)")
+            )
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Такой тариф уже есть: {float(tariff.price):g} ₸ с "
+                    f"{tariff.valid_from:%d.%m.%Y} заведён и как период ({period}), и "
+                    "как открытая ставка (или наоборот). Оставьте одну запись: либо "
+                    "бессрочную ставку, либо тариф периода с «Действует до»."
+                ),
+            )
+
     if not tariff.valid_to:  # открытая базовая ставка
         return
     if tariff.status == TARIFF_STATUS_ARCHIVED:

@@ -6,6 +6,9 @@
 помечаются «Архивными». Закрытый тариф-период (с valid_to) обязан иметь
 «Примечание» и не может пересекаться по срокам с другим «Действующим» тарифом
 периода того же вида услуги.
+
+Дополнительно (12.09.2026) запрещён «двойник»: открытая ставка и закрытый тариф-период
+одной услуги с одной датой начала и одной ценой (@see `test_open_tariff_twin_is_rejected`).
 """
 
 from fastapi.testclient import TestClient
@@ -126,3 +129,43 @@ def test_period_tariff_rules_comment_and_overlap(db, user_factory):
     r = client.post("/api/tariffs", headers=h, json=payload)
     assert r.status_code == 201, r.text
     assert r.json()["status"] == "active"
+
+
+def test_open_tariff_twin_is_rejected(db, user_factory):
+    """Запрет «двойника»: открытая ставка и закрытый период с одной датой и ценой.
+
+    Реальный дефект (конверсия 2.18): у «Фонда развития» одновременно существовали
+    открытая база 148 850 с 01.04.2026 и закрытый период 148 850 на апрель 2026 —
+    открытая запись «перекрывала» период и подставлялась в начисления следующих
+    месяцев (`resolve_tariff_for_accrual_period` поле `status` не читает).
+    """
+    admin = user_factory("tftwin", UserRole.admin)
+    svc_id = _make_service(db, "__test_ДвойникПериода")
+    db.commit()
+    client = TestClient(app)
+    h = _headers(admin)
+
+    def create(price, valid_from, valid_to=None, comment=None):
+        payload = {"services_type_id": svc_id, "price": price, "valid_from": valid_from}
+        if valid_to is not None:
+            payload["valid_to"] = valid_to
+            payload["comment"] = comment or "разовый период"
+        return client.post("/api/tariffs", headers=h, json=payload)
+
+    # Закрытый период на май 2026 — создаётся.
+    r = create(4000, "2026-05-01", "2026-05-31", comment="разовый сбор май")
+    assert r.status_code == 201, r.text
+
+    # Открытый «двойник» (та же услуга/дата/цена) — запрещён.
+    r = create(4000, "2026-05-01")
+    assert r.status_code == 422, r.text
+    assert "уже есть" in r.json()["detail"]
+
+    # Открытая ставка с той же датой, но другой ценой — допустима (месяц отличается).
+    r = create(2000, "2026-05-01")
+    assert r.status_code == 201, r.text
+
+    # И обратная сторона: закрытый период, дублирующий открытую базу, — тоже 422.
+    r = create(2000, "2026-05-01", "2026-05-31", comment="дубль базы")
+    assert r.status_code == 422, r.text
+    assert "уже есть" in r.json()["detail"]

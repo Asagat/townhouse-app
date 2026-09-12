@@ -145,3 +145,21 @@ python migrations/fix_duplicate_open_tariffs.py --apply --normalize-status
 
 Запуск на NAS (без сборки образа):
 `docker cp backend/migrations/fix_duplicate_open_tariffs.py <backend-контейнер>:/app/migrations/`.
+
+### Закрытие «разовых, записанных как база» (`close_oneoff_open_tariffs.py`)
+
+Часть разовых месячных сборов была заведена как ОТКРЫТЫЕ тарифы (`valid_to IS NULL`) —
+и такая запись продолжала работать «базой» в месяцы без закрытого периода. Скрипт
+закрывает её концом месяца старта (превращает в тариф-период), причину переносит в
+«Примечание»; начисления/регистры не меняются. Цели заданы явно (услуга/дата/цена) —
+id-независимо и идемпотентно.
+
+```bash
+python migrations/close_oneoff_open_tariffs.py          # dry-run
+python migrations/close_oneoff_open_tariffs.py --apply
+```
+
+Дополнительно в `services.validate_tariff_invariants` добавлен **запрет «двойника»**:
+нельзя завести открытую ставку и закрытый тариф-период одной услуги с одной датой
+начала и одной ценой (через UI такое больше не создать; архивный двойник тоже не
+пройдёт — он всё равно ломает `resolve_tariff_for_accrual_period`).
