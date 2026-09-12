@@ -110,11 +110,14 @@ TABLE_PLAN: list[tuple[str, list[tuple[str, str]]]] = [
         ("accounts_register", "transaction_id"),
     ]),
     ("accrual_documents", [("accruals_register", "accrual_document_id")]),
-    ("writeoff_documents", [("writeoff_items", "document_id")]),
+    ("writeoff_documents", [
+        ("writeoff_items", "document_id"),
+        ("accounts_register", "writeoff_id"),
+    ]),
     ("accruals_register", [
         ("accounts_register", "accrual_id"),
     ]),
-    ("writeoff_items", [("accounts_register", "writeoff_id")]),
+    ("writeoff_items", []),
     # Квитанции — в самом конце: их содержимое всё равно перегенерируется
     # (renumber_finalize.py), но нумерация id приводится здесь же.
     ("receipt_documents", [("receipt_items", "receipt_id")]),
@@ -150,6 +153,26 @@ def _set_seq(db, table: str, max_id: int) -> None:
     db.execute(text("SELECT setval(:s, :v, true)"), {"s": seq, "v": max(max_id, 1)})
 
 
+def _fk_defs(db, ref_table: str, ref_col: str) -> list[tuple[str, str]]:
+    """Имена и определения FK на колонку из каталога Postgres.
+
+    Имя констрейнта задаёт SQLAlchemy, и оно НЕ всегда вида
+    `<таблица>_<колонка>_fkey` — есть явные имена `fk_...` (см. models.py).
+    Возвращаем и имя, и `pg_get_constraintdef(oid)`, чтобы вернуть констрейнт
+    ровно таким, каким он был (включая поведение ON DELETE/CASCADE).
+    """
+    rows = db.execute(
+        text(
+            "SELECT c.conname, pg_get_constraintdef(c.oid) "
+            "FROM pg_constraint c "
+            "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey) "
+            "WHERE c.contype = 'f' AND c.conrelid = to_regclass(:tbl) AND a.attname = :col"
+        ),
+        {"tbl": f"public.{ref_table}", "col": ref_col},
+    ).fetchall()
+    return [(str(r[0]), str(r[1])) for r in rows]
+
+
 def _rebuild_table(db, table: str, old_ids: list[int], mapping: dict[int, int],
                    refs: list[tuple[str, str]]) -> int:
     """Перенумеровывает таблицу и все ссылающиеся на неё FK.
@@ -160,13 +183,17 @@ def _rebuild_table(db, table: str, old_ids: list[int], mapping: dict[int, int],
     """
     changed = 0
 
-    # Фаза 1: снимаем FK-констрейнты, которые могут помешать во время переноса.
-    # (например, cash_register.transaction_id NOT NULL при UPDATE родителя.)
+    # Фаза 1: снимаем FK-констрейнты, которые могут помешать во время переноса
+    # (например, cash_register.transaction_id NOT NULL при UPDATE родителя).
+    # Имена/определения берём из каталога и запоминаем, чтобы вернуть их как было.
+    saved_fks: dict[tuple[str, str], list[tuple[str, str]]] = {}
     for ref_table, ref_col in refs:
         if not _table_exists(db, ref_table):
             continue
-        db.execute(text(f"ALTER TABLE {ref_table} DROP CONSTRAINT IF EXISTS "
-                        f"{ref_table}_{ref_col}_fkey"))
+        defs = _fk_defs(db, ref_table, ref_col)
+        saved_fks[(ref_table, ref_col)] = defs
+        for name, _ in defs:
+            db.execute(text(f'ALTER TABLE {ref_table} DROP CONSTRAINT "{name}"'))
 
     # Фаза 2: родитель → отрицательная зона.
     for oid in old_ids:
@@ -196,71 +223,17 @@ def _rebuild_table(db, table: str, old_ids: list[int], mapping: dict[int, int],
                 {"n": mapping[oid], "o": -oid},
             )
 
-    # Фаза 5: возвращаем FK-констрейнты (имена и поведение — как в моделях).
+    # Фаза 5: возвращаем FK-констрейнты с исходными именами и определениями.
     for ref_table, ref_col in refs:
         if not _table_exists(db, ref_table):
             continue
-        fk = _FK_DEFS.get((ref_table, ref_col))
-        if fk:
+        for name, condef in saved_fks.get((ref_table, ref_col), []):
             db.execute(text(
-                f"ALTER TABLE {ref_table} ADD CONSTRAINT {ref_table}_{ref_col}_fkey "
-                f"FOREIGN KEY ({ref_col}) REFERENCES {table}(id) {fk}"
+                f'ALTER TABLE {ref_table} ADD CONSTRAINT "{name}" {condef}'
             ))
 
     _set_seq(db, table, len(old_ids))
     return changed
-
-
-# Поведение FK при удалении — копия моделей (models.py), чтобы восстановить
-# констрейнты ровно такими, какими их создал SQLAlchemy.
-_FK_DEFS: dict[tuple[str, str], str] = {
-    ("apartments", "owner_id"): "ON DELETE RESTRICT",
-    ("transactions", "contractor_id"): "ON DELETE RESTRICT",
-    ("cash_register", "contractor_id"): "ON DELETE RESTRICT",
-    ("accounts", "apartment_id"): "ON DELETE RESTRICT",
-    ("meters", "apartment_id"): "ON DELETE CASCADE",
-    ("meter_readings", "apartment_id"): "ON DELETE CASCADE",
-    ("users", "account_id"): "ON DELETE SET NULL",
-    ("transactions", "account_id"): "ON DELETE RESTRICT",
-    ("accruals_register", "account_id"): "ON DELETE RESTRICT",
-    ("accounts_register", "account_id"): "ON DELETE RESTRICT",
-    ("cash_register", "account_id"): "ON DELETE RESTRICT",
-    ("receipt_documents", "account_id"): "ON DELETE RESTRICT",
-    ("writeoff_items", "account_id"): "ON DELETE RESTRICT",
-    ("services_type", "tariff_type_id"): "ON DELETE RESTRICT",
-    ("tariffs", "services_type_id"): "ON DELETE RESTRICT",
-    ("meters", "services_type_id"): "ON DELETE RESTRICT",
-    ("meter_reading_documents", "services_type_id"): "ON DELETE RESTRICT",
-    ("meter_readings", "services_type_id"): "ON DELETE RESTRICT",
-    ("accruals_register", "services_type_id"): "ON DELETE RESTRICT",
-    ("accounts_register", "services_type_id"): "ON DELETE RESTRICT",
-    ("receipt_items", "services_type_id"): "ON DELETE RESTRICT",
-    ("writeoff_items", "services_type_id"): "ON DELETE RESTRICT",
-    ("accruals_register", "tariff_id"): "ON DELETE RESTRICT",
-    ("meter_readings", "meter_id"): "ON DELETE CASCADE",
-    ("meter_readings", "document_id"): "ON DELETE CASCADE",
-    ("accruals_register", "current_reading_id"): "ON DELETE SET NULL",
-    ("user_preferences", "user_id"): "ON DELETE CASCADE",
-    ("transactions", "created_by"): "ON DELETE SET NULL",
-    ("transactions", "updated_by"): "ON DELETE SET NULL",
-    ("meter_reading_documents", "created_by"): "ON DELETE SET NULL",
-    ("meter_reading_documents", "updated_by"): "ON DELETE SET NULL",
-    ("accrual_documents", "created_by"): "ON DELETE SET NULL",
-    ("accrual_documents", "updated_by"): "ON DELETE SET NULL",
-    ("receipt_documents", "created_by"): "ON DELETE SET NULL",
-    ("receipt_documents", "updated_by"): "ON DELETE SET NULL",
-    ("writeoff_documents", "created_by"): "ON DELETE SET NULL",
-    ("writeoff_documents", "updated_by"): "ON DELETE SET NULL",
-    ("transactions", "article_id"): "ON DELETE SET NULL",
-    ("transactions", "cash_point_id"): "ON DELETE RESTRICT",
-    ("cash_register", "transaction_id"): "ON DELETE CASCADE",
-    ("accounts_register", "transaction_id"): "ON DELETE CASCADE",
-    ("accruals_register", "accrual_document_id"): "ON DELETE CASCADE",
-    ("writeoff_items", "document_id"): "ON DELETE CASCADE",
-    ("accounts_register", "accrual_id"): "ON DELETE CASCADE",
-    ("accounts_register", "writeoff_id"): "ON DELETE CASCADE",
-    ("receipt_items", "receipt_id"): "ON DELETE CASCADE",
-}
 
 
 def _report(db) -> None:
