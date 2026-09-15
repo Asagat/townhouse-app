@@ -531,6 +531,11 @@ python create_user.py    # админ (идемпотентно)
    - если в источнике появился дамп **новее** применённого (маркер
      `.git/db_refresh.state`) — полная пересборка БД из дампа
      (`restore_townhouse.sh all --fresh --yes`) с последующим догоном схемы.
+     Дампом данных считается только файл канонического имени
+     `townhouse_ГГГГММДД_ЧЧММСС.sql` (его создаёт `dump_to_sync.sh`); прочие
+     `townhouse_*.sql` — роли (`townhouse_roles_*`), точки отката
+     (`townhouse_pre_*`) и выгрузки для прод-переноса (`townhouse_for_prod_*`) —
+     выбором игнорируются (подробнее §7.4).
 
    Лог запусков — `.git/post-merge.log`. Вручную можно запустить
    `./scripts/refresh_from_backups.sh [--yes|--dry-run]`.
@@ -540,6 +545,9 @@ python create_user.py    # админ (идемпотентно)
   не делают (например, VPS или corsus без симметричного режима §7.4).
 - Автоимпорт **деструктивен** (drop/create БД) и поэтому включается только
   явной переменной `DB_MIRROR_BACKUPS` и только при появлении дампа новее маркера.
+- Имена дампов важны: отбор идёт по шаблону `townhouse_ГГГГММДД_ЧЧММСС.sql`
+  (не по mtime). Дамп с другим именем зеркало не увидит и напишет «нет дампов
+  данных». Точки отката (`townhouse_pre_*`) лучше держать вне синхронизируемой папки.
 - `git pull --rebase` hook **не** запускает — используйте обычный `git pull`.
 
 ### 7.4 Симметричный режим: corsus ↔ snowflake (разработка по очереди)
@@ -583,6 +591,14 @@ python create_user.py    # админ (идемпотентно)
 3. Второй ПК делает обычный `git pull` → hook запускает `update_db_after_pull.sh`:
    догон схемы (на corsus — в backend-контейнере, на snowflake — через `.venv`),
    затем импорт дампа (`restore_townhouse.sh all --fresh --yes`) и повторный догон схемы.
+
+«Самый свежий» определяется только среди канонических дампов данных
+`townhouse_ГГГГММДД_ЧЧММСС.sql` (по метке времени в имени, а не по mtime). Служебные
+файлы в этой же папке — роли (`townhouse_roles_*`), точки отката (`townhouse_pre_*`)
+и выгрузки для прод-переноса (`townhouse_for_prod_*`) — выбором игнорируются: раньше
+отбор `ls | sort | tail -1` подхватывал их (имена `pre_`/`for_prod_` сортируются после
+дампов данных), зеркало импортировало точку отката и «застревало» на ней (маркер
+вставал на служебный файл, и новые дампы больше не применялись).
 
 Импорт срабатывает, когда самый свежий дамп **отличается от маркера**; одинаковый —
 пропускается. Автоимпорт деструктивен (drop/create БД) — на зеркале это норма, но перед
@@ -1030,7 +1046,7 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 | `./scripts/setup_vps.sh` | Полная установка на НОВОМ VPS (пакеты, clone, .env, БД, systemd, build) |
 | `./scripts/deploy_vps.sh [ref]` | Обновление VPS (fetch, при `ref` — фиксация ветки/тега/SHA, alembic, справочники, админ, сборка фронтенда, restart). Без аргумента — авто-выкат `git pull` (main); вызывается из GitHub Actions (см. §10) |
 | `./scripts/restore_townhouse.sh` | Восстановление БД из дампов (см. §8.2): `data [--fresh] <файл.sql>`, `roles [--force] <файл.sql>`, `all ...`; `--yes` — без запроса (для автоматизации) |
-| `./scripts/refresh_from_backups.sh [--yes]` | Зеркальный ПК: импорт свежих дампов из `DB_MIRROR_BACKUPS` + догон схемы (маркер `.git/db_refresh.state`) |
+| `./scripts/refresh_from_backups.sh [--yes]` | Зеркальный ПК: импорт свежих дампов из `DB_MIRROR_BACKUPS` + догон схемы (маркер `.git/db_refresh.state`); отбор — только канонические `townhouse_ГГГГММДД_ЧЧММСС.sql` |
 | `./scripts/update_db_after_pull.sh` | После `git pull`: догон схемы + зеркальные дампы (вызывается hook-ом post-merge) |
 | `./scripts/dump_to_sync.sh` | Активный ПК: выгрузить дамп БД в синхронизируемую папку (`DB_MIRROR_BACKUPS`) и обновить маркер |
 | `./scripts/install_post_merge_hook.sh` | Установить/удалить git-hook `post-merge` (автозапуск после pull) |
