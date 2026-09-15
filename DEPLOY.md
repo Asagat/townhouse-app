@@ -947,6 +947,44 @@ docker compose -f docker-compose.prod.yml exec -T postgres \
 | Кириллица в справочниках → `UnicodeEncodeError` | БД создана не в UTF8; пересоздать с `POSTGRES_INITDB_ARGS` (§3.1) |
 | Дамп не заливается: «already exists» | дамп содержит схему; заливать в **пустую** БД (шаг В до заливки не выполнять) |
 
+### 7.7 Демо-контур на NAS (`demo.sagacloud.synology.me`)
+
+Показательная копия системы — **автономная папка** `deploy/demo/` (свой compose,
+свои контейнеры/volume/сеть и отдельные секреты). Прод-контур и его данные не
+затрагиваются; полный порядок запуска — `deploy/demo/README.md`.
+
+- **Схема — та же проверенная 3-контейнерная**: `postgres` + `backend` (FastAPI) +
+  `frontend` (nginx: SPA + прокси `/api/`). Префикс `townhouse-demo-*` даён только
+  контейнерам/volume (`townhouse_demo_pgdata`)/сети (`townhouse_demo`); имена СЕРВИСОВ
+  (`postgres`/`backend`/`frontend`) менять нельзя — это DNS-имена, и nginx В ОБРАЗЕ
+  фронтенда проксирует `/api/` на `backend:8000`.
+- **Наружу** — только `APP_PORT=8081` (фронтенд); HTTPS терминирует DSM-«Обратный
+  прокси» (`demo.sagacloud.synology.me` → `http://<NAS>:8081`), `CORS_ORIGINS` — под
+  демо-домен.
+- **Данные** — вымышленные, генерируются `backend/migrations/seed_demo_data.py`
+  (скрипт входит в образ backend; нужен релиз, в образе которого он есть).
+  По умолчанию — последние 3 завершённых месяца на дату запуска + детерминированный
+  seed (числа воспроизводимы); логины жителей не создаются (ЛК показывается из админки).
+
+Первичная последовательность (в каталоге `deploy/demo` на NAS):
+
+```bash
+cp .env.demo.example .env                                   # заполнить секреты (свои, не прод)
+docker compose -f docker-compose.demo.yml up -d
+docker compose -f docker-compose.demo.yml exec backend python -m alembic upgrade head
+docker compose -f docker-compose.demo.yml exec backend python init_data.py
+docker compose -f docker-compose.demo.yml exec backend python create_user.py
+docker compose -f docker-compose.demo.yml exec backend python migrations/seed_demo_data.py            # план
+docker compose -f docker-compose.demo.yml exec backend python migrations/seed_demo_data.py --apply    # создать
+```
+
+Сброс демо-данных (показать чистый пример заново): добавить `--wipe`.
+Обновление версии — только из CLI (`pull` + `up -d` + `alembic upgrade head`); кнопки
+«Обновить» в Container Manager нет, «Очистить» использовать нельзя (уносит volume).
+
+Упрощение до 2 контейнеров (SPA отдаёт backend, без nginx) — отдельная задача,
+`ROADMAP.md` в разделе «Технический долг» (ТД-5).
+
 ---
 
 ## 8. Резервное копирование БД (дамп)

@@ -1,0 +1,93 @@
+# Демонстрационный контур Townhouse ERP — NAS Synology (Container Manager).
+#
+# АВТОНОМНАЯ ПАПКА: этот стек не пересекается с прод-контуром (корневой
+# docker-compose.prod.yml) — свои контейнеры, свой volume, своя сеть и свой .env.
+# Запускать из ЭТОЙ папки (тогда .env подхватится автоматически):
+#
+#   cd deploy/demo
+#   cp .env.demo.example .env      # заполнить секреты
+#   docker compose -f docker-compose.demo.yml up -d
+#
+# Полный порядок первого запуска (схема, справочники, демо-данные) — в README.md
+# рядом с этим файлом.
+#
+# ВАЖНО про имена СЕРВИСОВ: `postgres`, `backend`, `frontend` — это DNS-имена внутри
+# сети Docker. nginx ВНУТРИ образа фронтенда проксирует /api/ на `backend:8000`
+# (frontend/nginx-container.conf), поэтому имена сервисов менять НЕЛЬЗЯ. Префикс
+# `townhouse-demo-*` даём только именам контейнеров/volume/сети — так демо-контур
+# не конфликтует с прод-контуром и его видно в Container Manager.
+#
+# 3 контейнера (как в проде): postgres + backend + frontend(nginx: SPA + прокси /api).
+# Наружу открывается ТОЛЬКО порт фронтенда (APP_PORT); HTTPS терминируется на DSM
+# («Обратный прокси»), напр. demo.sagacloud.synology.me → http://<NAS>:8081.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: townhouse-demo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-townhouse_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD не задан в .env}
+      # Отдельная БД демо-контура (данные вымышленные).
+      POSTGRES_DB: ${POSTGRES_DB:-townhouse_demo}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+    volumes:
+      # Свой volume: прод-данные (townhouse_pgdata) не затрагиваются.
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-townhouse_user} -d ${POSTGRES_DB:-townhouse_demo}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # Портов наружу нет: БД доступна только контейнерам этой сети.
+    networks:
+      - townhouse
+
+  backend:
+    # Тег релиза БЕЗ префикса `v` (git-тег v1.0.6 → docker-тег 1.0.6).
+    # Нужен релиз, в образе которого есть backend/migrations/seed_demo_data.py.
+    image: ghcr.io/asagat/townhouse-app-backend:${TOWNHOUSE_TAG:?TOWNHOUSE_TAG не задан — укажите docker-тег релиза без `v`, напр. 1.0.6}
+    container_name: townhouse-demo-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-townhouse_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD не задан в .env}@postgres:5432/${POSTGRES_DB:-townhouse_demo}
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY не задан в .env}
+      # Демо-домен (через запятую, если понадобится ещё хост).
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS не задан в .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD не задан в .env}
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    networks:
+      - townhouse
+
+  frontend:
+    image: ghcr.io/asagat/townhouse-app-frontend:${TOWNHOUSE_TAG:?TOWNHOUSE_TAG не задан — укажите docker-тег релиза без `v`, напр. 1.0.6}
+    container_name: townhouse-demo-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      # Наружу — только фронтенд; DSM «Обратный прокси» ставит HTTPS на этот порт.
+      - "${APP_PORT:-8081}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - townhouse
+
+volumes:
+  pgdata:
+    # Отдельный volume — данные демо не смешиваются с прод-БД.
+    name: townhouse_demo_pgdata
+
+networks:
+  townhouse:
+    name: townhouse_demo
