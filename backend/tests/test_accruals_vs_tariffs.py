@@ -20,10 +20,12 @@
 Тест read-only (без записи в БД), работает на импортированной dev/pre-prod БД.
 """
 
+from datetime import date
+
 from sqlalchemy import text
 import pytest
 
-from services import calculate_accruals_preview
+from services import calculate_accruals_preview, resolve_tariff_for_accrual_period
 
 FIXED = "Фиксированный"
 AREA = "По площади"
@@ -70,7 +72,13 @@ def test_regular_accruals_match_tariff_formulas(db):
 
 
 def test_march2024_fund_uses_closed_tariff_9560(db):
-    """март-2024 «Фонд развития»: действует тариф-период 9560 и начисление равно 9560.
+    """март-2024 «Фонд развития»: применяемый тариф 9560 и начисления равны 9560.
+
+    «Ответственный» тариф месяца ищется тем же правилом, что и в расчёте —
+    `resolve_tariff_for_accrual_period` (приоритет: закрытый тариф-период месяца,
+    затем открытая ставка). Поле `status` здесь НЕ критерий: после нормализации
+    статусов (12.09) «Действующим» остаётся ровно один тариф на услугу — тот, что
+    применяется в текущем месяце, а исторический месячный период «архивируется».
 
     Проверка имеет смысл только на БД с импортированной историей (есть начисления
     за март-2024 по «Фонду»). На пустой/свежей БД (disposable-CI после alembic +
@@ -88,14 +96,13 @@ def test_march2024_fund_uses_closed_tariff_9560(db):
     if not has_march:
         pytest.skip("Нет начислений «Фонда» за март-2024 (БД без импортированной истории)")
 
-    tariff = db.execute(text("""
-        SELECT id, price, status FROM tariffs
-        WHERE valid_from <= '2024-03-31' AND valid_to >= '2024-03-01'
-          AND services_type_id = (SELECT id FROM services_type WHERE services_type = 'Фонд развития')
-          AND status = 'active'
-    """)).fetchone()
-    assert tariff is not None, "Нет активного тарифа «Фонда» на март-2024 (ожидалась месячная ставка 9560)"
-    assert abs(float(tariff[1]) - 9560.0) < 0.005, f"Ставка март-2024 Фонда = {tariff[1]}, ожидалось 9560"
+    fund_service_id = db.execute(text(
+        "SELECT id FROM services_type WHERE services_type = 'Фонд развития'"
+    )).scalar()
+
+    tariff = resolve_tariff_for_accrual_period(db, fund_service_id, date(2024, 3, 31))
+    assert tariff is not None, "Нет применяемого тарифа «Фонда» на март-2024 (ожидалась месячная ставка 9560)"
+    assert abs(float(tariff.price) - 9560.0) < 0.005, f"Ставка март-2024 Фонда = {tariff.price}, ожидалось 9560"
 
     mismatch = db.execute(text("""
         SELECT COUNT(*) FROM accruals_register a
