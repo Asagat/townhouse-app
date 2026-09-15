@@ -226,6 +226,26 @@ def generate_receipts(
     if (year, month) > (today.year, today.month):
         raise HTTPException(status_code=422, detail="Нельзя сформировать квитанции за будущий период")
 
+    # Защита от дублирования («от дурака»): за период квитанции уже сформированы.
+    # `generate_receipt_document` не идемпотентен, поэтому повторный вызов создал бы
+    # дубли квитанций и их строк — ничего не создаём, просим сначала удалить прошлые.
+    existing_receipt = (
+        db.query(ReceiptDocument)
+        .filter(
+            ReceiptDocument.period_year == year,
+            ReceiptDocument.period_month == month,
+        )
+        .first()
+    )
+    if existing_receipt is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "За данный период уже имеется аналогичный документ — сначала нужно "
+                "удалить прошлые документы!"
+            ),
+        )
+
     accounts = db.query(Account).filter(Account.is_active == True).all()
     created = []
     comment = payload.get("comment")

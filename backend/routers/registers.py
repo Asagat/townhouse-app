@@ -97,6 +97,29 @@ async def generate_accruals(
 
     period_end = date(year, month, calendar.monthrange(year, month)[1])
 
+    # Защита от дублирования («от дурака»): месячный документ начислений за этот период
+    # уже оформлен. Повторная генерация создала бы второй «Начисление за …» и удвоила
+    # бы начисления/долг в регистрах — поэтому ничего не создаём и просим сначала
+    # удалить прошлые документы. Разовые документы ('oneoff') не мешают: они по своей
+    # природе сосуществуют с месячным (например, разовые сборы месяца).
+    existing_document = (
+        db.query(AccrualDocument)
+        .filter(
+            AccrualDocument.doc_kind == "monthly",
+            AccrualDocument.accrual_date >= date(year, month, 1),
+            AccrualDocument.accrual_date <= period_end,
+        )
+        .first()
+    )
+    if existing_document is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "За данный период уже имеется аналогичный документ — сначала нужно "
+                "удалить прошлые документы!"
+            ),
+        )
+
     # Собираем уникальные пары (account_id, services_type_id) из выбора клиента
     requested_pairs: set[tuple[int, int]] = set()
     for row in selections:
