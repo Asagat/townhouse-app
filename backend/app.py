@@ -83,8 +83,30 @@ from services import (build_accrual_register_items, build_transaction_title, cal
 
 
 # Инициализация основного приложения
-app = FastAPI(title="Townhouse ERP System")
+#
+# Swagger UI (/docs, /redoc) и схема /openapi.json — инструменты разработки.
+# В проде их закрывают: документация раскрывает структуру API (ресурсы, поля,
+# параметры) любому, кто дошёл до домена. Управление — переменной ENABLE_DOCS.
+#
+# Безопасный дефолт — ЗАКРЫТО (в проде не откроется по недосмотру). Локально
+# включить в .env:  ENABLE_DOCS=true
+
+def _docs_enabled() -> bool:
+    return os.getenv("ENABLE_DOCS", "false").strip().lower() in ("1", "true", "yes", "on")
+
+
+_DOCS_ON = _docs_enabled()
+app = FastAPI(
+    title="Townhouse ERP System",
+    docs_url="/docs" if _DOCS_ON else None,
+    redoc_url="/redoc" if _DOCS_ON else None,
+    openapi_url="/openapi.json" if _DOCS_ON else None,
+)
 logger = logging.getLogger(__name__)
+if _DOCS_ON:
+    logger.info("ENABLE_DOCS включён — /docs и /openapi.json доступны.")
+else:
+    logger.info("ENABLE_DOCS выключен — /docs, /redoc и /openapi.json недоступны.")
 
 # --- НАСТРОЙКА CORS ---
 # Разрешённые источники берутся из CORS_ORIGINS (разделитель — запятая).

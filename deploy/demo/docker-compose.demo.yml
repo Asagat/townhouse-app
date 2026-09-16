@@ -60,6 +60,8 @@ services:
       # Демо-домен (через запятую, если понадобится ещё хост).
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS не задан в .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD не задан в .env}
+      # Swagger/ReDoc/openapi.json. В демо по умолчанию включены (показать API).
+      ENABLE_DOCS: ${ENABLE_DOCS:-true}
       PYTHONUTF8: "1"
       PYTHONIOENCODING: utf-8
     networks:

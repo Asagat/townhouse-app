@@ -53,6 +53,9 @@ services:
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY не задан в .env}
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS не задан в .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD не задан в .env}
+      # Swagger/ReDoc/openapi.json. В проде по умолчанию закрыты (безопасный дефолт,
+      # даже если переменная забыта в .env — документация не откроется).
+      ENABLE_DOCS: ${ENABLE_DOCS:-false}
       PYTHONUTF8: "1"
       PYTHONIOENCODING: utf-8
     networks:
