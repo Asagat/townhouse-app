@@ -14,7 +14,12 @@
 |---|---|
 | `docker-compose.demo.yml` | Стек демо-контура (префикс имён `townhouse-demo-*`, volume `townhouse_demo_pgdata`, сеть `townhouse_demo`) |
 | `.env.demo.example` | Шаблон окружения (скопировать в `.env` и заполнить секреты) |
+| `seed_demo_data.py` | Генератор демо-данных — копия `backend/migrations/seed_demo_data.py` (чтобы закинуть на NAS и запустить без нового релиза, см. ниже) |
 | `README.md` | Этот файл — порядок запуска |
+
+> На NAS удобно переименовать `docker-compose.demo.yml` → `docker-compose.yml`: тогда
+> все команды короче (`docker compose up -d` без `-f`). В примерах ниже указан `-f`;
+> если файл переименован — флаг можно опускать.
 
 ## Первый запуск (на NAS, в каталоге проекта)
 
@@ -57,11 +62,40 @@ $DC exec backend python migrations/seed_demo_data.py --apply
 seed; логины жителей **не создаются** (`--residents` не передаём — ЛК жителя
 показывается из админки).
 
+Движения кассы датируются началом следующего месяца (оплаты — 5-го, расходы — 10-го, но
+не позже сегодня): иначе последние операции выпадают из окна дашборда «последние 30 дней»
+и «Внесено в кассу»/«Расходы» показывают 0.
+
 Период можно зафиксировать, если нужна неизменная картинка:
 `--end 2026-08 --months 3 --seed 20260915`.
 
 Генератор отказывается писать в непустую БД (печатает, что найдено) — чтобы демо не
 смешалось с чем-то ещё.
+
+## Генератор без нового релиза (копия в этой папке)
+
+В образе лежит та версия генератора, что попала в релиз. Чтобы запустить
+обновлённый генератор, не выпуская новый релиз, в этой папке лежит его копия —
+закидываем её в контейнер и запускаем:
+
+```bash
+docker compose cp ./seed_demo_data.py backend:/app/migrations/seed_demo_data.py
+docker compose exec backend python migrations/seed_demo_data.py                # план
+docker compose exec backend python migrations/seed_demo_data.py --apply --wipe # пересоздать
+```
+
+Альтернатива через имя контейнера (если `compose cp` недоступен):
+
+```bash
+docker cp ./seed_demo_data.py townhouse-demo-backend:/app/migrations/seed_demo_data.py
+```
+
+⚠️ Файл живёт внутри контейнера и **исчезает** при `docker compose up -d --force-recreate`
+(и при `pull`). После каждого пересоздания контейнера копию нужно закинуть заново —
+либо дождаться релиза, в образе которого та же версия.
+
+Копия здесь — ТОЧНО та же, что `backend/migrations/seed_demo_data.py` (канонический
+источник). При правках держите их синхронными (сверка: `diff`/`sha256sum`).
 
 ## Сброс демо-данных
 
@@ -107,7 +141,8 @@ docker compose -f docker-compose.demo.yml exec backend python -m alembic upgrade
 > на `backend:8000`. Префикс даётся только именам контейнеров/volume/сети.
 - Демо-контур **не пересекается** с прод-контуром: контейнеры `townhouse-demo-*`,
   volume `townhouse_demo_pgdata`, сеть `townhouse_demo`, отдельные секреты.
-- Прод-shell и демо-shell — разные: команды всегда через
-  `docker compose -f deploy/demo/docker-compose.demo.yml`.
+- Прод-shell и демо-shell — разные: команды демо выполняются из папки `deploy/demo`
+  со своим compose-файлом (`docker-compose.demo.yml` или переименованным в
+  `docker-compose.yml`) — чтобы не задеть прод-стек.
 - Упрощение до 2 контейнеров (SPA отдаёт FastAPI, убрать nginx) — отдельная задача,
   см. `ROADMAP.md` (раздел «Технический долг»).
