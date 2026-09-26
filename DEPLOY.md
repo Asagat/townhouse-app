@@ -1144,7 +1144,13 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 | `.github/workflows/docker-build.yml` | Авто-сборка и публикация прод-docker-образов (`backend/Dockerfile`, **`frontend/Dockerfile.prod`** — nginx+dist) в `ghcr.io/asagat/townhouse-app-{backend,frontend}`: push в `main` → тег `main`; релизный тег `v*` → semver-теги `1.2.3` и `1.2` (**без** префикса `v`); можно запустить вручную. Именно эти образы потребляет прод-стек NAS (`docker-compose.prod.yml`, `TOWNHOUSE_TAG` — тоже без `v`). |
 | ~~`.github/workflows/deploy.yml` + `.github/actions/deploy/`~~ | **Удалены (08.09.2026)** — SSH-выкат на сервер был по тегу `v*` → `production` или вручную; серверов `staging`/`production` нет. При появлении хост-сервера процедуру можно восстановить по этому разделу. |
 
-**Текущий релиз:** `v1.0.8` (снята молчаливая обрезка списков до 10 строк); предыдущий — `v1.0.7` (Swagger/ReDoc закрыты в проде через `ENABLE_DOCS`). В ghcr образы `1.0.8` и `1.0` (а также `latest`); ранее — `v1.0.0`…`v1.0.6`.
+**Текущий релиз:** `v1.0.9` (исправлен драйвер PostgreSQL — см. примечание ниже); **`v1.0.8` использовать нельзя** (не поднимается против БД из-за SQLAlchemy 2.1); `v1.0.7` — Swagger/ReDoc закрыты в проде через `ENABLE_DOCS`). В ghcr — `1.0.9` и `1.0` (плюс плавающий `latest`); ранее — `v1.0.0`…`v1.0.6`.
+
+> **Дрейф зависимостей (26.09.2026):** `backend/requirements.txt` был unpinned — в свежей сборке подтянулся
+> SQLAlchemy 2.1, где дефолтный драйвер для `postgresql://` сменился на psycopg (v3), из-за чего образ падал
+> на `import database` (`ModuleNotFoundError: psycopg`), а CI — на миграциях. Исправлено: явный драйвер в
+> `database.py` (`postgresql+psycopg2://`) + `sqlalchemy>=2.0,<2.1` в requirements (ADR-002). При обновлении
+> прочих зависимостей обязательно дождитесь зелёного CI и job'а `Images` (сборка образов + smoke-тест).
 
 На сервере `scripts/deploy_vps.sh <ref>` делает: `git fetch` + фиксация кода на `ref` (workflow передаёт **SHA проверенного CI коммита**) → `alembic upgrade head` → `init_data.py` → `create_user.py` → **сборка фронтенда** (`npm ci`/`npm install` → `npm run build`; статика в `frontend/dist`, её отдаёт nginx) → перезапуск systemd-сервиса `townhouse-backend`. *(Актуально только при наличии VPS-хоста; в текущей локальной модели не используется.)*
 
