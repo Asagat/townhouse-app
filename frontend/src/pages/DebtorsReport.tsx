@@ -64,8 +64,6 @@ export const DebtorsReport = () => {
         { title: "№ квартиры", dataIndex: "apartment_number", key: "apartment_number", render: (v: number | null) => v ?? "—" },
         { title: "Лицевой счёт", dataIndex: "account_number", key: "account_number" },
         { title: "Собственник", dataIndex: "owner_name", key: "owner_name", render: (v: string | null) => v ?? "—" },
-        { title: "Начислено", dataIndex: "accrued", key: "accrued", align: "right" as const, render: (v: number) => formatMoney(v) },
-        { title: "Оплачено", dataIndex: "paid", key: "paid", align: "right" as const, render: (v: number) => formatMoney(v) },
         { title: "Переплата", dataIndex: "overpayment", key: "overpayment", align: "right" as const, render: (v: number) => (v ? formatMoney(v) : "—") },
         { title: "Долг", dataIndex: "debt", key: "debt", align: "right" as const, render: (v: number) => <Typography.Text style={{ color: v > 0 ? "#cf1322" : "#3f8600" }}>{formatMoney(v)}</Typography.Text> },
     ];

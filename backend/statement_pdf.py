@@ -369,15 +369,14 @@ def build_expense_report_pdf(data: dict) -> bytes:
 def build_debtors_report_pdf(data: dict) -> bytes:
     """PDF отчёта «По должникам» (2.16)."""
     from reportlab.lib.units import cm
-    headers = ["Кв.", "Л/с", "Собственник", "Начислено", "Оплачено", "Долг"]
-    widths = [cm * w for w in (1.3, 1.7, 5.0, 2.4, 2.4, 2.6)]
+    headers = ["Кв.", "Л/с", "Собственник", "Долг"]
+    widths = [cm * w for w in (1.3, 1.7, 5.0, 2.6)]
     rows = []
     for r in data.get("rows", []):
         rows.append([str(r.get("apartment_number") or ""), r.get("account_number") or "",
                      r.get("owner_name") or (r.get("account_name") or ""),
-                     _money(r.get("accrued")), _money(r.get("paid")),
                      _money(r.get("debt"))])
-    total = (["Итого", "", "", "", "", _money(data.get("total_debt"))]
+    total = (["Итого", "", "", _money(data.get("total_debt"))]
              if data.get("rows") else None)
     sections = [("Должники", headers, widths, rows, total)] if rows else []
     subtitle = [f"Должников: {data.get('count', 0)}"]
