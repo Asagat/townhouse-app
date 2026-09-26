@@ -418,3 +418,45 @@ def test_rebuild_is_deterministic(db, account_factory):
     assert float(first_balance) == float(second_balance)
     # Долг = начислено 1500 - списано 900 = 600 (положительный = долг).
     assert float(first_balance) == 600.0
+
+
+# --- cash_register: balance_after для строк без лицевого счёта ---
+
+
+def test_cash_balance_recalculated_for_rows_without_account(db, account_factory):
+    """Строки cash_register без привязки к л/с (account_id IS NULL — расходы кассы,
+    входящий остаток) тоже получают нарастающий итог balance_after.
+
+    Регрессия: пересчёт шёл с `WHERE account_id = :account_id`, а `NULL = NULL` не
+    истинно, поэтому такие строки навсегда оставались с balance_after = 0.
+    """
+    from datetime import datetime
+    from decimal import Decimal
+
+    rec = account_factory("nullbal")
+    # Даты заведомо раньше всех существующих операций — не зависим от наполнения БД.
+    t1 = Transaction(
+        account_id=None, cash_point_id=rec["cash_point_id"],
+        transaction_type=TransactionTypeEnum.out_cash, amount=Decimal("100"),
+        transaction_date=datetime(2016, 12, 1, 10, 0),
+    )
+    t2 = Transaction(
+        account_id=None, cash_point_id=rec["cash_point_id"],
+        transaction_type=TransactionTypeEnum.out_cash, amount=Decimal("50"),
+        transaction_date=datetime(2016, 12, 2, 10, 0),
+    )
+    db.add_all([t1, t2])
+    db.commit()
+    try:
+        rows = db.execute(
+            text("SELECT balance_after FROM cash_register WHERE account_id IS NULL "
+                 "AND transaction_id IN (:a, :b) ORDER BY operation_date, id"),
+            {"a": t1.id, "b": t2.id},
+        ).scalars().all()
+        # Нарастающий итог по группе «без л/с»: -100, затем -150 (два расхода).
+        assert [float(x) for x in rows] == [-100.0, -150.0]
+    finally:
+        # Автоочистка идёт по account_id и такие строки не удалит.
+        db.delete(t1)
+        db.delete(t2)
+        db.commit()

@@ -565,7 +565,11 @@ _REGISTER_RUNNING_UPDATE = """
                    ORDER BY operation_date ASC, id ASC
                ) AS running
         FROM {table}
-        WHERE account_id = :account_id
+        -- IS NOT DISTINCT FROM (а не `=`) — чтобы группа строк БЕЗ лицевого счёта
+        -- (account_id IS NULL: расходы кассы, входящий остаток) тоже получала
+        -- нарастающий итог. С `= :account_id` такие строки не матчились (NULL = NULL
+        -- → NULL) и balance_after оставался нулём.
+        WHERE account_id IS NOT DISTINCT FROM :account_id
     )
     UPDATE {table} ar
     SET balance_after = ordered.running
@@ -581,6 +585,10 @@ def recalculate_register_balance(executor, table: str, account_id) -> None:
     """Пересчитывает balance_after для ВСЕХ записей указанного регистра аккаунта
     «с нуля» по нарастающему итогу (SUM(income - expense)) в хронологическом порядке
     (operation_date, затем id).
+
+    Группа определяется `account_id`; для операций без лицевого счёта
+    (`account_id = None`, например расходы кассы) пересчитывается группа
+    `account_id IS NULL` — это отдельный нарастающий итог.
 
     Функция МЕХАНИЧЕСКАЯ — она не знает смысла income/expense (долг или денежный
     остаток — см. блок «КОНВЕНЦИЯ ЗНАКОВ»). Принимает имя таблицы из фиксированного
