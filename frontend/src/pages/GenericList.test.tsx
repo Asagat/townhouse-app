@@ -8,7 +8,7 @@
 // именно форматирование таблицы.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { Refine } from "@refinedev/core";
 import { GenericList } from "./GenericList";
 
@@ -124,5 +124,17 @@ describe("GenericList — форматирование колонок списк
         const row = screen.getByText(/Комментарий А/u).closest("tr");
         const date = within(row as HTMLElement).getByText(/24\.08\.2026/u);
         expect(date.textContent).toMatch(/^24\.08\.2026/);
+    });
+
+    it("колонка ID доступна в панели «Отображаемые колонки» (её можно скрыть)", async () => {
+        // Панель открывается кнопкой с иконкой таблицы (TableOutlined → .anticon-table).
+        const colsButton = document.querySelector(".anticon-table")?.closest("button");
+        expect(colsButton).not.toBeNull();
+        fireEvent.click(colsButton as HTMLElement);
+
+        await screen.findByText(/Отображаемые колонки/u);
+        // getByLabelText бросает, если чек-бокса нет; по умолчанию колонка видима.
+        const idCheckbox = screen.getByLabelText("ID") as HTMLInputElement;
+        expect(idCheckbox.checked).toBe(true);
     });
 });

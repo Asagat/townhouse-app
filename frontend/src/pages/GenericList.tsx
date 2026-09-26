@@ -40,7 +40,7 @@ import {
     useApiUrl,
     useGetIdentity,
 } from "@refinedev/core";
-import type { FieldMeta, ModalState } from "../types";
+import type { Column, FieldMeta, ModalState } from "../types";
 import type { CrudFilter, CrudSort } from "@refinedev/core";
 import {
     fetchServerPrefs,
@@ -474,7 +474,13 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         }
     }, [data, selectedRowKey]);
 
-    const columns = getColumnsForResource(resourceName);
+    // ID — обычная переключаемая колонка списка: добавляем её первой в общий список,
+    // чтобы её можно было скрыть/переставить в панели «Отображаемые колонки»
+    // (раньше была захардкожена отдельно и в настройки/панель не попадала).
+    const columns: Column[] = [
+        { key: "id", label: "ID" },
+        ...getColumnsForResource(resourceName),
+    ];
     const meta = allResources.find((r) => r.key === resourceName);
 
     // Вариант A + C (п. 2.10) + ширины (2.1): видимость/порядок/ширины колонок.
@@ -1013,63 +1019,46 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             isMeterReadingDocuments ||
             roleCanWrite);
 
-    const tableColumns: ColumnsType<any> = [
-        {
-            title: "ID",
-            dataIndex: "id",
-            key: "id",
-            width: widths["id"] ?? 70,
-            sorter: true,
+    // Колонки таблицы строятся из общего списка колонок (включая ID) — видимость,
+    // порядок и ширины применяются к ним одинаково.
+    const tableColumns: ColumnsType<any> = displayColumns.map((col): ColumnType<any> => {
+        const sortable = isSortableField(col.key);
+        const isNested = col.key.includes('.');
+        return {
+            title: <ColumnDragTitle columnKey={col.key}>{col.label}</ColumnDragTitle>,
+            dataIndex: col.key,
+            key: col.key,
+            // ID по умолчанию чуть уже (как было, когда колонка была отдельной).
+            width: widths[col.key] ?? (col.key === 'id' ? 70 : undefined),
+            render: (value: any, record: any) => {
+                try {
+                    const val = isNested ? getValueByPath(record, col.key) : value;
+                    return col.format ? col.format(val) : val ?? "—";
+                } catch {
+                    return "—";
+                }
+            },
+            sorter: sortable,
             sortDirections: ['ascend', 'descend'],
-            sortOrder: getColumnSortOrder('id'),
+            sortOrder: getColumnSortOrder(col.key),
             // Без всплывающей подсказки сортировки: оверлей antd над заголовком
-            // перекрывает кнопки панели записи (например «Просмотр») над таблицей.
+            // перекрывает кнопки панели записи над таблицей.
             showSorterTooltip: false,
             onHeaderCell: (): any => ({
-                ...headerResizeProps("id", setWidth),
-                style: headerAlignStyle(),
-            }),
-            onCell: (): any => ({ style: cellAlignStyle("id") }),
-            // Сортировка по умолчанию — на «Периоде» (см. выше); стрелку на ID не ставим.
-            ...(defaultSortDescPeriod ? {} : { defaultSortOrder: 'descend' as const }),
-        },
-        ...displayColumns.map((col): ColumnType<any> => {
-            const sortable = isSortableField(col.key);
-            const isNested = col.key.includes('.');
-            return {
-                title: <ColumnDragTitle columnKey={col.key}>{col.label}</ColumnDragTitle>,
-                dataIndex: col.key,
-                key: col.key,
-                width: widths[col.key],
-                render: (value: any, record: any) => {
-                    try {
-                        const val = isNested ? getValueByPath(record, col.key) : value;
-                        return col.format ? col.format(val) : val ?? "—";
-                    } catch {
-                        return "—";
-                    }
+                ...headerResizeProps(col.key, setWidth),
+                style: {
+                    ...headerAlignStyle(),
+                    ...(sortable ? { cursor: "pointer" } : {}),
                 },
-                sorter: sortable,
-                sortDirections: ['ascend', 'descend'],
-                sortOrder: getColumnSortOrder(col.key),
-                // Без всплывающей подсказки сортировки: оверлей antd над заголовком
-                // перекрывает кнопки панели записи над таблицей.
-                showSorterTooltip: false,
-                onHeaderCell: (): any => ({
-                    ...headerResizeProps(col.key, setWidth),
-                    style: {
-                        ...headerAlignStyle(),
-                        ...(sortable ? { cursor: "pointer" } : {}),
-                    },
-                }),
-                onCell: (): any => ({ style: cellAlignStyle(col.key) }),
-                // Подсветка сортировки по умолчанию для регистра начислений.
-                ...(defaultSortDescPeriod && col.key === 'accrual_date'
-                    ? { defaultSortOrder: 'descend' as const }
-                    : {}),
-            };
-        }),
-    ];
+            }),
+            onCell: (): any => ({ style: cellAlignStyle(col.key) }),
+            // Подсветка сортировки по умолчанию: «Период» в регистре начислений,
+            // иначе — ID (в регистре стрелку на ID не ставим).
+            ...((defaultSortDescPeriod ? col.key === 'accrual_date' : col.key === 'id')
+                ? { defaultSortOrder: 'descend' as const }
+                : {}),
+        };
+    });
 
     return (
         <div
@@ -1244,7 +1233,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                         options={[
                             { value: "id", label: "ID" },
                             ...displayColumns
-                                .filter((c) => isSortableField(c.key))
+                                .filter((c) => c.key !== "id" && isSortableField(c.key))
                                 .map((c) => ({ value: c.key, label: c.label })),
                         ]}
                     />
@@ -1274,7 +1263,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                 </div>
                                 <div style={{ maxHeight: 360, overflow: "auto" }}>
                                     {displayColumns
-                                        .filter((col) => isSortableField(col.key))
+                                        .filter((col) => col.key !== "id" && isSortableField(col.key))
                                         .map((col) => (
                                             <div
                                                 key={col.key}
