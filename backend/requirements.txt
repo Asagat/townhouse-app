@@ -1,6 +1,10 @@
 fastapi
 uvicorn
-sqlalchemy
+# SQLAlchemy: НЕ снимать верхнюю границу без проверки. В 2.1 дефолтным драйвером
+# для `postgresql://` стал psycopg (v3), а в проекте установлен `psycopg2-binary` —
+# свежая сборка падала на `import database` (ModuleNotFoundError: psycopg).
+# Драйвер дополнительно задаётся явно в database.with_explicit_driver().
+sqlalchemy>=2.0,<2.1
 psycopg2-binary
 sqladmin
 pydantic

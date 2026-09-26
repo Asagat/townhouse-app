@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -25,17 +26,30 @@ load_dotenv(_BACKEND_DIR / ".env")
 #
 # Так в .env достаточно указать либо DATABASE_URL, либо набор POSTGRES_* — дублировать
 # не нужно.
+def with_explicit_driver(url: str) -> str:
+    """Делает PostgreSQL-драйвер ЯВНЫМ в строке подключения.
+
+    SQLAlchemy выбирает DBAPI по схеме: для `postgresql://` исторически это был
+    psycopg2, но в SQLAlchemy 2.1 дефолтом стал psycopg (v3). В проекте установлен
+    `psycopg2-binary`, поэтому на свежих сборках импорт падал
+    (`ModuleNotFoundError: No module named 'psycopg'`) — так CI и упал на миграциях.
+    Указываем драйвер явно (`postgresql+psycopg2://`), чтобы поведение не зависело
+    от версии SQLAlchemy и от того, что придёт с unpinned-зависимостями.
+    """
+    return re.sub(r"^postgres(ql)?://", "postgresql+psycopg2://", url, count=1)
+
+
 def build_database_url() -> str:
     explicit = os.getenv("DATABASE_URL")
     if explicit and explicit.strip():
-        return explicit.strip()
+        return with_explicit_driver(explicit.strip())
 
     user = os.getenv("POSTGRES_USER", "postgres")
     password = os.getenv("POSTGRES_PASSWORD", "postgres")
     db = os.getenv("POSTGRES_DB", "townhouse")
     host = os.getenv("POSTGRES_HOST", "127.0.0.1")
     port = os.getenv("POSTGRES_PORT", "5432")
-    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+    return with_explicit_driver(f"postgresql://{user}:{password}@{host}:{port}/{db}")
 
 
 SQLALCHEMY_DATABASE_URL = build_database_url()
