@@ -472,16 +472,44 @@ def bulk_receipt_pdf(
 
 @router.delete("/receipt_documents/bulk_delete")
 def bulk_delete_receipts(
-    year: int,
-    month: int,
+    year: int | None = None,
+    month: int | None = None,
     db: Session = Depends(get_db),
     _auth: User = Depends(require_write_access),
 ):
-    """Массово удаляет квитанции за период (строки удаляются каскадно)."""
-    deleted = db.query(ReceiptDocument).filter(
-        ReceiptDocument.period_year == year,
-        ReceiptDocument.period_month == month,
-    ).delete(synchronize_session=False)
+    """Массово удаляет квитанции за период (строки удаляются каскадно).
+
+    - `year` + `month` — за конкретный месяц;
+    - только `year` — за весь год (все месяцы).
+    """
+    if year is None:
+        raise HTTPException(status_code=422, detail="Укажите год")
+    query = db.query(ReceiptDocument).filter(ReceiptDocument.period_year == year)
+    if month is not None:
+        if month < 1 or month > 12:
+            raise HTTPException(status_code=422, detail="Некорректный месяц")
+        query = query.filter(ReceiptDocument.period_month == month)
+    deleted = query.delete(synchronize_session=False)
+    db.commit()
+    return {"deleted": deleted}
+
+
+@router.post("/receipt_documents/bulk_delete")
+def bulk_delete_receipts_by_ids(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    _auth: User = Depends(require_write_access),
+):
+    """Массово удаляет квитанции по списку id (выделение строк в списке)."""
+    raw_ids = payload.get("ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise HTTPException(status_code=422, detail="Не указаны квитанции для удаления")
+    ids = [int(i) for i in raw_ids]
+    deleted = (
+        db.query(ReceiptDocument)
+        .filter(ReceiptDocument.id.in_(ids))
+        .delete(synchronize_session=False)
+    )
     db.commit()
     return {"deleted": deleted}
 

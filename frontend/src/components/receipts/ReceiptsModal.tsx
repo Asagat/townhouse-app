@@ -49,6 +49,9 @@ export const ReceiptsModal = ({ open, onClose, onSaved }: ReceiptsModalProps) =>
     const [generating, setGenerating] = useState(false);
     const [downloading, setDownloading] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    // Область удаления: за конкретный месяц или за весь год (все месяцы).
+    const [deleteScope, setDeleteScope] = useState<"month" | "year">("month");
+    const [deleteCount, setDeleteCount] = useState<number | null>(null);
 
     const { mutate: generate } = useCustomMutation();
 
@@ -60,9 +63,32 @@ export const ReceiptsModal = ({ open, onClose, onSaved }: ReceiptsModalProps) =>
             setGenerating(false);
             setDownloading(false);
             setDeleting(false);
+            setDeleteScope("month");
+            setDeleteCount(null);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open]);
+
+    // Сколько квитанций попадёт под удаление (X-Total-Count фильтрованного списка).
+    useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        const query =
+            `/receipt_documents?_start=0&_end=1&period_year=${year}` +
+            (deleteScope === "month" ? `&period_month=${month}` : "");
+        authedFetch(`${apiUrl}${query}`)
+            .then((r) => {
+                if (cancelled) return;
+                const total = r.headers.get("X-Total-Count");
+                setDeleteCount(total == null ? null : Number(total));
+            })
+            .catch(() => {
+                if (!cancelled) setDeleteCount(null);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [open, apiUrl, year, month, deleteScope]);
 
     const handleGenerate = () => {
         setGenerating(true);
@@ -134,8 +160,10 @@ export const ReceiptsModal = ({ open, onClose, onSaved }: ReceiptsModalProps) =>
     const handleDeleteAll = async () => {
         setDeleting(true);
         try {
+            const query =
+                `year=${year}` + (deleteScope === "month" ? `&month=${month}` : "");
             const resp = await authedFetch(
-                `${apiUrl}/receipt_documents/bulk_delete?year=${year}&month=${month}`,
+                `${apiUrl}/receipt_documents/bulk_delete?${query}`,
                 { method: "DELETE" },
             );
             if (!resp.ok) {
@@ -173,7 +201,11 @@ export const ReceiptsModal = ({ open, onClose, onSaved }: ReceiptsModalProps) =>
                 </Button>,
                 <Popconfirm
                     key="del"
-                    title="Удалить все квитанции за выбранный период?"
+                    title={
+                        deleteScope === "month"
+                            ? "Удалить все квитанции за выбранный месяц?"
+                            : `Удалить ВСЕ квитанции за ${year} год (все месяцы)?`
+                    }
                     okText="Удалить"
                     cancelText="Отмена"
                     onConfirm={handleDeleteAll}
@@ -226,10 +258,29 @@ export const ReceiptsModal = ({ open, onClose, onSaved }: ReceiptsModalProps) =>
                     placeholder="Например: изменён тариф электроэнергии"
                 />
             </div>
-            <div style={{ color: "#888" }}>
+            <div style={{ marginTop: 14, display: "flex", alignItems: "flex-end", gap: 14, flexWrap: "wrap" }}>
+                <div>
+                    <div style={{ marginBottom: 4 }}>Удалять</div>
+                    <Select
+                        style={{ width: 170 }}
+                        value={deleteScope}
+                        onChange={(v) => setDeleteScope(v)}
+                        options={[
+                            { value: "month", label: "За выбранный месяц" },
+                            { value: "year", label: "За весь год" },
+                        ]}
+                    />
+                </div>
+                <div style={{ color: "#888", fontSize: 12, paddingBottom: 6 }}>
+                    {deleteCount == null
+                        ? "Квитанции для удаления: —"
+                        : `Будет удалено квитанций: ${deleteCount}`}
+                </div>
+            </div>
+            <div style={{ color: "#888", marginTop: 10 }}>
                 Квитанции будут сформированы по всем активным лицевым счетам за выбранный
                 период. ZIP-архив содержит PDF по каждой квитанции. Удаление затрагивает
-                только квитанции за выбранный период.
+                выбранный месяц или весь год (все месяцы).
             </div>
         </Modal>
     );

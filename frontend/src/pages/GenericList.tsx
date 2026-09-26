@@ -464,6 +464,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     // --- Выделенная запись (2.12): действия записи — из панели над списком ---
     const [selectedRowKey, setSelectedRowKey] = useState<string | number | null>(null);
     const selectedRecord = data.find((r) => r.id === selectedRowKey) ?? null;
+    // Массовое выделение чекбоксами (квитанции) — для удаления выбранных.
+    const [checkedRowKeys, setCheckedRowKeys] = useState<(string | number)[]>([]);
 
     // Если выделенная запись исчезла из данных (удалена/другая страница) — снимаем выбор.
     useEffect(() => {
@@ -841,6 +843,35 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         </Tooltip>
     );
 
+    // Массовое удаление квитанций по выделенным строкам (POST с ids).
+    const bulkDeleteReceipts = async (ids: (string | number)[]) => {
+        try {
+            const resp = await authedFetch(`${apiUrl}/receipt_documents/bulk_delete`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: ids.map((x) => Number(x)) }),
+            });
+            if (!resp.ok) {
+                let detail = "Не удалось удалить квитанции";
+                try {
+                    const err = await resp.json();
+                    detail = err?.detail ?? detail;
+                } catch {
+                    // ignore
+                }
+                message.error(detail);
+                return;
+            }
+            const body = await resp.json();
+            message.success(`Удалено квитанций: ${body?.deleted ?? 0}`);
+            setCheckedRowKeys([]);
+            setSelectedRowKey(null);
+            tableQuery.refetch();
+        } catch (err: any) {
+            message.error(err?.message ?? "Не удалось удалить квитанции");
+        }
+    };
+
     const errMsg = (err: any, fallback: string) => err?.response?.data?.detail ?? fallback;
 
     const renderRecordActions = (record: any): React.ReactNode => {
@@ -1158,6 +1189,23 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                         )}
                                     </Space>
                                 ))}
+                            {isReceiptDocuments && checkedRowKeys.length > 0 && (
+                                <Tooltip title="Удалить выбранные">
+                                    <Popconfirm
+                                        title={`Удалить выбранные квитанции (${checkedRowKeys.length})?`}
+                                        okText="Удалить"
+                                        cancelText="Отмена"
+                                        onConfirm={() => bulkDeleteReceipts(checkedRowKeys)}
+                                    >
+                                        <Button danger icon={<DeleteOutlined />} />
+                                    </Popconfirm>
+                                </Tooltip>
+                            )}
+                            {isReceiptDocuments && checkedRowKeys.length > 0 && (
+                                <span style={{ color: "#888", fontSize: 12, marginLeft: 4 }}>
+                                    Выбрано: {checkedRowKeys.length}
+                                </span>
+                            )}
                         </div>
                     )}
                 </div>
@@ -1323,13 +1371,24 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                       onClick: () => setSelectedRowKey(record.id),
                                       style: { cursor: "pointer" },
                                   }),
-                                  rowSelection: {
-                                      type: "radio",
-                                      selectedRowKeys:
-                                          selectedRowKey != null ? [selectedRowKey] : [],
-                                      onChange: (keys) =>
-                                          setSelectedRowKey((keys[0] as string | number) ?? null),
-                                  },
+                                  // Квитанции — чекбоксы (массовое выделение для удаления),
+                                  // остальные списки — radio (действия одной записи).
+                                  rowSelection: isReceiptDocuments
+                                      ? {
+                                            type: "checkbox",
+                                            selectedRowKeys: checkedRowKeys,
+                                            onChange: (keys) =>
+                                                setCheckedRowKeys(keys as (string | number)[]),
+                                        }
+                                      : {
+                                            type: "radio",
+                                            selectedRowKeys:
+                                                selectedRowKey != null ? [selectedRowKey] : [],
+                                            onChange: (keys) =>
+                                                setSelectedRowKey(
+                                                    (keys[0] as string | number) ?? null,
+                                                ),
+                                        },
                               }
                             : {})}
                         pagination={{
