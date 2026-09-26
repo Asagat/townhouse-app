@@ -912,16 +912,6 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                             `receipt_${record.id}.pdf`,
                         ),
                     )}
-                    {roleCanDelete &&
-                        deleteButton("del", "Удалить", "Удалить квитанцию?", () =>
-                            deleteRecord(
-                                { resource: resourceName, id: record.id },
-                                {
-                                    onSuccess: () => message.success("Квитанция удалена"),
-                                    onError: (err: any) => message.error(errMsg(err, "Не удалось удалить квитанцию")),
-                                },
-                            ),
-                        )}
                 </Space>
             );
         }
@@ -1164,6 +1154,15 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                     />
                                 </Tooltip>
                             )}
+                            {isReceiptDocuments && roleCanCreate && (
+                                <Tooltip title="Сформировать квитанции">
+                                    <Button
+                                        type="primary"
+                                        icon={<FileAddOutlined />}
+                                        onClick={() => setReceiptsModalOpen(true)}
+                                    />
+                                </Tooltip>
+                            )}
                             {canUseSelection &&
                                 (selectedRecord ? (
                                     <>
@@ -1182,25 +1181,43 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                                 <Button icon={<EditOutlined />} disabled />
                                             </Tooltip>
                                         )}
-                                        {roleCanDelete && (
+                                        {roleCanDelete && !isReceiptDocuments && (
                                             <Tooltip title="Удалить">
                                                 <Button icon={<DeleteOutlined />} danger disabled />
                                             </Tooltip>
                                         )}
                                     </Space>
                                 ))}
-                            {isReceiptDocuments && checkedRowKeys.length > 0 && (
-                                <Tooltip title="Удалить выбранные">
-                                    <Popconfirm
-                                        title={`Удалить выбранные квитанции (${checkedRowKeys.length})?`}
-                                        okText="Удалить"
-                                        cancelText="Отмена"
-                                        onConfirm={() => bulkDeleteReceipts(checkedRowKeys)}
+                            {isReceiptDocuments &&
+                                roleCanDelete &&
+                                (checkedRowKeys.length > 0 || (canUseSelection && selectedRecord)) && (
+                                    <Tooltip
+                                        title={
+                                            checkedRowKeys.length > 0
+                                                ? "Удалить выбранные"
+                                                : "Удалить"
+                                        }
                                     >
-                                        <Button danger icon={<DeleteOutlined />} />
-                                    </Popconfirm>
-                                </Tooltip>
-                            )}
+                                        <Popconfirm
+                                            title={
+                                                checkedRowKeys.length > 1
+                                                    ? `Удалить выбранные квитанции (${checkedRowKeys.length})?`
+                                                    : "Удалить квитанцию?"
+                                            }
+                                            okText="Удалить"
+                                            cancelText="Отмена"
+                                            onConfirm={() =>
+                                                bulkDeleteReceipts(
+                                                    checkedRowKeys.length > 0
+                                                        ? checkedRowKeys
+                                                        : [selectedRecord!.id],
+                                                )
+                                            }
+                                        >
+                                            <Button danger icon={<DeleteOutlined />} />
+                                        </Popconfirm>
+                                    </Tooltip>
+                                )}
                             {isReceiptDocuments && checkedRowKeys.length > 0 && (
                                 <span style={{ color: "#888", fontSize: 12, marginLeft: 4 }}>
                                     Выбрано: {checkedRowKeys.length}
@@ -1326,16 +1343,6 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                 <Button icon={<TableOutlined />} />
                             </Tooltip>
                         </Popover>
-                    )}
-
-                    {isReceiptDocuments && (
-                        <Tooltip title="Сформировать квитанции">
-                            <Button
-                                type="primary"
-                                icon={<FileAddOutlined />}
-                                onClick={() => setReceiptsModalOpen(true)}
-                            />
-                        </Tooltip>
                     )}
 
                     {isWriteoffDocuments && (role === "admin" || role === "operator") && (
