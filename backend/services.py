@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import text
+from sqlalchemy import and_, or_, text
 from sqlalchemy.orm import Session
 
 from field_config import coerce_field_value
@@ -663,38 +663,50 @@ def calculate_accrual_for_account_service(
     if tariff is None:
         return None
 
-    meter = db.query(Meter).filter(
-        Meter.apartment_id == apartment.id,
-        Meter.services_type_id == service_type.id
-    ).first()
+    # Счётчик мог меняться (M-XX-1 → M-XX-2; новый прибор стартует с нуля), поэтому
+    # «текущее» показание ищем среди ВСЕХ счётчиков пары (квартира, услуга) — берём
+    # самое позднее с датой ≤ конца периода; «предыдущее» — предыдущее показание
+    # ТОГО ЖЕ счётчика. Раньше брался .first() (самый старый счётчик) и его показания —
+    # отсюда «постороннее» предыдущее показание и неверная сумма.
+    current_reading_obj = (
+        db.query(MeterReading)
+        .join(Meter, Meter.id == MeterReading.meter_id)
+        .filter(
+            Meter.apartment_id == apartment.id,
+            Meter.services_type_id == service_type.id,
+            MeterReading.reading_date <= period_end,
+        )
+        .order_by(MeterReading.reading_date.desc(), MeterReading.id.desc())
+        .first()
+    )
 
     past_reading = None
     current_reading = None
     current_reading_id = None
     consumption = 0
 
-    if meter:
-        current_reading_obj = db.query(MeterReading).filter(
-            MeterReading.meter_id == meter.id,
-            MeterReading.reading_date <= period_end
-        ).order_by(MeterReading.reading_date.desc()).first()
+    if current_reading_obj:
+        current_reading_id = current_reading_obj.id
+        current_reading = float(current_reading_obj.reading)
 
-        if current_reading_obj:
-            current_reading_id = current_reading_obj.id
-            current_reading = float(current_reading_obj.reading)
-
-            past_reading_obj = db.query(MeterReading).filter(
-                MeterReading.meter_id == meter.id,
-                MeterReading.reading_date < current_reading_obj.reading_date,
-                MeterReading.id != current_reading_obj.id
-            ).order_by(MeterReading.reading_date.desc()).first()
-
-            if past_reading_obj:
-                past_reading = float(past_reading_obj.reading)
-            else:
-                past_reading = 0
-
-            consumption = current_reading - past_reading
+        # Предыдущее показание — предыдущее в хронологии (дата, id) того же счётчика.
+        past_reading_obj = (
+            db.query(MeterReading)
+            .filter(
+                MeterReading.meter_id == current_reading_obj.meter_id,
+                or_(
+                    MeterReading.reading_date < current_reading_obj.reading_date,
+                    and_(
+                        MeterReading.reading_date == current_reading_obj.reading_date,
+                        MeterReading.id < current_reading_obj.id,
+                    ),
+                ),
+            )
+            .order_by(MeterReading.reading_date.desc(), MeterReading.id.desc())
+            .first()
+        )
+        past_reading = float(past_reading_obj.reading) if past_reading_obj else 0
+        consumption = current_reading - past_reading
 
     # Тип тарифа задан на ВИДЕ УСЛУГИ (09.2026, перенесён с тарифа): единая привязка
     # исключает ошибку «на тарифе указан не тот тип». Логика по имени типа:

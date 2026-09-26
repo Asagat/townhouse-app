@@ -89,6 +89,57 @@ def test_meter_tariff_uses_consumption(db, account_factory):
     assert result["amount"] == 10.0 * 60.0  # тариф × потребление
 
 
+def test_meter_replacement_uses_active_meter(db, account_factory):
+    """Замена счётчика (старый → новый): начисление берёт показания ДЕЙСТВУЮЩЕГО
+    прибора, причём текущее и предыдущее — с одного и того же счётчика.
+
+    Регрессия: выбирался первый счётчик квартиры (самый старый) и его показания —
+    текущее и «предыдущее» относились к старому прибору (годы назад), а показания
+    нового счётчика игнорировались; сумма считалась неверно.
+    """
+    rec = account_factory("swap")
+    apt = db.get(Apartment, rec["apartment_id"])
+    svc, _ = _make_service_with_tariff(db, "__test_Замена", "По счетчику", 10)
+    db.commit()
+
+    old = Meter(services_type_id=svc.id, apartment_id=apt.id,
+                serial_number=f"OLD-{svc.id}-{rec['account_id']}",
+                installed_at=date(2017, 10, 1))
+    new = Meter(services_type_id=svc.id, apartment_id=apt.id,
+                serial_number=f"NEW-{svc.id}-{rec['account_id']}",
+                installed_at=date(2018, 3, 25))
+    db.add_all([old, new])
+    db.flush()
+    # Старый прибор: показания 2017–2018 (до замены).
+    db.add(MeterReading(document_id=None, apartment_id=apt.id, meter_id=old.id,
+                        services_type_id=svc.id, reading=100, reading_date=date(2017, 12, 1)))
+    db.add(MeterReading(document_id=None, apartment_id=apt.id, meter_id=old.id,
+                        services_type_id=svc.id, reading=130, reading_date=date(2018, 3, 25)))
+    # Новый прибор: стартует с нуля, есть показание текущего месяца.
+    db.add(MeterReading(document_id=None, apartment_id=apt.id, meter_id=new.id,
+                        services_type_id=svc.id, reading=0, reading_date=date(2018, 3, 25)))
+    db.add(MeterReading(document_id=None, apartment_id=apt.id, meter_id=new.id,
+                        services_type_id=svc.id, reading=45, reading_date=date(2018, 4, 25)))
+    db.commit()
+
+    acc = db.get(Account, rec["account_id"])
+    svc_obj = db.get(ServiceType, svc.id)
+
+    # Период после замены — берётся НОВЫЙ прибор: 0 → 45.
+    after = A.calculate_accrual_for_account_service(db, acc, svc_obj, date(2018, 4, 30))
+    assert after is not None
+    assert after["past_reading_value"] == 0.0
+    assert after["current_reading_value"] == 45.0
+    assert after["consumption"] == 45.0
+    assert after["amount"] == 10.0 * 45.0
+
+    # Период до замены — берётся СТАРЫЙ прибор: 100 (первое показание, предыдущего нет).
+    before = A.calculate_accrual_for_account_service(db, acc, svc_obj, date(2018, 2, 28))
+    assert before is not None
+    assert before["current_reading_value"] == 100.0
+    assert before["consumption"] == 100.0
+
+
 def test_period_tariff_covering_month_takes_priority_over_open(db, account_factory):
     """ 2.18: закрытый тариф-период услуги действует на тот месяц, который он
     покрывает своими valid_from..valid_to, и подменяет открытую базовую ставку
