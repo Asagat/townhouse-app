@@ -10,6 +10,11 @@
 # --- Этап 1: сборка статики ---
 FROM node:20-alpine AS build
 
+# Номер релиза «вшивается» в бандл (показывается в навигации, см. vite.config.ts).
+# В CI передаётся git-тег релиза (docker-build.yml); по умолчанию — dev.
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 WORKDIR /app
 
 # Манифесты + локальные tgz-зависимости (Refine-пакеты ставятся из файлов репозитория).

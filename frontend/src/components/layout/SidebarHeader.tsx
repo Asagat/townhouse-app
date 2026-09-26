@@ -20,17 +20,33 @@ export const SidebarHeader = ({
         }}
     >
         {!isCollapsed && (
-            <span
-                style={{
-                    color: COLORS.textActive,
-                    fontWeight: 700,
-                    fontSize: 18,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                }}
-            >
-                Family Townhouse
-            </span>
+            <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                <span
+                    style={{
+                        color: COLORS.textActive,
+                        fontWeight: 700,
+                        fontSize: 18,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                    }}
+                >
+                    Family Townhouse
+                </span>
+                {/* Номер релиза (вшит в сборку, см. vite.config.ts). */}
+                <span
+                    title={`Версия: ${__APP_VERSION__}`}
+                    style={{
+                        color: COLORS.textMuted,
+                        fontSize: 11,
+                        lineHeight: 1.2,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                    }}
+                >
+                    {__APP_VERSION__}
+                </span>
+            </div>
         )}
         <Button
             type="text"
