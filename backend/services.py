@@ -71,6 +71,7 @@ def resolve_transaction_values(
     notes = payload.get("notes")
     transaction_date = payload.get("transaction_date")
     article_id = payload.get("article_id")
+    contractor_id = payload.get("contractor_id")
 
     if cash_point_id in (None, ""):
         raise HTTPException(status_code=422, detail="Поле 'Касса/Счёт' обязательно")
@@ -80,6 +81,10 @@ def resolve_transaction_values(
         raise HTTPException(status_code=422, detail="Поле 'Сумма' обязательно")
     if article_id in (None, ""):
         raise HTTPException(status_code=422, detail="Поле 'Аналитика' обязательно")
+    # Контрагент обязателен (как и в field_config): раньше он молча терялся при вводе
+    # через приложение и в документе, и в зеркальном cash_register (см. ниже values).
+    if contractor_id in (None, ""):
+        raise HTTPException(status_code=422, detail="Поле 'Контрагент' обязательно")
 
     # Квартира/л/с НЕ обязательны: если не указаны — операция идёт в общий денежный
     # регистр без привязки к лицевому счёту (account_id = NULL), но с аналитикой.
@@ -105,6 +110,7 @@ def resolve_transaction_values(
         "account_id": account_id,
         "cash_point_id": int(cash_point_id),
         "article_id": int(article_id) if article_id not in (None, "") else None,
+        "contractor_id": int(contractor_id),
         "transaction_type": coerce_field_value(
             transaction_type,
             {
