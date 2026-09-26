@@ -43,9 +43,9 @@ def build_cash_register_report(
     Отчёт по кассе за период.
 
     - Период: даты 'YYYY-MM-DD'. Если не заданы — берём за всё время.
-    - Начальный остаток по кассе — баланс последней записи ДО начала периода.
+    - Начальный остаток по кассе — Σ(income − expense) по строкам кассы ДО начала периода.
     - Приход/расход за период — суммы income/expense из cash_register.
-    - Конечный остаток = начальный + приход - расход.
+    - Конечный остаток = начальный + приход - расход (деньги на конец периода).
     - Опционально фильтр по кассе (cash_point_id).
     """
     from_hour = _parse_day(from_date, True)
@@ -66,18 +66,21 @@ def build_cash_register_report(
             text("SELECT id, name, is_active FROM cash_points ORDER BY id"),
         ).fetchall()
 
-    # Начальные остатки по кассам (баланс последней записи ДО начала периода).
+    # Начальные остатки по кассам: накопительный итог Σ(income − expense) ДО начала
+    # периода. ВАЖНО: `cash_register.balance_after` здесь не годится — он ведётся
+    # по ЛИЦЕВОМУ СЧЁТУ (recalculate_register_balance фильтрует по account_id), а не
+    # по кассе, и для операций без л/с (расходы/входящий остаток, account_id IS NULL)
+    # вообще остаётся нулём. Из-за этого «остаток на конец» в отчёте за период был
+    # неверен (начальный = 0/по одному счёту), хотя фактический остаток кассы — Σ по всем.
     opening: dict[int, float] = {p.id: 0.0 for p in points}
     if from_hour is not None:
         for p in points:
             row = db.execute(
                 text("""
-                    SELECT cr.balance_after
+                    SELECT COALESCE(SUM(cr.income - cr.expense), 0)
                     FROM cash_register cr
                     JOIN transactions t ON t.id = cr.transaction_id
                     WHERE t.cash_point_id = :cp AND cr.operation_date < :start
-                    ORDER BY cr.operation_date DESC, cr.id DESC
-                    LIMIT 1
                 """),
                 {"cp": p.id, "start": from_hour},
             ).first()
