@@ -58,17 +58,38 @@ def _fund_service_id(db) -> int | None:
     svc = db.query(ServiceType).filter(ServiceType.services_type == FUND_SERVICE_FALLBACK).first()
     return svc.id if svc else None
 
-def _account_balance(db: Session, account_id: int) -> float:
+def _account_balance(db: Session, account_id: int, as_of: date | None = None) -> float:
     """Баланс лицевого счёта по регистру взаиморасчётов (по услугам).
 
-    > 0 — долг жителя, < 0 — переплата (аванс). Учитывает всё, включая приходы,
-    сделанные в текущем месяце, — поэтому используется для «К оплате» в квитанции.
+    > 0 — долг жителя, < 0 — переплата (аванс).
+
+    `as_of` — дата среза (включительно). Срез делается по ДАТЕ ПЕРВИЧНОГО ДОКУМЕНТА,
+    а не по моменту попадания записи в регистр (`operation_date`): начисление — по
+    `accruals_register.accrual_date`, приход/расход — по `transactions.transaction_date`,
+    списание — по `writeoff_documents.writeoff_date`. Так движения, внесённые задним
+    числом, учитываются по своей документной дате.
+
+    Для квитанции за период передаётся последний день месяца: в «К оплате» попадают
+    движения самого месяца, но не последующих — перегенерация квитанции не «плывёт»
+    от новых приходов/начислений. `as_of=None` — баланс на «сейчас» (без фильтра).
     """
-    value = db.execute(
-        text("SELECT COALESCE(SUM(income - expense),0) FROM accounts_register "
-             "WHERE account_id=:a AND services_type_id IS NOT NULL"),
-        {"a": account_id},
-    ).scalar()
+    sql = (
+        "SELECT COALESCE(SUM(ar.income - ar.expense),0) FROM accounts_register ar "
+        "LEFT JOIN accruals_register acc ON acc.id = ar.accrual_id "
+        "LEFT JOIN transactions t ON t.id = ar.transaction_id "
+        "LEFT JOIN writeoff_documents wo ON wo.id = ar.writeoff_id "
+        "WHERE ar.account_id = :a AND ar.services_type_id IS NOT NULL"
+    )
+    params: dict[str, Any] = {"a": account_id}
+    if as_of is not None:
+        # Fallback на operation_date — чтобы строка регистра без первичного документа
+        # не выпадала из суммы (NULL <= :asof не проходит фильтр).
+        sql += (
+            " AND COALESCE(acc.accrual_date, t.transaction_date::date, "
+            "wo.writeoff_date, ar.operation_date::date) <= :asof"
+        )
+        params["asof"] = as_of
+    value = db.execute(text(sql), params).scalar()
     return float(value or 0.0)
 
 
@@ -138,11 +159,12 @@ def generate_receipt_document(
         db.add(item)
         created_items.append(item)
 
-    # Долг/переплата считаются от ФАКТИЧЕСКОГО баланса счёта (включает приходы этого
-    # месяца). «К оплате» = текущий долг; «Долг» — задолженность за прошлые периоды
-    # (без начислений этого месяца); «Переплата» — уже внесённое в счёт месяца сверх
-    # прошлого долга (или аванс). Сумма строк квитанции сходится с «К оплате».
-    balance = _account_balance(db, account.id)
+    # Долг/переплата считаются от баланса счёта НА КОНЕЦ ПЕРИОДА квитанции
+    # (начисления и приходы самого месяца учтены, последующих — нет).
+    # «К оплате» = этот баланс; «Долг» — задолженность за прошлые периоды
+    # (без начислений этого месяца); «Переплата» — внесённое сверх долга (или аванс).
+    # Сумма строк квитанции сходится с «К оплате».
+    balance = _account_balance(db, account.id, as_of=end)
     payable = balance if balance > 0 else max(0.0, total_amount + balance)
     debt = max(0.0, balance - total_amount)
     overpayment = total_amount + debt - payable

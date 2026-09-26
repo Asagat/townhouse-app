@@ -1,12 +1,16 @@
 # backend/tests/test_receipts_calculation.py
-"""Расчёт долга/переплаты в квитанции: приходы текущего месяца учитываются.
+"""Расчёт долга/переплаты в квитанции: срез баланса на КОНЕЦ ПЕРИОДА квитанции.
 
-Регрессия: «долг» брался как состояние регистра НА НАЧАЛО месяца
-(`operation_date < 1-е число`), поэтому платежи, сделанные в этом же месяце, не
-уменьшали «К оплате» — квитанция, сформированная после оплат, задваивала уплаченное.
+История:
+  - раньше «долг» брался как состояние регистра НА НАЧАЛО месяца, поэтому платежи
+    этого же месяца не уменьшали «К оплате» — квитанция задваивала уплаченное;
+  - затем «К оплате» считали по балансу на «сейчас» (без фильтра по дате) — в
+    квитанцию за август попадали сентябрьские приходы/начисления;
+  - текущая модель: «К оплате» = баланс счёта на ПОСЛЕДНИЙ день периода квитанции
+    по дате первичного документа (приходы и начисления самого месяца учтены,
+    последующих — нет; внесённое задним числом считается по документной дате).
 
-Новая модель (сохраняет формулу «К оплате = Сумма + Долг − Переплата»):
-  - «К оплате»  = фактический долг счёта (баланс регистра взаиморасчётов);
+Сохраняется формула «К оплате = Сумма + Долг − Переплата»:
   - «Долг»      = задолженность за прошлые периоды (без начислений этого месяца);
   - «Переплата» = уже внесённое в счёт месяца сверх прошлого долга (или аванс).
 """
@@ -98,7 +102,7 @@ def test_receipt_payable_accounts_for_payment_in_the_same_month(db, account_fact
 
         assert receipt is not None
         assert float(receipt.total_amount) == 10000.0
-        # К оплате — фактический долг (10000 − 4000), а не «сумма + долг на начало».
+        # К оплате — долг на конец сентября (10000 − 4000); платёж месяца учтён.
         assert float(receipt.payable_amount) == 6000.0
         assert float(receipt.debt) == 0.0
         # Уже внесённое в счёт месяца показано в «Переплате»: 10000 + 0 − 6000.
@@ -131,5 +135,37 @@ def test_receipt_payable_without_payments_is_charges_plus_prior_debt(db, account
         assert float(receipt.debt) == 10000.0  # долг за август
         assert float(receipt.overpayment) == 0.0
         assert float(receipt.payable_amount) == 15000.0
+    finally:
+        _drop_receipts(db, rec["account_id"])
+
+
+def test_receipt_payable_ignores_movements_after_the_period(db, account_factory):
+    """Квитанция за период не учитывает приходы/начисления ПОСЛЕ его конца.
+
+    Регрессия: «К оплате» брался по балансу на «сейчас» (без фильтра по дате),
+    поэтому сентябрьский приход уменьшал долг в августовской квитанции, а
+    сентябрьское начисление — увеличивало.
+    """
+    rec = account_factory("rcptlate")
+    svc, tariff = _svc_with_tariff(db, "__test_Квитанция3")
+    try:
+        # Август — период квитанции: начислено 10 000.
+        _accrual(db, rec["account_id"], svc.id, tariff.id, Decimal("10000"), 2026, 8)
+        # Сентябрь (позже периода): приход 4 000 и начисление 5 000.
+        _payment(db, rec["account_id"], rec["cash_point_id"], Decimal("4000"), day=10)
+        _accrual(db, rec["account_id"], svc.id, tariff.id, Decimal("5000"), 2026, 9)
+        calculate_write_offs(db, [rec["account_id"]])
+        db.commit()
+
+        acc = db.get(Account, rec["account_id"])
+        receipt = generate_receipt_document(db, acc, 2026, 8)
+        db.commit()
+
+        assert receipt is not None
+        assert float(receipt.total_amount) == 10000.0
+        # Ни сентябрьский приход, ни сентябрьское начисление в август не попали.
+        assert float(receipt.payable_amount) == 10000.0
+        assert float(receipt.debt) == 0.0
+        assert float(receipt.overpayment) == 0.0
     finally:
         _drop_receipts(db, rec["account_id"])
