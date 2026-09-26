@@ -921,6 +921,14 @@ curl -s http://localhost:8080/api/auth/me | head -1  # ожидаем 401 (жи�
    ```bash
    docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
    ```
+5. **Разовые правки данных**, если они есть в релизе, выполняются штатными скриптами
+   `backend/migrations/*` (dry-run → `--apply`), а не вручную в БД (правило из `AGENTS.md`).
+   Пример — пересчёт `balance_after` строк без лицевого счёта (появился в `v1.1.0`):
+
+   ```bash
+   docker compose -f docker-compose.prod.yml exec backend python migrations/recalc_cash_register_balance.py
+   docker compose -f docker-compose.prod.yml exec backend python migrations/recalc_cash_register_balance.py --apply
+   ```
 
 > Опционально: `pull_policy: always` у сервисов в `docker-compose.prod.yml` заставит тянуть
 > образ при любом пересоздании (в т.ч. из UI или `up` без явного `pull`).
@@ -1004,8 +1012,10 @@ docker compose -f docker-compose.demo.yml exec backend python migrations/seed_de
 Упрощение до 2 контейнеров (SPA отдаёт backend, без nginx) — отдельная задача,
 `ROADMAP.md` в разделе «Технический долг» (ТД-5).
 
-**Состояние (15.09.2026):** контур развёрнут и наполнен демо-данными (релиз `v1.0.6`);
-наружу — `APP_PORT=8081`, HTTPS терминирует DSM-«Обратный прокси». Актуальная версия
+**Состояние (26.09.2026):** контур развёрнут и наполнен демо-данными; тег образов —
+плавающий `latest` (на 26.09.2026 — `v1.1.0`), наружу — `APP_PORT=8081`, HTTPS терминирует
+DSM-«Обратный прокси». Обновление — `pull` + `up -d` + `alembic upgrade head`, затем (при наличии
+в релизе) разовые скрипты `backend/migrations/*` в режиме dry-run → `--apply`. Актуальная версия
 демо-данных — та, что даёт генератор из `deploy/demo/seed_demo_data.py`.
 
 **Как прогнать обновлённый генератор без нового релиза.** В образе лежит та версия
@@ -1144,7 +1154,7 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 | `.github/workflows/docker-build.yml` | Авто-сборка и публикация прод-docker-образов (`backend/Dockerfile`, **`frontend/Dockerfile.prod`** — nginx+dist) в `ghcr.io/asagat/townhouse-app-{backend,frontend}`: push в `main` → тег `main`; релизный тег `v*` → semver-теги `1.2.3` и `1.2` (**без** префикса `v`); можно запустить вручную. Именно эти образы потребляет прод-стек NAS (`docker-compose.prod.yml`, `TOWNHOUSE_TAG` — тоже без `v`). |
 | ~~`.github/workflows/deploy.yml` + `.github/actions/deploy/`~~ | **Удалены (08.09.2026)** — SSH-выкат на сервер был по тегу `v*` → `production` или вручную; серверов `staging`/`production` нет. При появлении хост-сервера процедуру можно восстановить по этому разделу. |
 
-**Текущий релиз:** `v1.0.9` (исправлен драйвер PostgreSQL — см. примечание ниже); **`v1.0.8` использовать нельзя** (не поднимается против БД из-за SQLAlchemy 2.1); `v1.0.7` — Swagger/ReDoc закрыты в проде через `ENABLE_DOCS`). В ghcr — `1.0.9` и `1.0` (плюс плавающий `latest`); ранее — `v1.0.0`…`v1.0.6`.
+**Текущий релиз:** `v1.1.0` (контрагент в «Приход/Расход»; «остаток на конец» в отчёте по кассе; `balance_after` для строк без л/с + бэкфилл-скрипт). История: `v1.0.9` — исправлен драйвер PostgreSQL (см. примечание ниже); **`v1.0.8` использовать нельзя** (не поднимается против БД из-за SQLAlchemy 2.1); `v1.0.7` — Swagger/ReDoc закрыты в проде через `ENABLE_DOCS`. В ghcr — `1.1.0` и `1.1` (плюс плавающий `latest`); ранее — `v1.0.0`…`v1.0.10`.
 
 > **Дрейф зависимостей (26.09.2026):** `backend/requirements.txt` был unpinned — в свежей сборке подтянулся
 > SQLAlchemy 2.1, где дефолтный драйвер для `postgresql://` сменился на psycopg (v3), из-за чего образ падал
