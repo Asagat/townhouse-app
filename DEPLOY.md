@@ -973,7 +973,7 @@ Swagger UI (`/docs`), ReDoc (`/redoc`) и схема `/openapi.json` отклю�
 затрагиваются; полный порядок запуска — `deploy/demo/README.md`.
 
 - **Схема — та же проверенная 3-контейнерная**: `postgres` + `backend` (FastAPI) +
-  `frontend` (nginx: SPA + прокси `/api/`). Префикс `townhouse-demo-*` даён только
+  `frontend` (nginx: SPA + прокси `/api/`). Префикс `townhouse-demo-*` даётся только
   контейнерам/volume (`townhouse_demo_pgdata`)/сети (`townhouse_demo`); имена СЕРВИСОВ
   (`postgres`/`backend`/`frontend`) менять нельзя — это DNS-имена, и nginx В ОБРАЗЕ
   фронтенда проксирует `/api/` на `backend:8000`.
@@ -1003,6 +1003,23 @@ docker compose -f docker-compose.demo.yml exec backend python migrations/seed_de
 
 Упрощение до 2 контейнеров (SPA отдаёт backend, без nginx) — отдельная задача,
 `ROADMAP.md` в разделе «Технический долг» (ТД-5).
+
+**Состояние (15.09.2026):** контур развёрнут и наполнен демо-данными (релиз `v1.0.6`);
+наружу — `APP_PORT=8081`, HTTPS терминирует DSM-«Обратный прокси». Актуальная версия
+демо-данных — та, что даёт генератор из `deploy/demo/seed_demo_data.py`.
+
+**Как прогнать обновлённый генератор без нового релиза.** В образе лежит та версия
+генератора, что попала в релиз (≥ `1.0.6`). Чтобы выполнить свежую версию, её копию из
+папки демо (`deploy/demo/seed_demo_data.py`) закидывают в контейнер и запускают:
+
+```bash
+docker compose cp ./seed_demo_data.py backend:/app/migrations/seed_demo_data.py
+docker compose exec backend python migrations/seed_demo_data.py --apply --wipe
+```
+
+⚠️ Закинутый так файл живёт внутри контейнера и **теряется** при `up -d --force-recreate`
+или `pull` — после пересоздания его нужно положить заново, либо штатно выпустить новый
+релизный тег (в образе будет та же версия). Подробности — `deploy/demo/README.md`.
 
 ---
 
@@ -1108,6 +1125,7 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 | `./scripts/dump_to_sync.sh` | Активный ПК: выгрузить дамп БД в синхронизируемую папку (`DB_MIRROR_BACKUPS`) и обновить маркер |
 | `./scripts/install_post_merge_hook.sh` | Установить/удалить git-hook `post-merge` (автозапуск после pull) |
 | `./scripts/install_pre_push_hook.sh` | Установить/удалить git-hook `pre-push` (автодамп БД перед push) |
+| `docker compose -f deploy/demo/docker-compose.demo.yml …` | Демо-контур на NAS (`demo.sagacloud.synology.me`): подъём, обновление, наполнение демо-данными — см. §8 и `deploy/demo/README.md` |
 
 ---
 
@@ -1125,6 +1143,8 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 | `.github/workflows/ci.yml` | Автопроверка на push/PR в `main`. Job `backend`: disposable-сервис `postgres:16` → `alembic upgrade head` → `init_data.py` → `python -m pytest tests/ -q` (`DATABASE_URL` и `AUTH_SECRET_KEY` задаются на job). Job `frontend`: `npm ci` → `npm run build` (= tsc + vite). Job `images-build` (матрица frontend/backend) собирает **прод-образы** (`frontend/Dockerfile.prod`, `backend/Dockerfile`) без публикации + smoke-тест фронтенд-контейнера (контейнер должен стартовать и отдавать SPA) — ловит ошибки, которые не видны при сборке на хосте (например, права `/app` при `USER node` или падение nginx без рантайм-resolver). Сводный **нематричный** job `images` с фиксированным именем — именно он является required-чеком: у матричного job'а GitHub дописывает к имени чек-рана суффикс «(значения матрицы)», поэтому базовое имя required-чеком стать не может (вечно `expected`). |
 | `.github/workflows/docker-build.yml` | Авто-сборка и публикация прод-docker-образов (`backend/Dockerfile`, **`frontend/Dockerfile.prod`** — nginx+dist) в `ghcr.io/asagat/townhouse-app-{backend,frontend}`: push в `main` → тег `main`; релизный тег `v*` → semver-теги `1.2.3` и `1.2` (**без** префикса `v`); можно запустить вручную. Именно эти образы потребляет прод-стек NAS (`docker-compose.prod.yml`, `TOWNHOUSE_TAG` — тоже без `v`). |
 | ~~`.github/workflows/deploy.yml` + `.github/actions/deploy/`~~ | **Удалены (08.09.2026)** — SSH-выкат на сервер был по тегу `v*` → `production` или вручную; серверов `staging`/`production` нет. При появлении хост-сервера процедуру можно восстановить по этому разделу. |
+
+**Текущий релиз:** `v1.0.8` (снята молчаливая обрезка списков до 10 строк); предыдущий — `v1.0.7` (Swagger/ReDoc закрыты в проде через `ENABLE_DOCS`). В ghcr образы `1.0.8` и `1.0` (а также `latest`); ранее — `v1.0.0`…`v1.0.6`.
 
 На сервере `scripts/deploy_vps.sh <ref>` делает: `git fetch` + фиксация кода на `ref` (workflow передаёт **SHA проверенного CI коммита**) → `alembic upgrade head` → `init_data.py` → `create_user.py` → **сборка фронтенда** (`npm ci`/`npm install` → `npm run build`; статика в `frontend/dist`, её отдаёт nginx) → перезапуск systemd-сервиса `townhouse-backend`. *(Актуально только при наличии VPS-хоста; в текущей локальной модели не используется.)*
 
