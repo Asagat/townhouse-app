@@ -15,6 +15,7 @@ import {
 import { useApiUrl, useCustomMutation, useList } from "@refinedev/core";
 import dayjs from "dayjs";
 import { formatMoney } from "../../config/formatters";
+import { referenceSorters } from "../../config/referenceSort";
 
 interface PersonalAccrualModalProps {
     open: boolean;
@@ -51,8 +52,16 @@ export const PersonalAccrualModal = ({
     const [month, setMonth] = useState<number>(now.month() + 1);
     const [reason, setReason] = useState<string>("");
 
-    const { data: accountsData } = useList({ resource: "accounts", pagination: { mode: "off" } });
-    const { data: servicesData } = useList({ resource: "services_type", pagination: { mode: "off" } });
+    const { data: accountsData } = useList({
+        resource: "accounts",
+        pagination: { mode: "off" },
+        sorters: referenceSorters("accounts"),
+    });
+    const { data: servicesData } = useList({
+        resource: "services_type",
+        pagination: { mode: "off" },
+        sorters: referenceSorters("services_type"),
+    });
 
     const accountOptions = (accountsData?.data ?? []).map((a: any) => ({
         value: a.id,

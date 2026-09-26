@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { Select } from "antd";
 import { authedFetch, apiUrl } from "../../auth/http";
 import type { ReferenceFilterSource } from "../../config/filters";
+import { referenceSortQuery } from "../../config/referenceSort";
 
 // Кэш загруженных справочников на уровне модуля (ключ — resource).
 const cache = new Map<string, any[]>();
@@ -32,7 +33,7 @@ export const ReferenceFilterSelect = ({
             return;
         }
         setLoading(true);
-        authedFetch(`${apiUrl}/${source.resource}?_end=100000`)
+        authedFetch(`${apiUrl}/${source.resource}?_end=100000${referenceSortQuery(source.resource)}`)
             .then(async (r) => {
                 if (!r.ok) return [] as any[];
                 const data = await r.json();

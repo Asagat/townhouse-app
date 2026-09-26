@@ -8,6 +8,7 @@ import { useApiUrl } from "@refinedev/core";
 import { authedFetch } from "../auth/http";
 import { CabinetView } from "../components/cabinet/CabinetView";
 import type { ReceiptRow, StatementData } from "../components/cabinet/CabinetView";
+import { referenceSortQuery } from "../config/referenceSort";
 
 interface AccountOption {
     value: number;
@@ -26,7 +27,7 @@ export const AdminCabinet = () => {
 
     // Список лицевых счетов с квартирой и собственником (для выпадающего списка).
     useEffect(() => {
-        authedFetch(`${apiUrl}/accounts?_start=0&_end=1000`)
+        authedFetch(`${apiUrl}/accounts?_start=0&_end=1000${referenceSortQuery("accounts")}`)
             .then(async (r) => {
                 if (!r.ok) throw new Error("Не удалось загрузить лицевые счета");
                 const data = await r.json();

@@ -22,6 +22,7 @@ import dayjs, { Dayjs } from "dayjs";
 import { useList } from "@refinedev/core";
 import { authedFetch, apiUrl, openAuthorizedPdf } from "../auth/http";
 import { formatDate, formatMoney } from "../config/formatters";
+import { referenceSorters } from "../config/referenceSort";
 
 interface MovementRow {
     date: string | null;
@@ -58,7 +59,11 @@ const fmtSigned = (v: number): string => {
 
 export const StatementReport = () => {
     const [accountId, setAccountId] = useState<number | undefined>(undefined);
-    const { data: accountsData } = useList({ resource: "accounts", pagination: { mode: "off" } });
+    const { data: accountsData } = useList({
+        resource: "accounts",
+        pagination: { mode: "off" },
+        sorters: referenceSorters("accounts"),
+    });
     const accountOptions = (accountsData?.data ?? []).map((a: any) => ({
         value: a.id,
         label: `${a.account_number} — кв.${a.apartment?.apartment_number ?? "?"} ${a.account_name ?? ""}`.trim(),

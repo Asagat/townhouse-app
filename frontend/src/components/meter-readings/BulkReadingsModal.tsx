@@ -15,6 +15,7 @@ import {
 import dayjs, { Dayjs } from "dayjs";
 import { useList, useApiUrl, useCustom, useCustomMutation } from "@refinedev/core";
 import { DATE_FORMAT } from "../../config/formatters";
+import { referenceSorters } from "../../config/referenceSort";
 
 interface BulkReadingsModalProps {
     open: boolean;
@@ -65,7 +66,7 @@ export const BulkReadingsModal = ({
     const { data: apartmentsData, isLoading: apartmentsLoading } = useList({
         resource: "apartments",
         pagination: { mode: "off" },
-        sorters: [{ field: "apartment_number", order: "asc" }],
+        sorters: referenceSorters("apartments"),
     });
     const { data: serviceTypesData } = useList({
         resource: "services_type",

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Select } from "antd";
 import { authedFetch, apiUrl } from "../../auth/http";
+import { referenceSortQuery } from "../../config/referenceSort";
 
 /**
  * Форматтеры для отображения записей справочников в выпадающих списках
@@ -78,8 +79,9 @@ export const ReferenceSelect = ({
     useEffect(() => {
         let cancelled = false;
         setLoading(true);
-        // direct fetch: no Refine pagination -> all records (все квартиры и т.п.).
-        authedFetch(`${apiUrl}/${resource}?_end=100000`)
+        // direct fetch: no Refine pagination -> all records (все квартиры и т.п.),
+        // порядок — по referenceSortQuery (например, квартиры по номеру).
+        authedFetch(`${apiUrl}/${resource}?_end=100000${referenceSortQuery(resource)}`)
             .then(async (r) => {
                 if (!r.ok) return [] as any[];
                 const data = await r.json();
