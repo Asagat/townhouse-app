@@ -9,6 +9,40 @@
 Настроено в `backend/alembic/` и `backend/alembic.ini`; URL берётся из окружения
 `DATABASE_URL` через `backend/database.py`.
 
+## ⚠️ Реестр разовых/временных скриптов — на будущую чистку репозитория (ТД-7)
+
+В этой папке накопились скрипты, которые выполнялись **один раз** (разовые правки
+данных/переносы). Они оставлены для трассируемости и на случай повторного прогона
+при восстановлении БД из старого дампа, НО это «технический хлам» — его планируется
+вычистить из репозитория (задача `ТД-7` в `ROADMAP.md`).
+
+**Правило ведения:** применил разовый скрипт — допиши его в список ниже; при «уборке»
+удаляем всё, что не нужно для воспроизведения. Классификацию подтверждает владелец.
+
+**Оставить (переиспользуемые инструменты):**
+- `accruals_sum_check.py` — сверка контрольных сумм начислений (read-only);
+- `resync_accounts_register_to_accruals.py` — сверка/пересчёт регистра взаиморасчётов
+  (штатный инструмент, упомянут в `AGENTS.md`);
+- `renumber_all_entities.py`, `renumber_finalize.py` — перенумерация id при переносе БД;
+- `seed_demo_data.py` — генератор демонстрационных данных.
+
+**Разовые — применены (кандидаты на удаление):**
+- правки данных/документов/регистров: `recover_kv13_garbage_accruals.py`,
+  `restore_missing_accruals_to_accounts.py`, `merge_2019_01_audit_personal.py`,
+  `reclassify_2019_01_2022_01_personal.py`, `reclassify_2020_02_2024_10_fond_personal.py`,
+  `flip_accounts_register_signs.py`, `fill_accrual_readings.py`, `recalc_cash_register_balance.py`;
+- тарифы/услуги: `dedupe_electricity_service.py`, `move_prochie_rashody_to_fond.py`,
+  `fix_fond_oneoff_tariffs_for_prochie.py`, `fix_duplicate_open_tariffs.py`,
+  `close_oneoff_open_tariffs.py`, `annotate_2_18_converted_tariffs.py`;
+- касса/статьи/контрагенты: `migrate_group_cash_by_day.py`, `migrate_expand_article_2026.py`,
+  `migrate_old_payments_to_cash_register.py`, `update_counterparties_from_xlsx.py`;
+- приборы/показания: `fix_meter_installed_at.py`, `fix_reading_meter_binding.py`;
+- импорт истории из старой БД (раздел 4): `migrate_prepare_sources.py`, `migrate_import.py`,
+  `migrate_synthetic/`, `reimport/` (в т.ч. устаревшие частные случаи из раздела ниже).
+
+> Актуальность разового скрипта не значит «выполняй его сейчас» — многие уже дали
+> результат, а некоторые (напр. импорт истории) применимы только к пустой/исходной БД.
+
 ## Перенумерация id (разово, перед финальным прод-развёртыванием — ТД-2)
 
 Приводит автогенерируемые `id` всех таблиц к непрерывной нумерации с 1, сохраняя
