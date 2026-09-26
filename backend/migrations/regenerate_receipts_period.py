@@ -7,7 +7,8 @@
 
 Что делает:
   1. dry-run (по умолчанию) — считает, какими СТАНУТ квитанции за период, и печатает
-     построчное сравнение с текущими; в БД ничего не пишется (транзакция откатывается);
+     построчное сравнение с текущими; в БД ничего не пишется (транзакция откатывается,
+     счётчик id квитанций восстанавливается);
   2. --apply — удаляет существующие квитанции за период и формирует заново штатным
      генератором (`routers.receipts.generate_receipt_document`), затем коммит.
 
@@ -27,6 +28,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from sqlalchemy import text  # noqa: E402
+
 from database import SessionLocal  # noqa: E402
 from models import Account, ReceiptDocument  # noqa: E402
 from routers.receipts import generate_receipt_document  # noqa: E402
@@ -34,6 +37,31 @@ from routers.receipts import generate_receipt_document  # noqa: E402
 
 def _fmt(value) -> str:
     return f"{float(value or 0):,.2f}".replace(",", " ")
+
+
+def _receipt_seq_state(db):
+    """Состояние последовательности id квитанций: (имя, last_value, is_called).
+
+    Нужно, чтобы dry-run был без побочных эффектов: INSERT расходует id даже при
+    последующем ROLLBACK (последовательности в PostgreSQL не транзакционные), поэтому
+    после отката возвращаем счётчик в исходное состояние.
+    """
+    seq = db.execute(
+        text("SELECT pg_get_serial_sequence('receipt_documents','id')")
+    ).scalar()
+    if not seq:
+        return None
+    row = db.execute(text(f"SELECT last_value, is_called FROM {seq}")).first()
+    return (seq, int(row[0]), bool(row[1]))
+
+
+def _restore_receipt_seq(db, state) -> None:
+    """Возвращает счётчик id квитанций в состояние до dry-run (после rollback)."""
+    if not state:
+        return
+    seq, last_value, is_called = state
+    db.execute(text(f"SELECT setval('{seq}', :v, :c)"), {"v": last_value, "c": is_called})
+    db.commit()
 
 
 def _periods(db, year: int, month: int | None) -> list[tuple[int, int]]:
@@ -102,6 +130,10 @@ def main() -> None:
         print(f"Периоды: {periods_label}")
         print(f"Квитанций сейчас: {_receipts_count(db, periods)}")
 
+        # id квитанций выдаются из sequence и расходуются даже при ROLLBACK —
+        # запоминаем счётчик, чтобы в dry-run его вернуть.
+        seq_state = _receipt_seq_state(db)
+
         # Удаляем квитанции периода и формируем заново.
         del_q = db.query(ReceiptDocument).filter(ReceiptDocument.period_year == args.year)
         if args.month is not None:
@@ -139,6 +171,7 @@ def main() -> None:
 
         if not args.apply:
             db.rollback()
+            _restore_receipt_seq(db, seq_state)
             print("\ndry-run: изменения в БД НЕ записаны. Для записи запустите с ключом --apply")
             return
 
