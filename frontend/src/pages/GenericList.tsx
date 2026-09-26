@@ -95,7 +95,7 @@ import type { SortOrder } from "antd/es/table/interface";
 import type { ColumnsType, ColumnType } from "antd/es/table";
 import { BRAND } from "../config/colors";
 import { canCreate, canEdit, canDelete } from "../auth/can";
-import { useColumnSettings } from "../hooks/useColumnSettings";
+import { useColumnSettings, withLeadingColumn } from "../hooks/useColumnSettings";
 import { openAuthorizedPdf, authedFetch } from "../auth/http";
 
 interface GenericListProps {
@@ -488,7 +488,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const { orderedAll, hiddenKeys, widths, toggle, move, moveKey, setWidth } =
         useColumnSettings(
             columns.map((c) => c.key),
-            savedPrefs?.columns ?? null,
+            // ID держим первым даже у старых настроек, где его в порядке не было.
+            withLeadingColumn(savedPrefs?.columns ?? null, "id"),
             (next: StoredColumnSettings) => patchPrefs({ columns: next }),
         );
     const columnByKey = new Map(columns.map((c) => [c.key, c]));

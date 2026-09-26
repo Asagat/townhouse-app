@@ -16,6 +16,24 @@ export interface StoredColumnSettings {
 }
 
 /**
+ * Разовое добавление колонки в начало сохранённого порядка.
+ *
+ * Колонка ID раньше была захардкожена отдельно и не попадала в сохранённый
+ * порядок колонок. У пользователей со старыми настройками её там нет, и хук
+ * дописал бы «новую» колонку В КОНЕЦ (см. `orderedAll`). Здесь возвращаем порядок
+ * с ключом в начале — чтобы ID остался на своём месте (сейчас и раньше — первым).
+ */
+export const withLeadingColumn = (
+    settings: StoredColumnSettings | null,
+    key: string,
+): StoredColumnSettings | null => {
+    if (!settings) return null;
+    const order = settings.order ?? [];
+    if (order.length === 0 || order.includes(key)) return settings;
+    return { ...settings, order: [key, ...order] };
+};
+
+/**
  * Логика настроек колонок для (resource, role).
  * - `orderedAll` — все ключи колонок в текущем порядке (сохранённый либо исходный).
  * - `hiddenKeys` — множество скрытых ключей.
