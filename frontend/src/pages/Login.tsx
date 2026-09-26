@@ -1,11 +1,12 @@
 // src/pages/Login.tsx
 
-import { useRef, useState } from "react";
-import { Form, Input, Button, Card, Typography } from "antd";
+import { useEffect, useRef, useState } from "react";
+import { Alert, Form, Input, Button, Card, Typography } from "antd";
 import { UserOutlined, LockOutlined } from "@ant-design/icons";
 import { useLogin } from "@refinedev/core";
 import { useNavigate } from "react-router-dom";
 import { BRAND } from "../config/colors";
+import { SESSION_EXPIRED_MESSAGE, consumeSessionExpiredNotice } from "../auth/http";
 
 interface LoginForm {
     username: string;
@@ -16,6 +17,15 @@ export const Login = () => {
     const { mutateAsync: login, isLoading } = useLogin<LoginForm>();
     const navigate = useNavigate();
     const [error, setError] = useState<string | null>(null);
+    // Сообщение «сессия истекла» — показывается, если пользователя перенаправило
+    // сюда из-за истёкшего токена (пометка в sessionStorage, см. auth/http).
+    const [sessionExpired, setSessionExpired] = useState(false);
+
+    useEffect(() => {
+        if (consumeSessionExpiredNotice()) {
+            setSessionExpired(true);
+        }
+    }, []);
     // Защита от повторной отправки (двойной клик/Enter до блокировки кнопки):
     // пока первый запрос в полёте — игнорируем повторные submit-ы.
     const submittingRef = useRef(false);
@@ -55,6 +65,14 @@ export const Login = () => {
                     </Typography.Title>
                     <Typography.Text type="secondary">Вход в систему</Typography.Text>
                 </div>
+                {sessionExpired && (
+                    <Alert
+                        type="warning"
+                        showIcon
+                        message={SESSION_EXPIRED_MESSAGE}
+                        style={{ marginBottom: 16 }}
+                    />
+                )}
                 {error && (
                     <Typography.Paragraph type="danger" style={{ textAlign: "center" }}>
                         {error}

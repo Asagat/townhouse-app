@@ -85,14 +85,20 @@ def create_access_token(user: User) -> str:
     return jwt.encode(payload, _SECRET, algorithm=JWT_ALGORITHM)
 
 
+# Тексты 401 показываются пользователю в интерфейсе как есть — без технического
+# жаргона («токен истёк»), а с понятной инструкцией.
+SESSION_EXPIRED_DETAIL = "Сессия истекла. Выйдите из системы и войдите заново."
+SESSION_INVALID_DETAIL = "Сессия недействительна. Выйдите из системы и войдите заново."
+
+
 def decode_access_token(token: str) -> dict[str, Any]:
     """Декодирует JWT; бросает HTTPException при невалидном/просроченном токене."""
     try:
         return jwt.decode(token, _SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Токен истёк")
+        raise HTTPException(status_code=401, detail=SESSION_EXPIRED_DETAIL)
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Недействительный токен")
+        raise HTTPException(status_code=401, detail=SESSION_INVALID_DETAIL)
 
 
 # --- ЗАВИСИМОСТИ FASTAPI ---
@@ -110,7 +116,7 @@ def get_current_user(
     payload = decode_access_token(credentials.credentials)
     user_id = payload.get("sub")
     if user_id is None:
-        raise HTTPException(status_code=401, detail="Некорректный токен")
+        raise HTTPException(status_code=401, detail=SESSION_INVALID_DETAIL)
     user = db.get(User, int(user_id))
     if user is None or not user.is_active:
         raise HTTPException(status_code=403, detail="Пользователь недоступен или отключён")

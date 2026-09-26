@@ -21,20 +21,53 @@ http.interceptors.request.use((config) => {
     return config;
 });
 
+// --- Истёкшая/невалидная сессия (401) ---
+// Пользователю показываем понятный текст и просим войти заново вместо технического
+// «Токен истёк». Сообщение выводится на странице входа после перенаправления: пометка
+// кладётся в sessionStorage и переживает перезагрузку (см. Login).
+export const SESSION_EXPIRED_MESSAGE = "Сессия истекла. Выйдите из системы и войдите заново.";
+const SESSION_EXPIRED_FLAG = "townhouse:session-expired";
+
+let unauthorizedHandled = false;
+
+/** Реакция на 401: сброс токена + переход на вход с пометкой для страницы входа. */
+export const handleUnauthorized = (): void => {
+    // На самом входе 401 — это неверные логин/пароль; форму обрабатывает Login сама.
+    if (window.location.pathname === "/login" || unauthorizedHandled) return;
+    unauthorizedHandled = true;
+    clearToken();
+    try {
+        sessionStorage.setItem(SESSION_EXPIRED_FLAG, "1");
+    } catch {
+        /* приватный режим — пометку просто не сохраним */
+    }
+    window.location.href = "/login";
+};
+
+/** Забирает пометку «сессия истекла» (одноразово) для показа сообщения на входе. */
+export const consumeSessionExpiredNotice = (): boolean => {
+    try {
+        const flag = sessionStorage.getItem(SESSION_EXPIRED_FLAG) === "1";
+        if (flag) sessionStorage.removeItem(SESSION_EXPIRED_FLAG);
+        return flag;
+    } catch {
+        return false;
+    }
+};
+
 http.interceptors.response.use(
     (response) => response,
     (error: AxiosError) => {
-        // 401 — токен истёк/невалиден: сбрасываем и перенаправляем на вход.
-        if (error.response && error.response.status === 401 && window.location.pathname !== "/login") {
-            clearToken();
-            window.location.href = "/login";
+        // 401 — сессия истекла/невалидна: сбрасываем и перенаправляем на вход.
+        if (error.response?.status === 401) {
+            handleUnauthorized();
         }
         return Promise.reject(error);
     },
 );
 
 // Авторизованный вариант fetch (добавляет Bearer-токен) для прямых вызовов API.
-export const authedFetch = (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
+export const authedFetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
     const token = getToken();
     const headers = new Headers(init.headers ?? {});
     if (token) {
@@ -43,7 +76,13 @@ export const authedFetch = (input: RequestInfo | URL, init: RequestInit = {}): P
     if (init.body && !headers.has("Content-Type")) {
         headers.set("Content-Type", "application/json");
     }
-    return fetch(input, { ...init, headers });
+    const resp = await fetch(input, { ...init, headers });
+    // Прямые fetch-вызовы (отчёты, PDF, ЛК) не идут через axios-интерцептор —
+    // обрабатываем истёкшую сессию здесь так же (токен сбросить, уйти на вход).
+    if (resp.status === 401) {
+        handleUnauthorized();
+    }
+    return resp;
 };
 
 /**
@@ -63,6 +102,11 @@ export const downloadAuthorizedPdf = async (url: string, fallbackName = "documen
     const timer = window.setTimeout(() => controller.abort(), 60_000);
     try {
         const resp = await authedFetch(url, { signal: controller.signal });
+        if (resp.status === 401) {
+            // Истёкшая сессия: переход на вход уже обработан в authedFetch —
+            // технический текст ошибки не показываем.
+            return;
+        }
         if (!resp.ok) {
             let detail = `Не удалось загрузить PDF (${resp.status})`;
             try {
