@@ -915,6 +915,12 @@ curl -s http://localhost:8080/api/auth/me | head -1  # ожидаем 401 (жи�
 
    Псевдоним-функция `thupdate` в `/root/.profile` делает ровно это (`cd` + `pull` + `up -d`);
    `thstatus` — `docker compose ps`;
+
+   После выката **номер релиза виден прямо в интерфейсе**: под надписью «Family Townhouse»
+   в панели навигации (мелким шрифтом). Значение «вшивается» при сборке фронтенд-образа
+   из git-тега релиза (`build-args: APP_VERSION=${{ github.ref_name }}` в `docker-build.yml`;
+   в образе это, напр., `v1.1.7`) — по нему удобно убедиться, что живёт именно ожидаемый релиз.
+   Подробнее про переменную — §11 (CI/CD).
 4. **Миграции сами не накатываются** (`CMD` backend-образа — только `uvicorn`). Если релиз
    содержит миграцию схемы (как в шаге В):
 
@@ -971,6 +977,30 @@ Swagger UI (`/docs`), ReDoc (`/redoc`) и схема `/openapi.json` отклю�
 | Вход выполняется, но «Пользователь недоступен» | старый JWT после перенумерации `users` — выйти/войти заново |
 | Кириллица в справочниках → `UnicodeEncodeError` | БД создана не в UTF8; пересоздать с `POSTGRES_INITDB_ARGS` (§3.1) |
 | Дамп не заливается: «already exists» | дамп содержит схему; заливать в **пустую** БД (шаг В до заливки не выполнять) |
+
+#### 9) Снять свежий дамп прод-БД в локальную (dev) копию
+
+Обратная операция к шагу 4: забрать текущее состояние прода на dev-машину.
+
+```bash
+# На NAS — дамп прод-БД:
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  pg_dump -U townhouse_user -d townhouse --no-owner --no-privileges > /tmp/townhouse_prod.sql
+```
+
+```bash
+# На dev-машине (-O — на NAS отключена SFTP-подсистема, обычный scp падает):
+scp -O synology:/tmp/townhouse_prod.sql /tmp/townhouse_prod.sql
+cd townhouse-app
+./scripts/restore_townhouse.sh data --fresh --yes /tmp/townhouse_prod.sql
+docker compose exec backend python -m alembic upgrade head
+docker compose restart backend
+```
+
+> `--fresh` СТИРАЕТ локальную БД (без `--yes` скрипт спросит подтверждение). Авто-импорт
+> зеркала (pre-push/post-merge) подхватывает только **канонические** имена дампов
+> `townhouse_ГГГГММДД_ЧЧММСС.sql` (+ `townhouse_roles_*.sql`) — дампы с произвольными
+> именами он не видит и молча говорит «нет дампов данных»; такие применяют вручную, как выше.
 
 ---
 
