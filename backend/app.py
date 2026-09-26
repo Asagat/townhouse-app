@@ -325,7 +325,7 @@ def get_resource_meta(resource: str):
 def get_list(
     resource: str,
     _start: int = 0,
-    _end: int = 10,
+    _end: int | None = None,
     _sort: str | None = None,
     _order: str | None = None,
     request: Request = None,
@@ -418,7 +418,16 @@ def get_list(
             query = query.order_by(order_func(model.id))
 
     total_count = query.count()
-    items = query.offset(_start).limit(_end - _start).all()
+    if _end is None:
+        # Пагинация не запрошена: Refine при `pagination: { mode: "off" }` НЕ шлёт
+        # _start/_end (и прямые fetch без параметров тоже) — значит, нужен ВЕСЬ список.
+        # Раньше здесь стоял скрытый дефолт `_end = 10`, и такие запросы молча
+        # обрезались до 10 строк: в массовом вводе показаний и в просмотре документа
+        # показаний было видно 10 квартир из 17, в выписке по счёту — 10 счетов.
+        items = query.offset(_start).all()
+    else:
+        # Явная пагинация (обычные списки Refine): как раньше.
+        items = query.offset(_start).limit(max(_end - _start, 0)).all()
 
     serializer = SERIALIZERS.get(model)
     if serializer:
