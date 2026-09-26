@@ -11,8 +11,9 @@
   2. --apply — удаляет существующие квитанции за период и формирует заново штатным
      генератором (`routers.receipts.generate_receipt_document`), затем коммит.
 
-Набор периодов берётся из уже существующих квитанций (только `--year` → все месяцы года,
-за которые есть документы). Повторный запуск идемпотентен: пересоздаёт те же документы.
+Набор периодов: существующие квитанции за год + явно заданный `--month` (поэтому
+`--month` умеет и пересоздать, и СФОРМИРОВАТЬ период с нуля, если квитанций за него ещё
+нет). Повторный запуск идемпотентен: пересоздаёт те же документы.
 
 Запуск из каталога backend:
     python migrations/regenerate_receipts_period.py --year 2026 --month 8
@@ -36,12 +37,19 @@ def _fmt(value) -> str:
 
 
 def _periods(db, year: int, month: int | None) -> list[tuple[int, int]]:
-    """Периоды (year, month), за которые есть квитанции."""
+    """Периоды (year, month) к обработке.
+
+    Существующие за год квитанции + явно заданный `--month` (включается даже если
+    квитанций за него ещё нет — так можно сформировать период с нуля).
+    """
     q = db.query(ReceiptDocument).filter(ReceiptDocument.period_year == year)
     if month is not None:
         q = q.filter(ReceiptDocument.period_month == month)
     rows = q.with_entities(ReceiptDocument.period_year, ReceiptDocument.period_month).all()
-    return sorted({(int(y), int(m)) for y, m in rows})
+    periods = {(int(y), int(m)) for y, m in rows}
+    if month is not None:
+        periods.add((year, month))
+    return sorted(periods)
 
 
 def _payable_by_account(db, periods: list[tuple[int, int]]) -> dict[int, float]:
