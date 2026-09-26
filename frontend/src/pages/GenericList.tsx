@@ -458,8 +458,6 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const roleCanCreate = canCreate(role, resourceName);
     const roleCanEdit = canEdit(role, resourceName);
     const roleCanDelete = canDelete(role, resourceName);
-    // Есть ли у роли хоть какое-то действие записи (иначе выбор строки/панель действий скрыты).
-    const roleCanWrite = roleCanCreate || roleCanEdit || roleCanDelete;
 
     // --- Выделенная запись (2.12): действия записи — из панели над списком ---
     const [selectedRowKey, setSelectedRowKey] = useState<string | number | null>(null);
@@ -978,6 +976,16 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                 </Space>
             );
         }
+        if (isRegister) {
+            // Регистры производные (начисления/показания/взаиморасчёты/касса): прямое
+            // редактирование/удаление не поддерживается — записи формируются документами.
+            // Доступен только просмотр записи.
+            return (
+                <Space>
+                    {iconButton("view", "Просмотр", <EyeOutlined />, () => setModalState({ mode: "view", record }), "#22ae2e")}
+                </Space>
+            );
+        }
         if (!isReadOnly) {
             return (
                 <Space>
@@ -1011,14 +1019,13 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         !isReceiptDocuments &&
         !isWriteoffDocuments;
 
-    // Колонка выбора строки нужна только там, где для записи есть действия.
-    const canUseSelection =
-        !isRegister &&
-        (isWriteoffDocuments ||
-            isReceiptDocuments ||
-            isAccrualDocuments ||
-            isMeterReadingDocuments ||
-            roleCanWrite);
+    // Выделение строки и панель действий записи — во ВСЕХ списках: «Просмотр» доступен
+    // всегда, а «Добавить/Редактировать/Удалить» — по правам роли и типу данных
+    // (регистры производные — только просмотр, см. renderRecordActions).
+    const canUseSelection = true;
+    // Что доступно с записью (для «пустого» плейсхолдера панели).
+    const canEditRecord = roleCanEdit && !isRegister;
+    const canDeleteRecord = roleCanDelete && !isRegister && !isReceiptDocuments;
 
     // Колонки таблицы строятся из общего списка колонок (включая ID) — видимость,
     // порядок и ширины применяются к ним одинаково.
@@ -1166,12 +1173,12 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                         <Tooltip title="Просмотр">
                                             <Button icon={<EyeOutlined />} disabled />
                                         </Tooltip>
-                                        {roleCanEdit && (
+                                        {canEditRecord && (
                                             <Tooltip title="Редактировать">
                                                 <Button icon={<EditOutlined />} disabled />
                                             </Tooltip>
                                         )}
-                                        {roleCanDelete && !isReceiptDocuments && (
+                                        {canDeleteRecord && (
                                             <Tooltip title="Удалить">
                                                 <Button icon={<DeleteOutlined />} danger disabled />
                                             </Tooltip>
