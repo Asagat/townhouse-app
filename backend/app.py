@@ -55,6 +55,7 @@ from models import (
     Counterparty,
     ReceiptDocument,
     ReceiptItem,
+    RolePermission,
     ServiceType,
     Transaction,
     TransactionTypeEnum,
@@ -74,10 +75,25 @@ from writeoffs import (
     rebuild_accounts_register,
     check_register_integrity,
 )
-from permissions import require_resource_access
+from permissions import (
+    PERMISSION_CATALOG,
+    FIXED_ROLES,
+    LOCKED_ACTIONS,
+    ROLES,
+    effective_permissions,
+    require_resource_access,
+    sanitize_permissions,
+)
 from field_config import FIELD_CONFIG, MODEL_MAP, coerce_field_value
+from app_settings import (
+    generate_account_number,
+    get_setting,
+    get_settings,
+    set_settings,
+)
 from sorting import build_order_clause
 from filtering import build_filter_clauses
+from exporting import build_export_response
 from serializers import SERIALIZERS, _user_serializer
 from services import (build_accrual_register_items, build_transaction_title, calculate_accrual_for_account_service, calculate_accruals_preview, create_accounts_register_entries_for_accruals, resolve_meter_reading_values, resolve_meter_reading_document_values, resolve_transaction_values, set_transaction_title, audit_document_create, audit_document_update, validate_meter_service_type, retire_tariff_predecessors, validate_tariff_invariants, TARIFF_STATUS_ARCHIVED, TARIFF_STATUS_ACTIVE)
 
@@ -156,6 +172,28 @@ def login(payload: dict[str, Any] = Body(...), db: Session = Depends(get_db)):
 def me(user: User = Depends(get_current_user)):
     """Текущий пользователь по токену."""
     return _user_serializer(user)
+
+
+@auth_router.post("/change-password")
+def change_password(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Смена собственного пароля (Б9). При успехе снимает флаг must_change_password."""
+    current = payload.get("current_password") or ""
+    new = payload.get("new_password") or ""
+    if not current or not new:
+        raise HTTPException(status_code=422, detail="Укажите текущий и новый пароль")
+    if len(new) < 6:
+        raise HTTPException(status_code=422, detail="Пароль слишком короткий (мин. 6 символов)")
+    if not verify_password(current, user.password_hash):
+        raise HTTPException(status_code=400, detail="Неверный текущий пароль")
+    user.password_hash = hash_password(new)
+    user.must_change_password = False
+    db.add(user)
+    db.commit()
+    return {"ok": True}
 
 
 @auth_router.post("/users", status_code=status.HTTP_201_CREATED)
@@ -272,6 +310,137 @@ def delete_user(
     db.delete(target)
     db.commit()
     return Response(status_code=204)
+
+
+# --- ПРАВА ДОСТУПА (матрица роль × ресурс, задача 2.6) ---
+
+
+def _catalog_public() -> list[dict[str, Any]]:
+    return [
+        {
+            "key": e["key"],
+            "label": e["label"],
+            "group": e["group"],
+            "kind": e["kind"],
+            "read_enforced": bool(e.get("read_enforced", True)),
+        }
+        for e in PERMISSION_CATALOG
+    ]
+
+
+@auth_router.get("/permissions/me")
+def my_permissions(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Эффективные права текущей роли — для меню и кнопок на фронтенде."""
+    role = user.role.name
+    return {
+        "role": role,
+        "fixed": role in FIXED_ROLES,
+        "keys": effective_permissions(db, role),
+    }
+
+
+@auth_router.get("/permissions")
+def get_permissions_matrix(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("admin")),
+):
+    """Каталог ресурсов/разделов + эффективная матрица прав (только admin)."""
+    return {
+        "roles": ROLES,
+        "fixed_roles": sorted(FIXED_ROLES),
+        "locked_actions": {k: sorted(v) for k, v in LOCKED_ACTIONS.items()},
+        "catalog": _catalog_public(),
+        "matrix": {role: effective_permissions(db, role) for role in ROLES},
+    }
+
+
+@auth_router.put("/permissions")
+def update_permissions_matrix(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("admin")),
+):
+    """Массовое сохранение матрицы (только admin). Фиксированные роли игнорируются."""
+    catalog_keys = {e["key"] for e in PERMISSION_CATALOG}
+    updated = 0
+    for item in payload.get("items") or []:
+        role = str(item.get("role") or "")
+        resource = str(item.get("resource") or "")
+        if role in FIXED_ROLES or role not in ROLES or resource not in catalog_keys:
+            continue
+        perms = sanitize_permissions(
+            resource,
+            {
+                "menu": bool(item.get("menu")),
+                "read": bool(item.get("read")),
+                "create": bool(item.get("create")),
+                "edit": bool(item.get("edit")),
+                "delete": bool(item.get("delete")),
+            },
+        )
+        row = (
+            db.query(RolePermission)
+            .filter(RolePermission.role == role, RolePermission.resource == resource)
+            .first()
+        )
+        if row is None:
+            row = RolePermission(role=role, resource=resource)
+            db.add(row)
+        row.menu = perms["menu"]
+        row.can_read = perms["read"]
+        row.can_create = perms["create"]
+        row.can_edit = perms["edit"]
+        row.can_delete = perms["delete"]
+        row.updated_by = admin.id
+        updated += 1
+    db.commit()
+    return {"updated": updated}
+
+
+@auth_router.post("/permissions/reset")
+def reset_permissions_matrix(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("admin")),
+):
+    """Сброс матрицы к умолчаниям: удаляет все настройки (только admin)."""
+    deleted = db.query(RolePermission).delete()
+    db.commit()
+    return {"deleted": deleted}
+
+
+# --- ГЛОБАЛЬНЫЕ НАСТРОЙКИ ПРИЛОЖЕНИЯ (Б3) ---
+
+
+@auth_router.get("/settings")
+def read_app_settings(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("admin")),
+):
+    """Глобальные настройки приложения (только admin)."""
+    return {"settings": get_settings(db)}
+
+
+@auth_router.put("/settings")
+def update_app_settings(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("admin")),
+):
+    """Сохранение глобальных настроек (только admin)."""
+    values = payload.get("settings") or {}
+    if not isinstance(values, dict):
+        raise HTTPException(status_code=422, detail="Некорректный формат настроек")
+    if "account_number_prefix" in values:
+        prefix = str(values.get("account_number_prefix") or "").strip()
+        if not prefix:
+            raise HTTPException(status_code=422, detail="Префикс лицевого счёта не может быть пустым")
+        if len(prefix) > 16:
+            raise HTTPException(status_code=422, detail="Префикс слишком длинный (макс. 16)")
+        values["account_number_prefix"] = prefix
+    return {"settings": set_settings(db, values, admin.id)}
 
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ СЕРИАЛИЗАЦИИ ---
@@ -418,6 +587,12 @@ def get_list(
             query = query.order_by(order_func(model.id))
 
     total_count = query.count()
+    # Экспорт (2.2): если запрошен _export, вернём файл вместо JSON. Колонки/фильтры/
+    # сортировка — те же, что у списка; фронтенд выгружает ВСЕ отфильтрованные строки
+    # (запрос без _end), поэтому пагинация на экспорт не влияет.
+    export_fmt = request.query_params.get("_export") if request is not None else None
+    export_columns = request.query_params.get("_columns") if request is not None else None
+
     if _end is None:
         # Пагинация не запрошена: Refine при `pagination: { mode: "off" }` НЕ шлёт
         # _start/_end (и прямые fetch без параметров тоже) — значит, нужен ВЕСЬ список.
@@ -434,6 +609,9 @@ def get_list(
         serialized_data = [serializer(item) for item in items]
     else:
         serialized_data = [{"id": getattr(i, "id", None)} for i in items]
+
+    if export_fmt:
+        return build_export_response(resource, serialized_data, export_columns, export_fmt)
 
     return Response(
         content=json.dumps(serialized_data, default=str, ensure_ascii=False),
@@ -567,6 +745,13 @@ async def create_resource_item(
         )
 
     _require_positive_document_amount(resource, payload.get("amount"))
+
+    # Б3: если номер лицевого счёта не задан — генерируем его (префикс из настроек
+    # + номер квартиры). Поле остаётся редактируемым при желании.
+    if resource == "accounts" and not str(payload.get("account_number") or "").strip():
+        payload["account_number"] = generate_account_number(
+            db, get_setting(db, "account_number_prefix"), payload.get("apartment_id")
+        )
 
     model = MODEL_MAP.get(resource)
     fields = FIELD_CONFIG.get(resource)

@@ -1,0 +1,28 @@
+# docker-compose.test.yml — оверрейд для ИЗОЛИРОВАННОГО прогона backend-тестов (ТД-3).
+#
+# Запускается поверх основного docker-compose.yml ТОЛЬКО явным флагом -f
+# (см. scripts/test_backend.sh):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --wait postgres-test
+#
+# Добавляет одноразовую БД postgres-test: тесты гоняются против неё, а НЕ против
+# рабочей dev-БД (townhouse-postgres). Данные держим в tmpfs — после прогона
+# контейнер и БД удаляются, ничего не остаётся. Порты наружу не публикуются:
+# доступ к postgres-test есть только у сервисов того же compose-проекта (по имени
+# `postgres-test` в общей сети).
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: townhouse-postgres-test
+    environment:
+      POSTGRES_USER: townhouse_test
+      POSTGRES_PASSWORD: townhouse_test
+      POSTGRES_DB: townhouse_test
+    # Данные только в памяти: БД одноразовая, переживать перезапуск не должна.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U townhouse_test -d townhouse_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 20

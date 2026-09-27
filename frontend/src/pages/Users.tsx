@@ -6,9 +6,10 @@
 
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
-import { Table, Button, Space, Tooltip, Modal, Form, Input, Select, Switch, Popconfirm, message, Tag } from "antd";
+import { Table, Button, Space, Tooltip, Modal, Form, Input, Select, Switch, Popconfirm, message, Tag, Tabs } from "antd";
 import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import { http, apiUrl } from "../auth/http";
+import { RolePermissions } from "../components/permissions/RolePermissions";
 
 interface UserRow {
     id: number;
@@ -54,7 +55,7 @@ const actionIconBtn = (onClick: () => void, danger = false, label?: string) => (
     </Tooltip>
 );
 
-export const Users = () => {
+const UsersTab = () => {
     const [rows, setRows] = useState<UserRow[]>([]);
     const [loading, setLoading] = useState(false);
     const [modalOpen, setModalOpen] = useState(false);
@@ -150,11 +151,10 @@ export const Users = () => {
     ];
 
     return (
-        <div style={{ background: "#fff", padding: 30, borderRadius: 12, border: "1px solid #d9eedc" }}>
+        <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 20 }}>
                 <div>
-                    <h1 style={{ color: "#14501d", margin: 0 }}>Пользователи и права</h1>
-                    <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         {selectedRecord ? (
                             <>
                                 {actionIconBtn(() => openEdit(selectedRecord), false, "Редактировать")}
@@ -235,6 +235,19 @@ export const Users = () => {
                     </Form.Item>
                 </Form>
             </Modal>
-        </div>
+        </>
     );
 };
+
+export const Users = () => (
+    <div style={{ background: "#fff", padding: 30, borderRadius: 12, border: "1px solid #d9eedc" }}>
+        <h1 style={{ color: "#14501d", margin: 0 }}>Пользователи и права</h1>
+        <Tabs
+            style={{ marginTop: 12 }}
+            items={[
+                { key: "users", label: "Пользователи", children: <UsersTab /> },
+                { key: "permissions", label: "Права доступа", children: <RolePermissions /> },
+            ]}
+        />
+    </div>
+);

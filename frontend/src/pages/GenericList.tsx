@@ -14,13 +14,16 @@ import {
     InputNumber,
     Select,
     DatePicker,
+    Dropdown,
     message,
 } from "antd";
 import {
     AccountBookOutlined,
     CloudUploadOutlined,
     DeleteOutlined,
+    DownloadOutlined,
     EditOutlined,
+    EllipsisOutlined,
     EyeOutlined,
     FileAddOutlined,
     FilePdfOutlined,
@@ -28,6 +31,7 @@ import {
     FormOutlined,
     PlusOutlined,
     TableOutlined,
+    TeamOutlined,
     UndoOutlined,
 } from "@ant-design/icons";
 import {
@@ -51,7 +55,11 @@ import {
     type PrefsMap,
     type StoredColumnSettings,
 } from "../auth/preferences";
+import { usePermissions } from "../auth/permissions";
 import { getColumnsForResource } from "../config/columns";
+import { buildExportParams } from "../config/export";
+import { referenceFromRow } from "../config/referenceDrill";
+import { useReferenceDrill } from "../components/common/referenceDrillContext";
 import { cellAlignStyle, headerAlignStyle } from "../config/columnAlign";
 import { allResources } from "../config/menu";
 import {
@@ -84,6 +92,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext } from "@dnd-kit/sortable";
 import { BulkReadingsModal } from "../components/meter-readings/BulkReadingsModal";
+import { ApartmentResidentsModal } from "../components/apartments/ApartmentResidentsModal";
 import { AccrualsCalculationModal } from "../components/accruals/AccrualsCalculationModal";
 import { PersonalAccrualModal } from "../components/accruals/PersonalAccrualModal";
 import { OneOffAccrualsEditModal } from "../components/accruals/OneOffAccrualsEditModal";
@@ -96,7 +105,7 @@ import type { ColumnsType, ColumnType } from "antd/es/table";
 import { BRAND } from "../config/colors";
 import { canCreate, canEdit, canDelete } from "../auth/can";
 import { useColumnSettings, withLeadingColumn } from "../hooks/useColumnSettings";
-import { openAuthorizedPdf, authedFetch } from "../auth/http";
+import { openAuthorizedPdf, authedFetch, downloadAuthorizedFile } from "../auth/http";
 
 interface GenericListProps {
     resourceName: string;
@@ -148,6 +157,7 @@ const sortMapping: Record<string, string> = {
     'account_label': 'account.account_number',
     'account_id_label': 'account.account_number',
     'cash_point.name': 'cash_point.name',
+    'cash_point.kind': 'cash_point.kind',
     'cash_point_id_label': 'cash_point.name',
     'tariff_type.name': 'tariff_type.name',
     'tariff_type_id_label': 'tariff_type.name',
@@ -263,6 +273,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const apiUrl = useApiUrl();
 
     const { data: identity } = useGetIdentity<any>();
+    // Права роли (задача 2.6): перерисовка кнопок после загрузки матрицы с бэкенда.
+    usePermissions();
 
     // --- Настройки пользователя (2.13): сервер + локальный кэш по (пользователь, ресурс) ---
     const username = identity?.username ?? "";
@@ -352,6 +364,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     const { mutate: createRecord, isLoading: creating } = useCreate();
     const { mutate: updateRecord, isLoading: updating } = useUpdate();
     const { mutate: deleteRecord } = useDelete();
+    // «Проваливание» по ссылочным полям (2.21): открыть связанную запись в read-only окне.
+    const { drill, canDrill } = useReferenceDrill();
 
     const [modalState, setModalState] = useState<ModalState | null>(null);
 
@@ -552,6 +566,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
     // Персистим изменения сортировки/фильтров/размера страницы (на сервер — с debounce).
     useEffect(() => {
         if (!username || !prefsReadyRef.current) return;
+        // Представления по типу (2.15) не сохраняют фильтр-«предустановку» в настройки раздела.
         patchPrefs({
             sorters: (sorters ?? []) as ListSettings["sorters"],
             filters: (filters ?? []) as ListSettings["filters"],
@@ -682,6 +697,20 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
         setAppliedCount(0);
         setCurrent(1);
         setFiltersOpen(false);
+    };
+
+    // --- Экспорт списка в Excel/CSV (2.2) ---
+    // Выгружаем ВСЕ строки, соответствующие текущим фильтрам и сортировке (пагинация
+    // не ограничивает: страницы — способ показа, а не объём данных). Колонки — ровно те,
+    // что видны в таблице (с учётом скрытия/порядка), поэтому файл совпадает с ней.
+    const buildExportUrl = (fmt: "xlsx" | "csv"): string =>
+        `${apiUrl}/${resourceName}?${buildExportParams(filters, sorters, displayColumns, fmt).toString()}`;
+
+    const handleExport = async (fmt: "xlsx" | "csv") => {
+        const name = `${resourceName}_${dayjs().format("YYYYMMDD_HHmmss")}.${fmt}`;
+        await downloadAuthorizedFile(buildExportUrl(fmt), name, {
+            kindLabel: fmt === "xlsx" ? "Excel-файл" : "CSV-файл",
+        });
     };
 
     const renderFilterControl = (col: { key: string; label: string }) => {
@@ -879,6 +908,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
 
     const errMsg = (err: any, fallback: string) => err?.response?.data?.detail ?? fallback;
 
+    const [residentsApartment, setResidentsApartment] = useState<any | null>(null);
+
     const renderRecordActions = (record: any): React.ReactNode => {
         if (isWriteoffDocuments) {
             return (
@@ -992,6 +1023,8 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     {iconButton("view", "Просмотр", <EyeOutlined />, () => setModalState({ mode: "view", record }), "#22ae2e")}
                     {roleCanEdit &&
                         iconButton("edit", "Редактировать", <EditOutlined />, () => setModalState({ mode: "edit", record }), "#22ae2e")}
+                    {resourceName === "apartments" &&
+                        iconButton("residents", "Жильцы", <TeamOutlined />, () => setResidentsApartment(record), "#22ae2e")}
                     {roleCanDelete &&
                         deleteButton("del", "Удалить", "Удалить запись?", () =>
                             deleteRecord(
@@ -1041,7 +1074,28 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
             render: (value: any, record: any) => {
                 try {
                     const val = isNested ? getValueByPath(record, col.key) : value;
-                    return col.format ? col.format(val) : val ?? "—";
+                    const content = col.format ? col.format(val) : val ?? "—";
+                    // Ссылочная колонка с известным id → даём «провалиться» в запись (2.21).
+                    const ref = referenceFromRow(col.key, record);
+                    if (!ref || !canDrill(ref.resource)) {
+                        return content;
+                    }
+                    return (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            {content}
+                            <Tooltip title="Открыть связанную запись">
+                                <Button
+                                    size="small"
+                                    type="text"
+                                    icon={<EllipsisOutlined />}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        drill(ref.resource, ref.id);
+                                    }}
+                                />
+                            </Tooltip>
+                        </span>
+                    );
                 } catch {
                     return "—";
                 }
@@ -1207,7 +1261,7 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                                                 bulkDeleteReceipts(
                                                     checkedRowKeys.length > 0
                                                         ? checkedRowKeys
-                                                        : [selectedRecord!.id],
+                                                        : [selectedRecord!.id as string | number],
                                                 )
                                             }
                                         >
@@ -1308,6 +1362,20 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                             </Badge>
                         </Tooltip>
                     </Popover>
+                    <Dropdown
+                        trigger={["click"]}
+                        menu={{
+                            items: [
+                                { key: "xlsx", label: "Excel (.xlsx)" },
+                                { key: "csv", label: "CSV (.csv)" },
+                            ],
+                            onClick: ({ key }) => handleExport(key as "xlsx" | "csv"),
+                        }}
+                    >
+                        <Tooltip title="Экспорт в Excel/CSV">
+                            <Button icon={<DownloadOutlined />} />
+                        </Tooltip>
+                    </Dropdown>
                     {columns.length > 0 && (
                         <Popover
                             trigger="click"
@@ -1430,6 +1498,13 @@ export const GenericList = ({ resourceName }: GenericListProps) => {
                     resourceName={resourceName}
                 />
             )}
+
+            <ApartmentResidentsModal
+                open={!!residentsApartment}
+                apartment={residentsApartment}
+                canEdit={roleCanEdit}
+                onClose={() => setResidentsApartment(null)}
+            />
 
             {isMeterReadingDocuments && (
                 <BulkReadingsModal

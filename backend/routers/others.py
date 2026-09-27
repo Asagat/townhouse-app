@@ -8,10 +8,11 @@
 
 import io
 from datetime import datetime
+from typing import Any
 
 from auth import get_current_user
 from database import get_db
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -512,6 +513,64 @@ def get_my_house_expenses(
         "articles": articles,
         "total": round(sum(a["expense"] for a in articles), 2),
     }
+
+
+def _get_user_owner(db: Session, user: User):
+    """Собственник (Counterparty), привязанный к лицевому счёту текущего пользователя."""
+    account_id = getattr(user, "account_id", None)
+    if not account_id:
+        raise HTTPException(status_code=404, detail="Лицевой счёт не привязан к пользователю")
+    account = db.get(Account, int(account_id))
+    apartment = account.apartment if account else None
+    owner = apartment.owner if apartment else None
+    if owner is None:
+        raise HTTPException(status_code=404, detail="Собственник не найден")
+    return owner
+
+
+def _owner_contacts(owner, user: User) -> dict:
+    return {
+        "full_name": owner.full_name,
+        "phone": owner.phone,
+        "email": owner.email,
+        "contact_info": owner.contact_info,
+        "login": user.username,
+    }
+
+
+@router.get("/me/contacts")
+def get_my_contacts(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Контактные данные собственника для ЛК жителя (Б2). Логин — только для чтения."""
+    return _owner_contacts(_get_user_owner(db, user), user)
+
+
+@router.patch("/me/contacts")
+def update_my_contacts(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Правка собственных контактных данных жителем (Б2).
+
+    Меняются ФИО / телефон / e-mail / доп. контакты собственника; логин недоступен.
+    """
+    owner = _get_user_owner(db, user)
+    if "full_name" in payload:
+        full_name = (payload.get("full_name") or "").strip()
+        if not full_name:
+            raise HTTPException(status_code=422, detail="ФИО не может быть пустым")
+        owner.full_name = full_name
+    for field in ("phone", "email", "contact_info"):
+        if field in payload:
+            value = (payload.get(field) or "").strip()
+            setattr(owner, field, value or None)
+    db.add(owner)
+    db.commit()
+    db.refresh(owner)
+    return _owner_contacts(owner, user)
 
 
 @router.get("/creators")

@@ -2,7 +2,7 @@ name: CI
 
 # Автопроверка кода при каждом push/PR в main (см. ROADMAP п. 3.3):
 #   - backend: pytest против disposable PostgreSQL 16 (alembic upgrade head → init_data → pytest);
-#   - frontend: npm ci → npm run build (= tsc + vite build);
+#   - frontend: npm ci → npm run build (= tsc -b + vite build; реальная проверка типов src/);
 #   - images: сборка ПРОД-образов из Dockerfile.prod / Dockerfile (без публикации).
 # Ветка main защищена (branch protection) — эти job'ы отмечаются как required checks,
 # поэтому в main не попадает код, не прошедший проверки.
@@ -101,7 +101,7 @@ jobs:
         # Тот же шаг, что predev делает локально, — детерминированная сборка.
         run: npm run ensure-env
 
-      - name: Build (tsc + vite build)
+      - name: Build (tsc -b + vite build)
         run: npm run build
 
   # Сборка ПРОД-образов. Отдельный job нужен потому, что npm run build выше идёт

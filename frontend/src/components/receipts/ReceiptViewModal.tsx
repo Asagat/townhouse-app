@@ -424,9 +424,9 @@ export const ReceiptViewModal = ({
                     <div style={{ fontSize: 11, color: "#889", marginTop: 8 }}>
                         Сформирована: {formatIssued(doc.issued_at) || "—"}
                     </div>
-                    {rows.length > 0 && (
+                    {items.length > 0 && (
                         <div style={{ marginTop: 12, fontSize: 12, color: "#666" }}>
-                            Услуг в квитанции: {rows.length}. Полная детализация — в PDF.
+                            Услуг в квитанции: {items.length}. Полная детализация — в PDF.
                         </div>
                     )}
                     <div style={{ marginTop: 10 }}>

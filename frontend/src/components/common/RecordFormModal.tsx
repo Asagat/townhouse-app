@@ -1,10 +1,12 @@
 // src/components/common/RecordFormModal.tsx
 
 import { useEffect, useMemo } from "react";
-import { Modal, Form, Input, Button } from "antd";
+import { Modal, Form, Input, Button, Space, Tooltip } from "antd";
+import { EllipsisOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import type { FieldMeta } from "../../types";
 import { renderFieldControl } from "./renderFieldControl";
+import { useReferenceDrill } from "./referenceDrillContext";
 import { sortFieldsForForm } from "../../config/columns";
 import { formatDate, formatDateTime, formatMoney, formatPhone, isMoneyFieldName } from "../../config/formatters";
 
@@ -37,6 +39,8 @@ export const RecordFormModal = ({
     readonly = false,
 }: RecordFormModalProps) => {
     const [form] = Form.useForm();
+    // «Проваливание» по ссылочным полям (2.21): доступно в режиме просмотра.
+    const { drill, canDrill } = useReferenceDrill();
 
     // Сортируем поля в соответствии с конфигурацией
     const sortedFields = useMemo(() => {
@@ -197,7 +201,9 @@ export const RecordFormModal = ({
             <Form
                 form={form}
                 layout="vertical"
-                disabled={readonly}
+                // НЕ ставим `disabled={readonly}`: antd через DisabledContext глушил бы
+                // и кнопку «…» (проваливание в связанную запись, 2.21). Все поля в
+                // режиме просмотра и так disabled явно (см. <Input disabled>).
                 className={readonly ? "form-view-mode" : undefined}
             >
                 {sortedFields.map((field) => {
@@ -253,7 +259,27 @@ export const RecordFormModal = ({
                             {fieldReadonly ? (
                                 // Для readonly полей показываем просто текст;
                                 // булево — «Да/Нет», дата — прописью, деньги — с разделителями.
-                                <Input disabled value={fieldViewText(field)} />
+                                // У ссылочных полей — кнопка «…»: открыть связанную запись (2.21).
+                                (() => {
+                                    const refResource = field.type === "reference" ? field.reference : undefined;
+                                    const refId = refResource ? initialValues?.[field.name] : undefined;
+                                    const canOpen =
+                                        readonly && !!refResource && refId != null && canDrill(refResource);
+                                    if (!canOpen) {
+                                        return <Input disabled value={fieldViewText(field)} />;
+                                    }
+                                    return (
+                                        <Space.Compact style={{ width: "100%" }}>
+                                            <Input disabled value={fieldViewText(field)} />
+                                            <Tooltip title="Открыть связанную запись">
+                                                <Button
+                                                    icon={<EllipsisOutlined />}
+                                                    onClick={() => drill(refResource!, Number(refId))}
+                                                />
+                                            </Tooltip>
+                                        </Space.Compact>
+                                    );
+                                })()
                             ) : (
                                 renderFieldControl(field, form, resourceName)
                             )}

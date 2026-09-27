@@ -39,6 +39,7 @@ export const columnsConfig: Record<string, Column[]> = {
 
     cash_points: [
         { key: 'name', label: 'Наименование' },
+        { key: 'kind', label: 'Тип' },
         { key: 'is_active', label: 'Активен', format: formatBool },
     ],
 
@@ -54,6 +55,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'transaction_date', label: 'Дата документа', format: formatDateTime },
         { key: 'created_at', label: 'Дата создания', format: formatDateTime },
         { key: 'cash_point.name', label: 'Касса/Счёт' },
+        { key: 'cash_point.kind', label: 'Тип' },
         { key: 'apartment.apartment_number', label: '№ квартиры' },
         { key: 'account.account_number', label: 'Лицевой счёт' },
         { key: 'article.name', label: 'Статья' },
@@ -71,6 +73,7 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'transaction_date', label: 'Дата документа', format: formatDateTime },
         { key: 'created_at', label: 'Дата создания', format: formatDateTime },
         { key: 'cash_point.name', label: 'Касса/Счёт' },
+        { key: 'cash_point.kind', label: 'Тип' },
         { key: 'apartment.apartment_number', label: '№ квартиры' },
         { key: 'account.account_number', label: 'Лицевой счёт' },
         { key: 'article.name', label: 'Статья' },
@@ -136,10 +139,12 @@ export const columnsConfig: Record<string, Column[]> = {
         { key: 'account.account_number', label: 'Лицевой счёт' },
         { key: 'article.name', label: 'Статья' },
         { key: 'contractor.full_name', label: 'Контрагент' },
+        { key: 'cash_point.name', label: 'Касса/Счёт' },
+        { key: 'cash_point.kind', label: 'Тип' },
         { key: 'operation_date', label: 'Дата операции', format: formatDateTime },
         { key: 'income', label: 'Приход', format: formatMoney },
         { key: 'expense', label: 'Расход', format: formatMoney },
-        { key: 'balance_after', label: 'Баланс', format: formatMoney },
+        { key: 'balance_after', label: 'Остаток по кассе', format: formatMoney },
         { key: 'document_title', label: 'Документ' },
         { key: 'notes', label: 'Примечание' },
     ],
@@ -230,7 +235,7 @@ export const columnsConfig: Record<string, Column[]> = {
 export const formFieldConfig: Record<string, string[]> = {
     apartments: ['apartment_number', 'address', 'square', 'owner_id'],
     accounts: ['account_number', 'account_name', 'is_active', 'apartment_id'],
-    cash_points: ['name', 'is_active'],
+    cash_points: ['name', 'kind', 'is_active'],
     payments: ['transaction_date', 'cash_point_id', 'transaction_type', 'article_id', 'contractor_id', 'apartment_id', 'amount', 'notes'],
     transactions: ['transaction_date', 'cash_point_id', 'transaction_type', 'article_id', 'contractor_id', 'apartment_id', 'amount', 'notes'],
     accruals_register: ['accrual_date', 'account_id', 'services_type_id', 'past_reading_value', 'current_reading_value', 'consumption', 'amount'],

@@ -62,6 +62,12 @@ def _direct_column(model, field):
 
 def _path_leaf_type(base_model, path, column):
     """Тип «листового» столбца для пути по relationship (для SORT_FIELDS path-дескрипторов)."""
+    col = _path_leaf_column(base_model, path, column)
+    return col.type if col is not None else None
+
+
+def _path_leaf_column(base_model, path, column):
+    """Сам «листовой» столбец для пути по relationship (нужен для enum-приведений)."""
     mapper = base_model.__mapper__
     for rel_name in path:
         rel = mapper.relationships.get(rel_name)
@@ -71,7 +77,7 @@ def _path_leaf_type(base_model, path, column):
     leaf = mapper.class_.__table__
     if column not in leaf.c:
         return None
-    return leaf.c[column].type
+    return leaf.c[column]
 
 
 def _descriptor_kind(base_model, descriptor: dict) -> str:
@@ -97,7 +103,14 @@ def _resolve_field(resource: str, model, field: str):
         expr = _build_descriptor(model, descriptor)
         if expr is None:
             return None
-        return {"expr": expr, "kind": _descriptor_kind(model, descriptor), "col": None}
+        # Для путей по relationship оставляем листовой столбец — по нему в
+        # `_make_condition` работают enum-приведения (напр. `cash_point.kind`).
+        col = (
+            _path_leaf_column(model, descriptor["path"], descriptor["col"])
+            if "path" in descriptor
+            else None
+        )
+        return {"expr": expr, "kind": _descriptor_kind(model, descriptor), "col": col}
     col = _direct_column(model, field)
     if col is not None:
         return {"expr": col, "kind": _kind_of_column(col) or "str", "col": col}

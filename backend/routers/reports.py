@@ -15,7 +15,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from auth import require_roles
+from permissions import require_permission
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -56,14 +56,14 @@ def build_cash_register_report(
     # Список касс (всех, или одной выбранной).
     if cash_point_id:
         points = db.execute(
-            text("SELECT id, name, is_active FROM cash_points WHERE id = :id"),
+            text("SELECT id, name, is_active, kind FROM cash_points WHERE id = :id"),
             {"id": cash_point_id},
         ).fetchall()
         if not points:
             raise HTTPException(status_code=404, detail="Касса не найдена")
     else:
         points = db.execute(
-            text("SELECT id, name, is_active FROM cash_points ORDER BY id"),
+            text("SELECT id, name, is_active, kind FROM cash_points ORDER BY id"),
         ).fetchall()
 
     # Начальные остатки по кассам: накопительный итог Σ(income − expense) ДО начала
@@ -142,14 +142,23 @@ def build_cash_register_report(
     # Итоговая сводка по кассам и общие суммы.
     cash_points: list[dict] = []
     totals = {"opening": 0.0, "income": 0.0, "expense": 0.0, "closing": 0.0}
+    # Раздельные итоги по типу (2.15): «Касса» (нал) / «Счёт» (безнал).
+    by_kind = {
+        "cash": {"opening": 0.0, "income": 0.0, "expense": 0.0, "closing": 0.0},
+        "bank": {"opening": 0.0, "income": 0.0, "expense": 0.0, "closing": 0.0},
+    }
+    kind_labels = {"cash": "Касса", "bank": "Счёт"}
     for p in points:
         inc = per_cp[p.id]["income"]
         exp = per_cp[p.id]["expense"]
         closing = opening[p.id] + inc - exp
+        kind_code = p.kind or "cash"
         cash_points.append(
             {
                 "cash_point_id": p.id,
                 "cash_point_name": p.name,
+                "kind": kind_labels.get(kind_code, kind_code),
+                "kind_code": kind_code,
                 "is_active": bool(p.is_active),
                 "opening": round(opening[p.id], 2),
                 "income": round(inc, 2),
@@ -161,12 +170,22 @@ def build_cash_register_report(
         totals["income"] += inc
         totals["expense"] += exp
         totals["closing"] += closing
+        bucket = by_kind.get(kind_code)
+        if bucket is not None:
+            bucket["opening"] += opening[p.id]
+            bucket["income"] += inc
+            bucket["expense"] += exp
+            bucket["closing"] += closing
 
     movements.sort(key=lambda x: (x["operation_date"] or "", x["transaction_id"] or 0))
 
     return {
         "period": {"from": from_date, "to": to_date},
         "totals": {k: round(v, 2) for k, v in totals.items()},
+        "totals_by_kind": {
+            code: {k: round(v, 2) for k, v in bucket.items()}
+            for code, bucket in by_kind.items()
+        },
         "cash_points": cash_points,
         "movements": movements,
     }
@@ -190,7 +209,7 @@ def cash_register_report(
     to_date: str | None = Query(None, description="Конец периода YYYY-MM-DD"),
     cash_point_id: int | None = Query(None, description="Фильтр по кассе"),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
+    _user: User = Depends(require_permission("cash_report")),
 ):
     """Отчёт по кассе: движение денег по кассам/счетам за период.
 
@@ -205,7 +224,7 @@ def cash_register_report_pdf(
     to_date: str | None = Query(None, description="Конец периода YYYY-MM-DD"),
     cash_point_id: int | None = Query(None, description="Фильтр по кассе"),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
+    _user: User = Depends(require_permission("cash_report")),
 ):
     """PDF «Отчёт по кассе» (2.16)."""
     data = build_cash_register_report(db, from_date, to_date, cash_point_id)
@@ -308,7 +327,7 @@ def expense_report(
     to_date: str | None = Query(None, description="Конец периода YYYY-MM-DD"),
     cash_point_id: int | None = Query(None, description="Фильтр по кассе"),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
+    _user: User = Depends(require_permission("expense_report")),
 ):
     """Отчёт по расходам: расход кассы за период (итог, по статьям, детализация)."""
     return build_expense_report(db, from_date, to_date, cash_point_id)
@@ -320,7 +339,7 @@ def expense_report_pdf(
     to_date: str | None = Query(None, description="Конец периода YYYY-MM-DD"),
     cash_point_id: int | None = Query(None, description="Фильтр по кассе"),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
+    _user: User = Depends(require_permission("expense_report")),
 ):
     """PDF «Отчёт по расходам» (2.16)."""
     data = build_expense_report(db, from_date, to_date, cash_point_id)
@@ -420,7 +439,7 @@ def build_debtors_report(db: Session, min_amount: float = 0.0, as_of: str | None
 def debtors_report(
     as_of: str | None = Query(None, description="Срез на дату YYYY-MM-DD (по умолчанию — на сейчас)"),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
+    _user: User = Depends(require_permission("debtors_report")),
 ):
     """Отчёт по должникам: активные л/с с долгом. as_of — считать долг на указанную дату."""
     return build_debtors_report(db, as_of=as_of)
@@ -430,7 +449,7 @@ def debtors_report(
 def debtors_report_pdf(
     as_of: str | None = Query(None, description="Срез на дату YYYY-MM-DD (по умолчанию — на сейчас)"),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
+    _user: User = Depends(require_permission("debtors_report")),
 ):
     """PDF «Отчёт по должникам». as_of — считать долг на указанную дату."""
     data = build_debtors_report(db, as_of=as_of)
@@ -525,7 +544,7 @@ def statement_report(
     from_date: str | None = Query(None),
     to_date: str | None = Query(None),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
+    _user: User = Depends(require_permission("statement_report")),
 ):
     """Выписка по лицевому счёту: помесячно начислено/списано/остаток."""
     return build_statement_report(db, account_id, from_date, to_date)
@@ -537,7 +556,7 @@ def statement_report_pdf(
     from_date: str | None = Query(None),
     to_date: str | None = Query(None),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
+    _user: User = Depends(require_permission("statement_report")),
 ):
     """PDF выписки по лицевому счёту — той же, что формируется в ЛК (2.3+Б15).
 

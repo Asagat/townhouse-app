@@ -37,6 +37,18 @@ class AnalyticKind(enum.Enum):
     opening = "Входящий остаток"
 
 
+class CashPointKind(enum.Enum):
+    """Тип «Кассы/Счёта» (задача 2.15): наличная касса или банковский счёт."""
+    cash = "Касса"
+    bank = "Счёт"
+
+
+class ResidentRole(enum.Enum):
+    """Статус жильца в квартире (Б8)."""
+    owner = "Собственник"
+    tenant = "Проживающий"
+
+
 class UserRole(enum.Enum):
     admin = "Администратор"
     operator = "Оператор"
@@ -65,6 +77,8 @@ class User(Base):
         Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
     )
     is_active = Column(Boolean, default=True)
+    # Принудительная смена пароля при первом входе (Б9): снимается после смены пароля.
+    must_change_password = Column(Boolean, nullable=False, default=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
@@ -91,6 +105,57 @@ class UserPreference(Base):
     )
     resource = Column(String(100), nullable=False)
     data = Column(JSON, nullable=False)
+
+
+class RolePermission(Base):
+    """Права роли на ресурс/раздел (задача 2.6).
+
+    Матрица «роль × ресурс»: видимость раздела меню (`menu`) и права на действия
+    (`can_read/can_create/can_edit/can_delete`). Строка появляется для пары
+    (роль, ресурс): сначала материализуется из `permissions.default_permissions()`
+    (миграция `0022`), далее редактируется админом. Отсутствующая строка в рантайме
+    означает «дефолт из кода» (см. `permissions.effective_permissions`).
+
+    Роли `admin` и `resident` фиксированы (`permissions.FIXED_ROLES`): строки для них
+    не влияют на доступ. Ресурсы из `LOCKED_ACTIONS` всё равно запрещены к записи.
+
+    `role` — имя члена `UserRole` (напр. 'cashier'), как и `users.role`; `resource` —
+    ключ ресурса/раздела (см. `permissions.PERMISSION_CATALOG`).
+    """
+
+    __tablename__ = "role_permissions"
+    __table_args__ = (
+        UniqueConstraint("role", "resource", name="uq_role_permissions_role_resource"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    role = Column(String(20), nullable=False)
+    resource = Column(String(64), nullable=False)
+    menu = Column(Boolean, nullable=False, default=False)
+    can_read = Column(Boolean, nullable=False, default=False)
+    can_create = Column(Boolean, nullable=False, default=False)
+    can_edit = Column(Boolean, nullable=False, default=False)
+    can_delete = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+    updated_by = Column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class AppSetting(Base):
+    """Глобальные настройки приложения (Б3 и далее): key/value, правит админ.
+
+    Хранит общесистемные параметры (например «Префикс лицевого счёта»).
+    Отсутствующая строка = значение по умолчанию из `app_settings.DEFAULTS`.
+    """
+
+    __tablename__ = "app_settings"
+    key = Column(String(64), primary_key=True)
+    value = Column(Text)
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+    updated_by = Column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 # --- СПРАВОЧНИКИ ---
@@ -131,6 +196,34 @@ class Apartment(Base):
     meter_readings = relationship(
         "MeterReading", back_populates="apartment", passive_deletes=True
     )
+    residents = relationship(
+        "ApartmentResident", back_populates="apartment", passive_deletes=True
+    )
+
+
+class ApartmentResident(Base):
+    """Сведения о жильцах квартиры (Б8, фаза 1).
+
+    Состав жителей по периодам: кто проживает в квартире с/по какую дату.
+    Используется тарифом «На человека» — число жильцов на дату начисления.
+    """
+
+    __tablename__ = "apartment_residents"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    apartment_id = Column(
+        Integer, ForeignKey("apartments.id", ondelete="CASCADE"), nullable=False
+    )
+    full_name = Column(String(255), nullable=False)
+    birth_date = Column(Date, nullable=True)
+    role = Column(
+        Enum(ResidentRole, native_enum=False), nullable=False, default=ResidentRole.tenant
+    )
+    # Период проживания: с какой даты по какую (NULL — по настоящее время).
+    date_from = Column(Date, nullable=True)
+    date_to = Column(Date, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    apartment = relationship("Apartment", back_populates="residents")
 
 
 class Account(Base):
@@ -158,6 +251,11 @@ class CashPoint(Base):
     __tablename__ = "cash_points"
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False)
+    # Тип: «Касса» (наличные) или «Счёт» (банковский). Определяет, какие операции
+    # допустимы (приход/расход в кассу ↔ cash; в банк ↔ bank) — см. services.py.
+    kind = Column(
+        Enum(CashPointKind, native_enum=False), nullable=False, default=CashPointKind.cash
+    )
     is_active = Column(Boolean, default=True)
 
     transactions = relationship("Transaction", back_populates="cash_point", passive_deletes=True)
@@ -501,16 +599,19 @@ class AccountsRegister(Base):
 
 
 class CashRegister(Base):
-    """Регистр денежных средств (история движения денег по лицевому счёту).
+    """Регистр денежных средств (история движения денег по кассе/счёту).
 
     Первичный регистр: заполняется документом «Приход/Расход» (Transaction).
-    НЕ является задолженностью жителя — это денежный остаток на счёте/кассе:
-    balance_after = SUM(income - expense), где income = реальный приход денег,
-    expense = реальный расход. Смысл знаков см. в блоке «КОНВЕНЦИЯ ЗНАКОВ».
+    НЕ является задолженностью жителя — это ДЕНЕЖНЫЙ остаток:
+    `balance_after` = нарастающий остаток денег ПО КАССЕ/СЧЁТУ (`cash_point_id`) после
+    операции: Σ(income − expense) по строкам этого кэшпоинта в порядке (operation_date, id).
+    Инвариант: у последней строки кэшпоинта значение равно Σ(income − expense) по нему.
+    Смысл знаков — в блоке «КОНВЕНЦИЯ ЗНАКОВ».
     """
     __tablename__ = "cash_register"
-    # Индекс для быстрого пересчёта баланса регистра по счёту (ORDER BY operation_date, id).
+    # Индексы: по кэшпоинту (нарастающий остаток по кассе) и по счёту (фильтры/сверки).
     __table_args__ = (
+        Index("idx_cash_register_cashpoint_date", "cash_point_id", "operation_date", "id"),
         Index("idx_cash_register_account_date", "account_id", "operation_date", "id"),
     )
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -529,6 +630,13 @@ class CashRegister(Base):
     contractor_id = Column(
         Integer, ForeignKey("counterparties.id", ondelete="RESTRICT"), nullable=True
     )
+    # Касса/счёт операции (зеркало из шапки «Приход/Расход») — по нему ведётся
+    # нарастающий ДЕНЕЖНЫЙ остаток `balance_after` и группируется «Регистр денежных
+    # средств». Nullable — как и у самой шапки (`transactions.cash_point_id`);
+    # в фактических данных пустых нет (все операции привязаны к кассе/счёту).
+    cash_point_id = Column(
+        Integer, ForeignKey("cash_points.id", ondelete="RESTRICT"), nullable=True
+    )
 
     income = Column(Numeric(15, 2), default=0)
     expense = Column(Numeric(15, 2), default=0)
@@ -537,6 +645,7 @@ class CashRegister(Base):
     account = relationship("Account", back_populates="cash_register")
     transaction = relationship("Transaction", back_populates="cash_register")
     contractor = relationship("Counterparty", foreign_keys=[contractor_id])
+    cash_point = relationship("CashPoint")
 
 
 # --- ОБРАБОТЧИКИ ---
@@ -565,10 +674,9 @@ _REGISTER_RUNNING_UPDATE = """
                    ORDER BY operation_date ASC, id ASC
                ) AS running
         FROM {table}
-        -- IS NOT DISTINCT FROM (а не `=`) — чтобы группа строк БЕЗ лицевого счёта
-        -- (account_id IS NULL: расходы кассы, входящий остаток) тоже получала
-        -- нарастающий итог. С `= :account_id` такие строки не матчились (NULL = NULL
-        -- → NULL) и balance_after оставался нулём.
+        -- IS NOT DISTINCT FROM (а не `=`) — чтобы группа строк с пустым account_id
+        -- (если такие есть) тоже получала нарастающий итог: с `= :account_id`
+        -- они бы не матчились (NULL = NULL → NULL).
         WHERE account_id IS NOT DISTINCT FROM :account_id
     )
     UPDATE {table} ar
@@ -578,7 +686,45 @@ _REGISTER_RUNNING_UPDATE = """
 """
 
 # Имена таблиц пересчёта — безопасные программные константы (без пользовательского ввода).
-_RECALC_TABLES = ("accounts_register", "cash_register")
+# Только взаиморасчёты: там нарастающий итог ведётся ПО ЛИЦЕВОМУ СЧЁТУ (долг жителя).
+# Денежный регистр считается иначе — по кэшпоинту (см. _CASH_RUNNING_UPDATE).
+_RECALC_TABLES = ("accounts_register",)
+
+
+# Нарастающий остаток денег ПО КАССЕ/СЧЁТУ (cash_register):
+#   balance_after = Σ(income − expense) по строкам этого `cash_point_id`,
+#   в порядке (operation_date, id), включая текущую строку.
+# `IS DISTINCT FROM` в UPDATE — чтобы повторные пересчёты писали только изменившиеся
+# строки (дешёвые no-op прогоны и массовые операции).
+_CASH_RUNNING_UPDATE = """
+    WITH ordered AS (
+        SELECT id,
+               SUM(income - expense) OVER (
+                   PARTITION BY cash_point_id
+                   ORDER BY operation_date ASC, id ASC
+               ) AS running
+        FROM cash_register
+    )
+    UPDATE cash_register ar
+    SET balance_after = ordered.running
+    FROM ordered
+    WHERE ar.id = ordered.id
+      AND ar.balance_after IS DISTINCT FROM ordered.running
+"""
+
+
+def recalculate_cash_register_balance(executor) -> None:
+    """Пересчитывает `balance_after` РЕГИСТРА ДЕНЕЖНЫХ СРЕДСТВ как нарастающий
+    остаток денег по каждой кассе/счёту (`cash_point_id`) — см. `_CASH_RUNNING_UPDATE`.
+
+    Пересчитывается весь регистр (все кэшпоинты) — операция затрагивает порядок итогов
+    только внутри своего кэшпоинта, но SQL-окно всё равно считает по всей таблице; при
+    текущих объёмах (≈2 тыс. строк) это миллисекунды, а режим «писать только изменившиеся»
+    делает повторные вызовы почти бесплатными.
+
+    Вызывается ORM-событиями `transaction_after_*` и разовым скриптом бэкфилла.
+    """
+    executor.execute(text(_CASH_RUNNING_UPDATE))
 
 
 def recalculate_register_balance(executor, table: str, account_id) -> None:
@@ -586,9 +732,12 @@ def recalculate_register_balance(executor, table: str, account_id) -> None:
     «с нуля» по нарастающему итогу (SUM(income - expense)) в хронологическом порядке
     (operation_date, затем id).
 
-    Группа определяется `account_id`; для операций без лицевого счёта
-    (`account_id = None`, например расходы кассы) пересчитывается группа
-    `account_id IS NULL` — это отдельный нарастающий итог.
+    Группа определяется `account_id` (для операций без лицевого счёта пересчитывается
+    группа `account_id IS NULL` — отдельный нарастающий итог).
+
+    Сейчас применяется ТОЛЬКО к взаиморасчётам (`accounts_register`, долг жителя).
+    Денежный регистр (`cash_register`) считается иначе — по кассе/счёту, см.
+    `recalculate_cash_register_balance`.
 
     Функция МЕХАНИЧЕСКАЯ — она не знает смысла income/expense (долг или денежный
     остаток — см. блок «КОНВЕНЦИЯ ЗНАКОВ»). Принимает имя таблицы из фиксированного
@@ -614,25 +763,34 @@ def recalculate_account_balance(executor, account_id) -> None:
     recalculate_register_balance(executor, "accounts_register", account_id)
 
 
-def recalculate_cash_balance(executor, account_id) -> None:
-    """Пересчитывает balance_after регистра денежных средств (cash_register)."""
-    recalculate_register_balance(executor, "cash_register", account_id)
+def recalculate_cash_balance(executor, account_id=None) -> None:
+    """Пересчитывает `balance_after` регистра денежных средств (cash_register).
+
+    Сигнатура с `account_id` сохранена для совместимости с существующими вызовами
+    (миграции/события), но параметр больше не используется: денежный остаток ведётся
+    ПО КАССЕ/СЧЁТУ, поэтому пересчитывается весь регистр (см.
+    `recalculate_cash_register_balance`).
+    """
+    recalculate_cash_register_balance(executor)
 
 
 def insert_cash_register_entry(connection, target) -> None:
     """Создаёт запись cash_register для вставленной транзакции («Приход/Расход»)."""
     income, expense = transaction_income_expense(target)
     connection.execute(
-        text("INSERT INTO cash_register (operation_date, account_id, transaction_id, contractor_id, income, expense, balance_after) "
-             "VALUES (:operation_date, :account_id, :transaction_id, :contractor_id, :income, :expense, :balance_after)"),
+        text("INSERT INTO cash_register (operation_date, account_id, transaction_id, contractor_id, cash_point_id, income, expense, balance_after) "
+             "VALUES (:operation_date, :account_id, :transaction_id, :contractor_id, :cash_point_id, :income, :expense, :balance_after)"),
         {
             "operation_date": target.transaction_date or datetime.now(),
             "account_id": target.account_id,
             "transaction_id": target.id,
             "contractor_id": target.contractor_id,
+            # Зеркало кассы/счёта из шапки — по нему ведётся нарастающий остаток
+            # (recalculate_cash_register_balance).
+            "cash_point_id": target.cash_point_id,
             "income": income,
             "expense": expense,
-            # значение пересчитается ниже по всей истории аккаунта
+            # значение пересчитается ниже по всей истории кассы/счёта
             "balance_after": 0,
         }
     )
@@ -642,12 +800,14 @@ def update_cash_register_entry(connection, target) -> None:
     """Обновляет содержимое записи cash_register для изменённой транзакции."""
     income, expense = transaction_income_expense(target)
     connection.execute(
-        text("UPDATE cash_register SET operation_date = :operation_date, contractor_id = :contractor_id, income = :income, expense = :expense "
+        text("UPDATE cash_register SET operation_date = :operation_date, contractor_id = :contractor_id, cash_point_id = :cash_point_id, income = :income, expense = :expense "
              "WHERE transaction_id = :transaction_id"),
         {
             "operation_date": target.transaction_date or datetime.now(),
             "transaction_id": target.id,
             "contractor_id": target.contractor_id,
+            # Зеркало кассы/счёта из шапки (может измениться при редактировании).
+            "cash_point_id": target.cash_point_id,
             "income": income,
             "expense": expense,
         }
@@ -657,7 +817,7 @@ def update_cash_register_entry(connection, target) -> None:
 @event.listens_for(Transaction, "after_insert")
 def transaction_after_insert(mapper, connection, target):
     insert_cash_register_entry(connection, target)
-    recalculate_cash_balance(connection, target.account_id)
+    recalculate_cash_register_balance(connection)
 
 
 @event.listens_for(Transaction, "after_update")
@@ -672,14 +832,14 @@ def transaction_after_update(mapper, connection, target):
         update_cash_register_entry(connection, target)
     else:
         insert_cash_register_entry(connection, target)
-    recalculate_cash_balance(connection, target.account_id)
+    recalculate_cash_register_balance(connection)
 
 
 @event.listens_for(Transaction, "after_delete")
 def transaction_after_delete(mapper, connection, target):
     # Каскадное удаление cash_register для этой транзакции выполняется СУБД;
-    # пересчитываем балансы оставшихся записей аккаунта.
-    recalculate_cash_balance(connection, target.account_id)
+    # пересчитываем остатки оставшихся записей кассы/счёта.
+    recalculate_cash_register_balance(connection)
 
 
 # --- КВИТАНЦИИ (документ-шапка + строки) ---

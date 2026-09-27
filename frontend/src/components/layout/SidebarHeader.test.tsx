@@ -14,8 +14,15 @@ describe("SidebarHeader", () => {
         expect(screen.getByText(__APP_VERSION__)).toBeTruthy();
     });
 
-    it("в свёрнутом виде название не показывается", () => {
+    it("показывает логотип перед названием", () => {
+        render(<SidebarHeader isCollapsed={false} onToggle={() => {}} />);
+        const logo = screen.getByAltText("FTH") as HTMLImageElement;
+        expect(logo.getAttribute("src")).toBe("/FTH.svg");
+    });
+
+    it("в свёрнутом виде название и логотип не показываются", () => {
         render(<SidebarHeader isCollapsed onToggle={() => {}} />);
         expect(screen.queryByText("Family Townhouse")).toBeNull();
+        expect(screen.queryByAltText("FTH")).toBeNull();
     });
 });

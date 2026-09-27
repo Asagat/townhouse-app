@@ -420,43 +420,50 @@ def test_rebuild_is_deterministic(db, account_factory):
     assert float(first_balance) == 600.0
 
 
-# --- cash_register: balance_after для строк без лицевого счёта ---
+# --- cash_register: остаток по кассе (balance_after) ---
 
 
-def test_cash_balance_recalculated_for_rows_without_account(db, account_factory):
-    """Строки cash_register без привязки к л/с (account_id IS NULL — расходы кассы,
-    входящий остаток) тоже получают нарастающий итог balance_after.
+def test_cash_balance_includes_rows_without_account(db, account_factory):
+    """`balance_after` = нарастающий остаток ПО КАССЕ/СЧЁТУ (ТД-6): строки без л/с
+    (расходы кассы) входят в тот же итог, что и строки с л/с той же кассы.
 
-    Регрессия: пересчёт шёл с `WHERE account_id = :account_id`, а `NULL = NULL` не
-    истинно, поэтому такие строки навсегда оставались с balance_after = 0.
+    Регрессия: раньше итог вёлся по лицевому счёту (`WHERE account_id =
+    :account_id`), а `NULL = NULL` не истинно — операции без л/с навсегда
+    оставались с balance_after = 0. Теперь итог ведётся по `cash_point_id`,
+    поэтому приход по л/с и расходы без л/с дают единый нарастающий остаток.
     """
     from datetime import datetime
     from decimal import Decimal
 
-    rec = account_factory("nullbal")
+    rec = account_factory("cpbal")
     # Даты заведомо раньше всех существующих операций — не зависим от наполнения БД.
     t1 = Transaction(
-        account_id=None, cash_point_id=rec["cash_point_id"],
-        transaction_type=TransactionTypeEnum.out_cash, amount=Decimal("100"),
+        account_id=rec["account_id"], cash_point_id=rec["cash_point_id"],
+        transaction_type=TransactionTypeEnum.in_cash, amount=Decimal("1000"),
         transaction_date=datetime(2016, 12, 1, 10, 0),
     )
     t2 = Transaction(
         account_id=None, cash_point_id=rec["cash_point_id"],
-        transaction_type=TransactionTypeEnum.out_cash, amount=Decimal("50"),
+        transaction_type=TransactionTypeEnum.out_cash, amount=Decimal("100"),
         transaction_date=datetime(2016, 12, 2, 10, 0),
     )
-    db.add_all([t1, t2])
+    t3 = Transaction(
+        account_id=None, cash_point_id=rec["cash_point_id"],
+        transaction_type=TransactionTypeEnum.out_cash, amount=Decimal("50"),
+        transaction_date=datetime(2016, 12, 3, 10, 0),
+    )
+    db.add_all([t1, t2, t3])
     db.commit()
     try:
         rows = db.execute(
-            text("SELECT balance_after FROM cash_register WHERE account_id IS NULL "
-                 "AND transaction_id IN (:a, :b) ORDER BY operation_date, id"),
-            {"a": t1.id, "b": t2.id},
+            text("SELECT balance_after FROM cash_register WHERE cash_point_id = :c "
+                 "ORDER BY operation_date, id"),
+            {"c": rec["cash_point_id"]},
         ).scalars().all()
-        # Нарастающий итог по группе «без л/с»: -100, затем -150 (два расхода).
-        assert [float(x) for x in rows] == [-100.0, -150.0]
+        # Нарастающий остаток по кассе: +1000, −100→900, −50→850.
+        assert [float(x) for x in rows] == [1000.0, 900.0, 850.0]
     finally:
-        # Автоочистка идёт по account_id и такие строки не удалит.
-        db.delete(t1)
-        db.delete(t2)
+        # Автоочистка идёт по account_id, строки без л/с она не удалит — чистим сами.
+        for t in (t1, t2, t3):
+            db.delete(t)
         db.commit()

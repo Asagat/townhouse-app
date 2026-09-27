@@ -132,6 +132,11 @@ export const categories: Category[] = [
               icon: "fa-solid fa-user-shield",
             },
             {
+              key: "prefixes",
+              label: "Префиксы",
+              icon: "fa-solid fa-gear",
+            },
+            {
               key: "cabinet_admin",
               label: "Личный кабинет жителя",
               icon: "fa-solid fa-user-tie",

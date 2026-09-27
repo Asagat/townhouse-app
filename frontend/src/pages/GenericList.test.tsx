@@ -8,21 +8,24 @@
 // именно форматирование таблицы.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Refine } from "@refinedev/core";
 import { GenericList } from "./GenericList";
+import { ReferenceDrillProvider } from "../components/common/ReferenceDrillProvider";
+import { clearToken, setIdentity } from "../auth/token";
 
 // Одинокая запись «Приход/Расход» со всеми типами значений для проверки колонок.
+// У вложенных справочников есть id — для «проваливания» в связанные записи (2.21).
 const TRANSACTION = {
     id: 1,
     title: "Приход в кассу",
     transaction_date: "2026-08-24T10:00:00",
-    cash_point: { name: "Основная касса" },
-    apartment: { apartment_number: "5" },
-    account: { account_number: "LS/0001" },
-    article: { name: "Поступления от жителей" },
-    contractor: { full_name: "Иванов Иван" },
-    owner: { full_name: "Петров Пётр" },
+    cash_point: { id: 2, name: "Основная касса" },
+    apartment: { id: 5, apartment_number: "5" },
+    account: { id: 9, account_number: "LS/0001" },
+    article: { id: 3, name: "Поступления от жителей" },
+    contractor: { id: 7, full_name: "Иванов Иван" },
+    owner: { id: 42, full_name: "Петров Пётр" },
     transaction_type: "in_cash",
     amount: 1234.5,
     notes: "Комментарий А",
@@ -136,5 +139,105 @@ describe("GenericList — форматирование колонок списк
         // getByLabelText бросает, если чек-бокса нет; по умолчанию колонка видима.
         const idCheckbox = screen.getByLabelText("ID") as HTMLInputElement;
         expect(idCheckbox.checked).toBe(true);
+    });
+});
+
+describe("GenericList — экспорт списка (2.2)", () => {
+    it("кнопка «Экспорт → Excel» запрашивает файл с _export=xlsx и колонками", async () => {
+        // Перехватываем fetch (его использует authedFetch скачивания) и не даём
+        // браузеру реально создавать/скачивать объектный URL.
+        const fetchMock = vi.fn(
+            async (_url: RequestInfo | URL) =>
+                new Response(new Blob(["data"]), {
+                    status: 200,
+                    headers: {
+                        "Content-Type":
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    },
+                }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        const createUrl = vi.fn(() => "blob:test");
+        const revokeUrl = vi.fn();
+        (URL as any).createObjectURL = createUrl;
+        (URL as any).revokeObjectURL = revokeUrl;
+        // Скачивание в jsdom иначе даёт «Not implemented: navigation» — гасим клик <a>.
+        const anchorClick = vi
+            .spyOn(HTMLAnchorElement.prototype, "click")
+            .mockImplementation(() => {});
+
+        try {
+            renderTransactionsList();
+            await screen.findByText(/Комментарий А/u);
+
+            // Кнопка экспорта — иконка «скачать» (DownloadOutlined).
+            const exportBtn = document.querySelector(".anticon-download")?.closest("button");
+            expect(exportBtn).not.toBeNull();
+            fireEvent.click(exportBtn as HTMLElement);
+
+            fireEvent.click(await screen.findByText("Excel (.xlsx)"));
+
+            await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+            const calledUrl = String(fetchMock.mock.calls[0][0]);
+            expect(calledUrl).toContain("/api/transactions?");
+            expect(calledUrl).toContain("_export=xlsx");
+            expect(calledUrl).toContain("_columns=");
+            // Колонки передаются JSON-ом (с ключом и подписью).
+            expect(decodeURIComponent(calledUrl)).toContain('"label":"Сумма"');
+        } finally {
+            anchorClick.mockRestore();
+            vi.unstubAllGlobals();
+        }
+    });
+});
+
+describe("GenericList — проваливание по ссылке (2.21)", () => {
+    it("кнопка «…» в ссылочной колонке открывает связанную запись", async () => {
+        setIdentity({
+            id: 1,
+            username: "admin",
+            full_name: "Админ",
+            role: "admin",
+            role_name: "Администратор",
+        });
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async (url: RequestInfo | URL) => {
+                const u = String(url);
+                const body = u.includes("/meta/owners")
+                    ? { fields: [{ name: "full_name", label: "ФИО", type: "string", required: true }] }
+                    : { id: 42, full_name: "Петров Пётр" };
+                return new Response(JSON.stringify(body), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" },
+                });
+            }),
+        );
+
+        try {
+            render(
+                <ReferenceDrillProvider>
+                    <Refine dataProvider={mockDataProvider}>
+                        <GenericList resourceName="transactions" />
+                    </Refine>
+                </ReferenceDrillProvider>,
+            );
+            await screen.findByText(/Комментарий А/u);
+
+            // Кнопка «…» в ячейке собственника («Петров Пётр»).
+            const ownerCell = rowCellByText(
+                screen.getByText(/Комментарий А/u).closest("tr") as HTMLElement,
+                /Петров Пётр/u,
+            );
+            const drillButton = ownerCell.querySelector(".anticon-ellipsis")?.closest("button");
+            expect(drillButton).not.toBeNull();
+            fireEvent.click(drillButton as HTMLElement);
+
+            expect(await screen.findByText("Просмотр: Контрагент")).toBeTruthy();
+            expect(await screen.findByDisplayValue("Петров Пётр")).toBeTruthy();
+        } finally {
+            clearToken();
+            vi.unstubAllGlobals();
+        }
     });
 });

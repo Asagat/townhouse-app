@@ -234,6 +234,11 @@ const MONTH_SELECT_OPTIONS: SelectOption[] = [
     { value: 12, label: "Декабрь" },
 ];
 
+const CASH_POINT_KIND_OPTIONS: SelectOption[] = [
+    { value: "cash", label: "Касса" },
+    { value: "bank", label: "Счёт" },
+];
+
 const RESOURCE_SELECT_OPTIONS: Record<string, Record<string, SelectOption[]>> = {
     tariffs: {
         status: [
@@ -244,6 +249,11 @@ const RESOURCE_SELECT_OPTIONS: Record<string, Record<string, SelectOption[]>> = 
     receipt_documents: {
         period_month: MONTH_SELECT_OPTIONS,
     },
+    // Тип «Касса/Счёт» (2.15): select-фильтр по типу кэшпоинта.
+    cash_points: { kind: CASH_POINT_KIND_OPTIONS },
+    cash_register: { "cash_point.kind": CASH_POINT_KIND_OPTIONS },
+    payments: { "cash_point.kind": CASH_POINT_KIND_OPTIONS },
+    transactions: { "cash_point.kind": CASH_POINT_KIND_OPTIONS },
 };
 
 export const isResourceSelectFilter = (resourceName: string, columnKey: string): boolean =>

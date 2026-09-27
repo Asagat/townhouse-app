@@ -1,24 +1,25 @@
-# tests/test_control_sums_vs_source.py
+# tests/check_sum/test_control_sums_vs_source.py
 """Контрольные суммы: регистры БД против исходного файла миграции.
 
 Сверяет «файл-источник» (templates/Миграция данных FTH.xlsx) с фактическим
 состоянием регистров dev/pre-prod БД:
 
-  - начисления (accruals_register): суммы по каждой квартире, итог и число строк
-    (квартира = apartments.apartment_number, в источнике Код_Квартира == Номер == 1..17);
   - касса (cash_register):
       * расход (expense) итог == сумме листа «Касса-Расход»;
       * приход по квартире == «Касса-Приход» по квартире ЗА ВЫЧЕТОМ сторно
         (возвратов) — в БД жительские платежи учитываются нетто;
       * итоговый приход (income) == приход источника минус ВСЕ сторно (включая
-        операции без квартиры).
+        операции без квартиры) + входящее сальдо кассы.
+
+Начисления сверяются отдельно и полнее — `test_accruals_sums_method.py`
+(6 срезов, файл-сырец); здесь остался только независимый базовый срез по кассе.
 
 Проверка работает, только если доступен файл-источник (в dev/CI-контейнере backend
 каталог templates/ не примонтирован — задайте переменную MIGRATION_SRC_XLSX или
 положите файл по пути ../templates/Миграция данных FTH.xlsx). Если файла или
 openpyxl нет — тест пропускается (pytest.skip), чтобы набор оставался зелёным.
 
-Запуск с файлом:  MIGRATION_SRC_XLSX=/path/Миграция данных FTH.xlsx pytest tests/test_control_sums_vs_source.py -q
+Запуск с файлом:  MIGRATION_SRC_XLSX=/path/Миграция данных FTH.xlsx pytest tests/check_sum -q
 """
 
 import importlib.util
@@ -86,18 +87,6 @@ def source():
     return {"accruals": acc_rows, "cash": cash_rows}
 
 
-def _apt_accruals(db):
-    """sum(amount) начислений по квартире (по accounts → apartments)."""
-    rows = db.execute(text(
-        "SELECT ap.apartment_number, COALESCE(SUM(a.amount), 0) "
-        "FROM accruals_register a "
-        "JOIN accounts acc ON acc.id = a.account_id "
-        "JOIN apartments ap ON ap.id = acc.apartment_id "
-        "GROUP BY ap.apartment_number"
-    )).fetchall()
-    return {int(r[0]): Decimal(str(r[1])) for r in rows}
-
-
 def _cash_by_apartment(db, kind: str):
     col = "income" if kind == "income" else "expense"
     rows = db.execute(text(
@@ -120,34 +109,6 @@ def _assert_close_dicts(left: dict[int, Decimal], right: dict[int, Decimal], lab
     assert not diffs, (
         f"{label}: расхождения (квартира, ожидаемо, в БД):\n"
         + "\n".join(f"  кв.{k}: {a:.2f} vs {b:.2f} (Δ={b - a:.2f})" for k, a, b in diffs)
-    )
-
-
-@pytest.mark.skip(reason=(
-    "Устарел: источник build_accruals_plan пропускает кв13/«Вывоз мусора», который восстановлен "
-    "(recover_kv13_garbage_accruals.py, +114 500); актуальная сверка начислений — "
-    "test_accruals_sums_method в этой папке (6 срезов, файл-сырец)."
-))
-def test_accruals_match_per_apartment_and_total(db, source):
-    """Замещён методом из test_accruals_sums_method — оставлен маркером во избежание ложного фейла."""
-    src_rows = source["accruals"]
-    src_by_apt: dict[int, Decimal] = defaultdict(Decimal)
-    for r in src_rows:
-        if r[0] is not None:
-            src_by_apt[int(r[0])] += r[4]
-
-    db_by_apt = _apt_accruals(db)
-    _assert_close_dicts(src_by_apt, db_by_apt, "Начисления по квартирам")
-
-    total_src = sum(src_by_apt.values())
-    total_db = sum(db_by_apt.values())
-    assert abs(total_src - total_db) < Decimal("0.01"), (
-        f"Итог начислений: файл {total_src:.2f} vs БД {total_db:.2f}"
-    )
-
-    db_count = int(db.execute(text("SELECT count(*) FROM accruals_register")).scalar())
-    assert len(src_rows) == db_count, (
-        f"Число строк начислений: файл {len(src_rows)} vs БД {db_count}"
     )
 
 

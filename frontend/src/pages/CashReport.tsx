@@ -14,7 +14,16 @@ const { RangePicker } = DatePicker;
 interface CashPointRow {
     cash_point_id: number;
     cash_point_name: string;
+    kind: string;
+    kind_code: string;
     is_active: boolean;
+    opening: number;
+    income: number;
+    expense: number;
+    closing: number;
+}
+
+interface KindTotals {
     opening: number;
     income: number;
     expense: number;
@@ -37,6 +46,7 @@ interface MovementRow {
 interface ReportData {
     period: { from: string | null; to: string | null };
     totals: { opening: number; income: number; expense: number; closing: number };
+    totals_by_kind: { cash: KindTotals; bank: KindTotals };
     cash_points: CashPointRow[];
     movements: MovementRow[];
 }
@@ -104,6 +114,23 @@ export const CashReport = () => {
 
     const pointCols = [
         { title: "Касса", dataIndex: "cash_point_name", key: "cash_point_name" },
+        { title: "Тип", dataIndex: "kind", key: "kind" },
+        { title: "Остаток на начало", dataIndex: "opening", key: "opening", align: "right" as const, render: (v: number) => formatMoney(v) },
+        { title: "Приход", dataIndex: "income", key: "income", align: "right" as const, render: (v: number) => formatMoney(v) },
+        { title: "Расход", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => formatMoney(v) },
+        { title: "Остаток на конец", dataIndex: "closing", key: "closing", align: "right" as const, render: (v: number) => formatMoney(v) },
+    ];
+
+    // Раздельные итоги по типу (2.15): наличные / безнал.
+    const kindTotalsRows = data
+        ? [
+              { key: "cash", label: "Наличные (касса)", ...data.totals_by_kind.cash },
+              { key: "bank", label: "Безналичные (счёт)", ...data.totals_by_kind.bank },
+          ]
+        : [];
+
+    const kindTotalsCols = [
+        { title: "Тип", dataIndex: "label", key: "label" },
         { title: "Остаток на начало", dataIndex: "opening", key: "opening", align: "right" as const, render: (v: number) => formatMoney(v) },
         { title: "Приход", dataIndex: "income", key: "income", align: "right" as const, render: (v: number) => formatMoney(v) },
         { title: "Расход", dataIndex: "expense", key: "expense", align: "right" as const, render: (v: number) => formatMoney(v) },
@@ -158,6 +185,10 @@ export const CashReport = () => {
                         <Col span={6}><Card size="small"><Statistic title="Расход" value={totals.expense} precision={2} /></Card></Col>
                         <Col span={6}><Card size="small"><Statistic title="Остаток на конец" value={totals.closing} precision={2} /></Card></Col>
                     </Row>
+
+                    <Card title="Итоги по типам" style={{ marginBottom: 16 }}>
+                        <Table rowKey="key" size="small" pagination={false} dataSource={kindTotalsRows} columns={kindTotalsCols} />
+                    </Card>
 
                     <Card title="По кассам" style={{ marginBottom: 16 }}>
                         <Table rowKey="cash_point_id" size="small" pagination={false} dataSource={data.cash_points} columns={pointCols} />

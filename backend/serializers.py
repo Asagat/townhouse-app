@@ -16,6 +16,7 @@ from models import (
     AccrualDocument,
     AnalyticArticle,
     Apartment,
+    ApartmentResident,
     CashPoint,
     CashRegister,
     Counterparty,
@@ -43,6 +44,7 @@ def _user_serializer(user: User) -> dict:
         "role_name": user.role.value if hasattr(user.role, "value") else str(user.role),
         "is_active": user.is_active,
         "account_id": user.account_id,
+        "must_change_password": bool(getattr(user, "must_change_password", False)),
     }
 
 
@@ -114,6 +116,18 @@ def apartment_serializer(item: Apartment) -> dict:
     }
 
 
+def apartment_resident_serializer(item: ApartmentResident) -> dict:
+    return {
+        "id": item.id,
+        "apartment_id": item.apartment_id,
+        "full_name": item.full_name,
+        "birth_date": item.birth_date.isoformat() if item.birth_date else None,
+        "role": item.role.value if hasattr(item.role, "value") else str(item.role),
+        "date_from": item.date_from.isoformat() if item.date_from else None,
+        "date_to": item.date_to.isoformat() if item.date_to else None,
+    }
+
+
 def account_serializer(item: Account) -> dict:
     apartment = item.apartment
     owner = apartment.owner if apartment else None
@@ -140,6 +154,8 @@ def cash_point_serializer(item: CashPoint) -> dict:
     return {
         "id": item.id,
         "name": item.name,
+        "kind": item.kind.value if hasattr(item.kind, "value") else str(item.kind),
+        "kind_code": item.kind.name if hasattr(item.kind, "name") else str(item.kind),
         "is_active": item.is_active,
     }
 
@@ -205,6 +221,8 @@ def transaction_serializer(item: Transaction) -> dict:
         result["cash_point"] = {
             "id": cash_point.id,
             "name": cash_point.name,
+            "kind": cash_point.kind.value if hasattr(cash_point.kind, "value") else str(cash_point.kind),
+            "kind_code": cash_point.kind.name if hasattr(cash_point.kind, "name") else str(cash_point.kind),
         }
     else:
         result["cash_point"] = None
@@ -494,6 +512,7 @@ def cash_register_serializer(item: CashRegister) -> dict:
         "account_id": item.account_id,
         "transaction_id": item.transaction_id,
         "contractor_id": item.contractor_id,
+        "cash_point_id": item.cash_point_id,
         "article_id": item.transaction.article_id if item.transaction else None,
         "income": float(item.income) if item.income is not None else 0.0,
         "expense": float(item.expense) if item.expense is not None else 0.0,
@@ -528,6 +547,16 @@ def cash_register_serializer(item: CashRegister) -> dict:
     else:
         result["contractor"] = None
     result["contractor_name"] = item.contractor.full_name if item.contractor else None
+    if item.cash_point:
+        result["cash_point"] = {
+            "id": item.cash_point.id,
+            "name": item.cash_point.name,
+            "kind": item.cash_point.kind.value if hasattr(item.cash_point.kind, "value") else str(item.cash_point.kind),
+            "kind_code": item.cash_point.kind.name if hasattr(item.cash_point.kind, "name") else str(item.cash_point.kind),
+        }
+    else:
+        result["cash_point"] = None
+    result["cash_point_name"] = item.cash_point.name if item.cash_point else None
     if item.transaction and item.transaction.article:
         art = item.transaction.article
         result["article"] = {
@@ -650,6 +679,7 @@ SERIALIZERS = {
     ]),
     Apartment: apartment_serializer,
     Account: account_serializer,
+    ApartmentResident: apartment_resident_serializer,
     CashPoint: cash_point_serializer,
     AnalyticArticle: analytic_article_serializer,
     Transaction: transaction_serializer,

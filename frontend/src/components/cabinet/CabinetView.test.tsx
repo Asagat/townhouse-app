@@ -186,4 +186,17 @@ describe("CabinetView", () => {
         expect(plain(value)).not.toContain("₸");
         expect(value.style.textAlign).toBe("right");
     });
+
+    it("адаптив (2.22): корень ЛК отмечен классом cabinet-view, период — на всю ширину на телефоне", async () => {
+        const { container } = renderView();
+
+        // CSS-хук компактных карточек на телефоне (media query в index.css).
+        expect(container.querySelector(".cabinet-view")).toBeTruthy();
+
+        // В jsdom matchMedia отдаёт «не совпало» → узкий экран: контролы периода
+        // растягиваются на всю ширину (не остаются фиксированные 200px).
+        const periodSelect = container.querySelector(".cabinet-view .ant-select");
+        expect(periodSelect).toBeTruthy();
+        expect((periodSelect as HTMLElement).getAttribute("style") ?? "").toMatch(/width:\s*100%/u);
+    });
 });

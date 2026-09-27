@@ -22,6 +22,9 @@ from models import (
     AccrualDocument,
     AnalyticArticle,
     AnalyticKind,
+    ApartmentResident,
+    CashPoint,
+    CashPointKind,
     Meter,
     MeterReading,
     ServiceType,
@@ -122,6 +125,25 @@ def resolve_transaction_values(
         "amount": coerce_field_value(amount, {"type": "decimal", "label": "Сумма"}),
         "notes": notes,
     }
+
+    # Касса/Счёт: должна существовать и соответствовать типу операции (2.15):
+    # приход/расход В КАССУ (in_cash/out_cash) — только кэшпоинт типа «Касса»;
+    # в/из банка (in_bank/out_bank) — только «Счёт».
+    cash_point = db.get(CashPoint, values["cash_point_id"])
+    if cash_point is None:
+        raise HTTPException(status_code=422, detail="Касса/Счёт не найдена")
+    is_cash_op = values["transaction_type"] in (
+        TransactionTypeEnum.in_cash, TransactionTypeEnum.out_cash
+    )
+    expected_kind = CashPointKind.cash if is_cash_op else CashPointKind.bank
+    if cash_point.kind != expected_kind:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Операция «{values['transaction_type'].value}» не соответствует типу "
+                f"«Касса/Счёт» «{cash_point.name}» (тип «{cash_point.kind.value}»)"
+            ),
+        )
 
     # Аналитика: статья должна соответствовать типу операции (доход↔приход, расход↔расход).
     if values.get("article_id") is not None:
@@ -643,6 +665,23 @@ def resolve_tariff_for_accrual_period(
     )
 
 
+def count_residents_for_period(db: Session, apartment_id: int, on_date: date) -> int:
+    """Число жильцов квартиры на дату (по периодам проживания, Б8).
+
+    Учитываются записи, у которых `date_from <= on_date` (или NULL) и
+    `date_to >= on_date` (или NULL — «по настоящее время»).
+    """
+    return (
+        db.query(ApartmentResident)
+        .filter(
+            ApartmentResident.apartment_id == apartment_id,
+            or_(ApartmentResident.date_from.is_(None), ApartmentResident.date_from <= on_date),
+            or_(ApartmentResident.date_to.is_(None), ApartmentResident.date_to >= on_date),
+        )
+        .count()
+    )
+
+
 def calculate_accrual_for_account_service(
     db: Session, account: Account, service_type: ServiceType, period_end: date
 ) -> dict[str, Any] | None:
@@ -726,6 +765,24 @@ def calculate_accrual_for_account_service(
             "services_type_id_label": service_type.services_type,
             "tariff_id": tariff.id,
             "tariff_id_label": f"{float(tariff.price)} ₸ × {square} м²",
+            "current_reading_id": current_reading_id,
+            "past_reading_value": past_reading,
+            "current_reading_value": current_reading,
+            "consumption": consumption,
+            "amount": amount,
+        }
+
+    # «На человека» (Б8): сумма = тариф × число проживающих на конец периода.
+    if tariff_type_name == "На человека":
+        residents = count_residents_for_period(db, apartment.id, period_end)
+        amount = float(tariff.price) * residents
+        return {
+            "account_id": account.id,
+            "account_id_label": f"№ {apartment.apartment_number} — {apartment.address}",
+            "services_type_id": service_type.id,
+            "services_type_id_label": service_type.services_type,
+            "tariff_id": tariff.id,
+            "tariff_id_label": f"{float(tariff.price)} ₸ × {residents} чел.",
             "current_reading_id": current_reading_id,
             "past_reading_value": past_reading,
             "current_reading_value": current_reading,

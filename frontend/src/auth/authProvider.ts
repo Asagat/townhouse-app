@@ -25,7 +25,8 @@ export const authProvider: AuthProvider = {
             const data = await res.json();
             setToken(data.access_token);
             setIdentity(data.user as Identity);
-            return { success: true, redirectTo: "/" };
+            // Б9: если требуется смена пароля — сразу на страницу смены.
+            return { success: true, redirectTo: data.user?.must_change_password ? "/change-password" : "/" };
         } catch {
             return {
                 success: false,

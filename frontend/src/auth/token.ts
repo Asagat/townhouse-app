@@ -22,6 +22,7 @@ export interface Identity {
     full_name: string | null;
     role: string;
     role_name: string;
+    must_change_password?: boolean;
 }
 
 export const getToken = (): string | null => localStorage.getItem(TOKEN_KEY);

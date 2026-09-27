@@ -31,7 +31,7 @@ export const Sidebar = () => {
             style={{
                 width: sidebarWidth,
                 flexShrink: 0,
-                minHeight: "100vh",
+                height: "100vh",
                 background: COLORS.sidebarBg,
                 borderRight: `1px solid ${COLORS.border}`,
                 padding: "24px 0",
@@ -39,14 +39,12 @@ export const Sidebar = () => {
                 transition: "width 0.2s ease",
                 display: "flex",
                 flexDirection: "column",
-                position: "sticky",
-                top: 0,
                 overflow: "hidden",
             }}
         >
             <SidebarHeader isCollapsed={isCollapsed} onToggle={toggleSidebar} />
 
-            <nav style={{ flex: 1, overflow: "hidden" }}>
+            <nav style={{ flex: 1, overflowY: "auto" }}>
                 {categories.map((category) => {
                     const isSingle = category.items.length === 1;
                     if (!isCollapsed && isSingle) {

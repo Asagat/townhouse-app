@@ -144,5 +144,5 @@ docker compose -f docker-compose.demo.yml exec backend python -m alembic upgrade
 - Прод-shell и демо-shell — разные: команды демо выполняются из папки `deploy/demo`
   со своим compose-файлом (`docker-compose.demo.yml` или переименованным в
   `docker-compose.yml`) — чтобы не задеть прод-стек.
-- Упрощение до 2 контейнеров (SPA отдаёт FastAPI, убрать nginx) — отдельная задача,
-  см. `ROADMAP.md` (раздел «Технический долг»).
+- Упрощение до 2 контейнеров (SPA отдаёт FastAPI, убрать nginx) — задача снята
+  (27.09.2026).

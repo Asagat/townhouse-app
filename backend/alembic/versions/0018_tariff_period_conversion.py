@@ -40,7 +40,7 @@ def _month_bounds(ym: tuple[int, int]) -> tuple[date, date]:
 
 def upgrade() -> None:
     bind = op.get_bind()
-    from sqlalchemy.orm import Session
+    from sqlalchemy.orm import Session, lazyload, load_only
     from models import (
         AccrualDocument,
         AccrualsRegister,
@@ -51,7 +51,26 @@ def upgrade() -> None:
 
     session = Session(bind=bind)
     try:
-        docs = {d.id: d for d in session.query(AccrualDocument).all()}
+        # load_only — только нужные столбцы: иначе ORM тянет аудит-связи `creator`/`updater`
+        # (`lazy="joined"` → JOIN users со ВСЕМИ его колонками), и при добавлении новой
+        # колонки в `users` (например `must_change_password`) миграция падала бы на свежей БД.
+        docs = {
+            d.id: d
+            for d in session.query(AccrualDocument)
+            .options(
+                load_only(
+                    AccrualDocument.id,
+                    AccrualDocument.accrual_date,
+                    AccrualDocument.doc_kind,
+                ),
+                # Отключаем жадный JOIN по аудиту (creator/updater — `lazy="joined"`):
+                # он тянет ВСЕ колонки users, и при добавлении новой колонки в users
+                # миграция падала бы на свежей БД (колонки тогда ещё нет).
+                lazyload(AccrualDocument.creator),
+                lazyload(AccrualDocument.updater),
+            )
+            .all()
+        }
         # строки регистра по документу
         rows_by_doc = {}
         for r in session.query(AccrualsRegister).all():

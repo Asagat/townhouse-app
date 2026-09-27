@@ -20,22 +20,38 @@ export const SidebarHeader = ({
         }}
     >
         {!isCollapsed && (
-            <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                <span
-                    style={{
-                        color: COLORS.textActive,
-                        fontWeight: 700,
-                        fontSize: 18,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                    }}
-                >
-                    Family Townhouse
-                </span>
-                {/* Номер релиза (вшит в сборку, см. vite.config.ts). */}
+            <div style={{ minWidth: 0 }}>
+                {/* Логотип и название — в одной строке с `alignItems: center`, поэтому
+                    вертикальный центр картинки совпадает с центром строки названия. */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {/* SVG с прозрачным фоном и viewBox="0 0 1024 1024» — корректно
+                        масштабируется до 32 px. */}
+                    <img
+                        src="/FTH.svg"
+                        width={32}
+                        height={32}
+                        alt="FTH"
+                        style={{ display: "block", flexShrink: 0 }}
+                    />
+                    <span
+                        style={{
+                            color: COLORS.textActive,
+                            fontWeight: 700,
+                            fontSize: 16,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                        }}
+                    >
+                        Family Townhouse
+                    </span>
+                </div>
+                {/* Номер релиза (вшит в сборку, см. vite.config.ts) — под названием
+                    (отступ равен ширине логотипа + зазору, чтобы стоял под текстом). */}
                 <span
                     title={`Версия: ${__APP_VERSION__}`}
                     style={{
+                        display: "block",
+                        paddingLeft: 40,
                         color: COLORS.textMuted,
                         fontSize: 11,
                         lineHeight: 1.2,

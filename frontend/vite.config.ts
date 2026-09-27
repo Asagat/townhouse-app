@@ -15,11 +15,12 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
-    // Номер релиза для интерфейса (надпись в навигации). Значение приходит из
-    // сборки: Docker `ARG APP_VERSION` (в CI — git-тег релиза, см. docker-build.yml);
-    // локально не задано → "dev". Подстановка на этапе сборки, без запроса к API.
+    // Номер релиза для интерфейса (надпись в навигации). В CI/prod задаётся
+    // через build-arg `APP_VERSION` (git-тег релиза, см. docker-build.yml/
+    // Dockerfile.prod) и имеет приоритет; локально берётся из frontend/.env
+    // (предварительный номер), иначе — «dev». Подстановка на этапе сборки.
     define: {
-      __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || "dev"),
+      __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || env.APP_VERSION || "dev"),
     },
     // Тестовые файлы (vitest/RTL) не участвуют в dev-обслуживании и сборке:
     // в окружении без dev-зависимостей (контейнер фронтенда) их импорт «vitest»

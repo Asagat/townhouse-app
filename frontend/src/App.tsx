@@ -9,6 +9,7 @@ import {
     Route,
     Outlet,
     Navigate,
+    useLocation,
 } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { ConfigProvider, Grid, Spin } from "antd";
@@ -21,6 +22,9 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { GenericList } from "./pages/GenericList";
 import { Login } from "./pages/Login";
 import { Users } from "./pages/Users";
+import { Settings } from "./pages/Settings";
+import { ChangePassword } from "./pages/ChangePassword";
+import { ResidentSettings } from "./pages/ResidentSettings";
 import { ResidentCabinet } from "./pages/ResidentCabinet";
 import { AdminCabinet } from "./pages/AdminCabinet";
 import { CashReport } from "./pages/CashReport";
@@ -28,14 +32,17 @@ import { ExpenseReport } from "./pages/ExpenseReport";
 import { DebtorsReport } from "./pages/DebtorsReport";
 import { StatementReport } from "./pages/StatementReport";
 import { Dashboard } from "./pages/Dashboard";
+import { ReferenceDrillProvider } from "./components/common/ReferenceDrillProvider";
 import { authProvider } from "./auth/authProvider";
 import { apiUrl, http } from "./auth/http";
 import { filterCategoriesByRole } from "./auth/menuAccess";
+import { usePermissions } from "./auth/permissions";
 import { AUTH_EVENT, getIdentity } from "./auth/token";
 
 const resourceForRoute = (key: string) => {
     if (key === "dashboard") return <Dashboard />;
     if (key === "users") return <Users />;
+    if (key === "prefixes") return <Settings />;
     if (key === "cabinet") return <ResidentCabinet />;
     if (key === "cabinet_admin") return <AdminCabinet />;
     if (key === "cash_report") return <CashReport />;
@@ -52,11 +59,13 @@ const ProtectedLayout = () => {
     const { data, isLoading } = useIsAuthenticated();
     const authenticated = data?.authenticated === true;
     const screens = Grid.useBreakpoint();
+    const location = useLocation();
     // На телефоне отступы страницы минимальные — контент по всей ширине экрана.
     const pagePadding = screens.md ? 40 : 12;
     // У жителя единственный раздел — «Мой кабинет»: боковая панель навигации
     // не нужна (его действия вынесены вниз страницы ЛК — см. ResidentCabinet).
     const hideSidebar = getIdentity()?.role === "resident";
+    const mustChangePassword = getIdentity()?.must_change_password === true;
 
     if (isLoading) {
         return (
@@ -68,13 +77,19 @@ const ProtectedLayout = () => {
     if (!authenticated) {
         return <Navigate to="/login" replace />;
     }
+    // Б9: пока пароль не сменён — доступна только страница смены пароля.
+    if (mustChangePassword && location.pathname !== "/change-password") {
+        return <Navigate to="/change-password" replace />;
+    }
     return (
-        <div style={{ display: "flex", minHeight: "100vh", width: "100%" }}>
+        <div style={{ display: "flex", height: "100vh", width: "100%", overflow: "hidden" }}>
             {!hideSidebar && <Sidebar />}
             <div
                 style={{
                     flex: 1,
                     minWidth: 0,
+                    height: "100vh",
+                    overflowY: "auto",
                     padding: pagePadding,
                     boxSizing: "border-box",
                     background: "#f2f8f3",
@@ -97,6 +112,9 @@ const App = () => {
         window.addEventListener(AUTH_EVENT, onAuthChange);
         return () => window.removeEventListener(AUTH_EVENT, onAuthChange);
     }, []);
+
+    // Права роли с бэкенда (задача 2.6): загрузка + перерисовка меню/роутов при смене.
+    usePermissions();
 
     const role = useMemo(() => getIdentity()?.role ?? "", [authVersion]);
     const visibleCategories = filterCategoriesByRole(role, categories);
@@ -140,6 +158,7 @@ const App = () => {
                         list: `/${r.key}`,
                     }))}
                 >
+                    <ReferenceDrillProvider>
                     <Routes>
                         <Route path="/login" element={<Login />} />
                         <Route element={<ProtectedLayout />}>
@@ -147,6 +166,11 @@ const App = () => {
                                 index
                                 element={<NavigateToResource resource={defaultResource} />}
                             />
+                            <Route path="/change-password" element={<ChangePassword />} />
+                            <Route path="/profile" element={<ResidentSettings />} />
+                            {/* Прежний адрес раздела «Префиксы» (был «Настройки»):
+                                редирект для старых ссылок/открытых вкладок. */}
+                            <Route path="/settings" element={<Navigate to="/prefixes" replace />} />
                             {visibleItems.map((r) => (
                                 <Route
                                     key={r.key}
@@ -154,8 +178,12 @@ const App = () => {
                                     element={resourceForRoute(r.key)}
                                 />
                             ))}
+                            {/* Неизвестный (устаревший/ошибочный) путь — на главную,
+                                чтобы вместо пустого экрана открылось приложение. */}
+                            <Route path="*" element={<Navigate to="/" replace />} />
                         </Route>
                     </Routes>
+                    </ReferenceDrillProvider>
                 </Refine>
             </BrowserRouter>
         </ConfigProvider>

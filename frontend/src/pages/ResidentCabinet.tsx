@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Button, Spin, Typography, message } from "antd";
+import { Alert, Button, Spin, Typography } from "antd";
 import { HomeOutlined, LogoutOutlined, SettingOutlined } from "@ant-design/icons";
 import { useApiUrl, useLogout } from "@refinedev/core";
 import { authedFetch } from "../auth/http";
@@ -90,7 +90,7 @@ export const ResidentCabinet = () => {
                             key: "settings",
                             icon: <SettingOutlined />,
                             label: "Настройки",
-                            onClick: () => message.info("Раздел «Настройки» появится позже"),
+                            onClick: () => navigate("/profile"),
                         },
                         {
                             key: "logout",

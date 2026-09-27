@@ -5,7 +5,7 @@
 //   - в просмотре администратора (pages/AdminCabinet) — по выбранному счёту (mode='account').
 
 import { useEffect, useState } from "react";
-import { Button, Card, Col, ConfigProvider, DatePicker, Row, Select, Space, Statistic, Tooltip, Typography } from "antd";
+import { Button, Card, Col, ConfigProvider, DatePicker, Grid, Row, Select, Space, Statistic, Tooltip, Typography } from "antd";
 import { FilePdfOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { authedFetch, openAuthorizedPdf } from "../../auth/http";
@@ -142,6 +142,10 @@ export const CabinetView = ({
 }) => {
     const houseExpensesEnabled = houseExpenses === true;
     const accountId = statement?.account?.id;
+    // На телефоне (<576px, ориентир — смартфоны от 360px) управляющие элементы
+    // растягиваем на всю ширину и укладываем столбиком — блок периода не «разъезжается».
+    const screens = Grid.useBreakpoint();
+    const isNarrow = !screens.sm;
 
     // --- Блок «Движения»: период + метрики + движения по счёту + PDF. ---
     const [movements, setMovements] = useState<AccountMovementRow[]>([]);
@@ -150,13 +154,13 @@ export const CabinetView = ({
     const [, setMovementsLoading] = useState(false);
     // --- Общий период страницы: стандартные пресеты или «За период» (свои даты). ---
     type PeriodPreset = "3m" | "prev_month" | "cur_month" | "custom";
-    const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("3m");
-    // Период по умолчанию — текущий и два предыдущих месяца («За 3 месяца»).
+    const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("prev_month");
+    // Период по умолчанию — прошлый месяц (Б16): текущий месяц обычно ещё не закрыт.
     const [fromDate, setFromDate] = useState<string | undefined>(
-        dayjs().startOf("month").subtract(2, "month").format("YYYY-MM-DD"),
+        dayjs().subtract(1, "month").startOf("month").format("YYYY-MM-DD"),
     );
     const [toDate, setToDate] = useState<string | undefined>(
-        dayjs().endOf("month").format("YYYY-MM-DD"),
+        dayjs().subtract(1, "month").endOf("month").format("YYYY-MM-DD"),
     );
     const applyPeriodPreset = (p: PeriodPreset) => {
         setPeriodPreset(p);
@@ -265,7 +269,7 @@ export const CabinetView = ({
         // Единый вид ЛК и в кабинете жителя, и в админ-просмотре: крупный шрифт
         // задаётся здесь (а не в странице), чтобы оба режима выглядели одинаково.
         <ConfigProvider theme={{ token: { fontSize: 17 } }}>
-            <div>
+            <div className="cabinet-view">
             {statement && (
                 <Card title={`Лицевой счёт ${statement.account.account_number}`} style={{ marginBottom: 16 }}>
                     <Space direction="vertical" style={{ width: "100%" }}>
@@ -283,12 +287,12 @@ export const CabinetView = ({
 
             {statement && accountId !== undefined && (
                 <Card size="small" style={{ marginBottom: 16 }}>
-                    <Space wrap>
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                         <Typography.Text strong style={{ fontSize: 17 }}>Период:</Typography.Text>
                         <Select
                             value={periodPreset}
                             onChange={applyPeriodPreset}
-                            style={{ width: 200 }}
+                            style={{ width: isNarrow ? "100%" : 200 }}
                             options={[
                                 { value: "3m", label: "За 3 месяца" },
                                 { value: "prev_month", label: "За прошлый месяц" },
@@ -302,6 +306,7 @@ export const CabinetView = ({
                                     format="DD.MM.YYYY"
                                     placeholder="Дата начала"
                                     allowClear
+                                    style={{ width: isNarrow ? "100%" : undefined }}
                                     value={fromDate ? dayjs(fromDate) : null}
                                     onChange={(d) => setFromDate(d ? d.format("YYYY-MM-DD") : undefined)}
                                 />
@@ -309,12 +314,13 @@ export const CabinetView = ({
                                     format="DD.MM.YYYY"
                                     placeholder="Дата конца"
                                     allowClear
+                                    style={{ width: isNarrow ? "100%" : undefined }}
                                     value={toDate ? dayjs(toDate) : null}
                                     onChange={(d) => setToDate(d ? d.format("YYYY-MM-DD") : undefined)}
                                 />
                             </>
                         )}
-                    </Space>
+                    </div>
                 </Card>
             )}
 

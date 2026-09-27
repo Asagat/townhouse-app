@@ -23,7 +23,7 @@ import calendar
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from auth import require_roles
+from permissions import require_permission
 from database import get_db
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
@@ -254,7 +254,7 @@ def build_expenses(pool: Session) -> dict:
 @router.get("/dashboard")
 def dashboard(
     db: Session = Depends(get_db),
-    _user: User = Depends(require_roles("admin", "operator", "cashier", "auditor")),
+    _user: User = Depends(require_permission("dashboard")),
 ):
     """Дашборд главной страницы — информационная сводка по дому «на сейчас»."""
     metrics = build_house_metrics(db)

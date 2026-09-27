@@ -34,6 +34,8 @@ SORT_FIELDS: dict[tuple[str, str], dict] = {
     ("transactions", "article.name"): {"path": ["article"], "col": "name"},
     ("transactions", "contractor.full_name"): {"path": ["contractor"], "col": "full_name"},
     ("transactions", "cash_point.name"): {"path": ["cash_point"], "col": "name"},
+    ("transactions", "cash_point.kind"): {"path": ["cash_point"], "col": "kind"},
+    ("payments", "cash_point.kind"): {"path": ["cash_point"], "col": "kind"},
     ("transactions", "account.account_number"): {"path": ["account"], "col": "account_number"},
     ("transactions", "owner.full_name"): {"path": ["account", "apartment", "owner"], "col": "full_name"},
     ("transactions", "apartment.apartment_number"): {"path": ["account", "apartment"], "col": "apartment_number"},
@@ -74,6 +76,8 @@ SORT_FIELDS: dict[tuple[str, str], dict] = {
     },
     ("cash_register", "account.account_number"): {"path": ["account"], "col": "account_number"},
     ("cash_register", "apartment.apartment_number"): {"path": ["account", "apartment"], "col": "apartment_number"},
+    ("cash_register", "cash_point.name"): {"path": ["cash_point"], "col": "name"},
+    ("cash_register", "cash_point.kind"): {"path": ["cash_point"], "col": "kind"},
     ("cash_register", "notes"): {"path": ["transaction"], "col": "notes"},
 
     # --- Показания (регистр) ---

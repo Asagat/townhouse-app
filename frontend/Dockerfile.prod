@@ -1,7 +1,7 @@
 # Production-образ фронтенда Townhouse ERP.
 #
 # Отличие от dev-Dockerfile (Vite-сервер с HMR): здесь делается production-сборка
-# (npm run build = tsc + vite build), а статика отдаётся nginx внутри этого же
+# (npm run build = tsc -b + vite build), а статика отдаётся nginx внутри этого же
 # контейнера. Прокси /api/ идёт на сервис backend (docker DNS).
 #
 # Используется в docker-compose.prod.yml (NAS Synology / прод-хост).

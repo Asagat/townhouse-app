@@ -3,11 +3,18 @@
 """
 Настройка pytest для бэкенда.
 
-Тесты работают против реальной БД PostgreSQL (см. backend/database.py), используя
-ОТДЕЛЬНЫЕ сущности с уникальными метками (owner.first_name == маркер теста), которые
-всегда удаляются после прохождения теста. Подходить к БД без изолированной схемы
-нельзя назвать идеальным, но для проекта без Alembic/тестовой схемы это единственный
-прагматичный вариант: тесты идемпотентны и не оставляют следов.
+Тесты работают против реальной БД PostgreSQL (см. backend/database.py), но ИЗОЛИРОВАННО:
+штатная команда — `./scripts/test_backend.sh` (корень репозитория), она поднимает
+одноразовую PostgreSQL (сервис postgres-test, данные в tmpfs), накатывает схему
+(alembic upgrade head) и справочники (init_data.py) и гоняет тесты против неё.
+
+Тесты создают ОТДЕЛЬНЫЕ сущности с уникальными метками (owner.first_name == маркер
+теста) и всегда удаляют их за собой — поэтому прогон против изолированной БД чистый и
+не зависит от живых данных (это убирало флейки вида test_filtering).
+
+Защита от случайного прогона по рабочей БД: ниже проверяется имя целевой БД. Если оно
+не выглядит тестовым, коллекция прерывается с подсказкой. Осознанный обход — переменная
+окружения TH_ALLOW_LIVE_DB=1 (только для ручной диагностики, не для штатного прогона).
 
 Запуск из каталога backend:  python -m pytest tests/ -q
 Для корректного импорта модулей (модели используют неявные относительные импорты)
@@ -18,12 +25,35 @@ import os
 import sys
 
 import pytest
+from sqlalchemy.engine import make_url
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
-from database import SessionLocal  # noqa: E402
+from database import SQLALCHEMY_DATABASE_URL, SessionLocal  # noqa: E402
+
+
+# --- ЗАЩИТА ОТ ПРОГОНА ПО РАБОЧЕЙ БД (ТД-3) --------------------------------
+# Имя тестовой БД должно содержать 'test' или 'ci' (одноразовая postgres-test и
+# БД из CI имеют такие имена). Иначе pytest не запускается без явного разрешения
+# TH_ALLOW_LIVE_DB=1 — так случайный прогон не трогает рабочую БД.
+def _is_test_database(url: str) -> bool:
+    try:
+        name = (make_url(url).database or "").lower()
+    except Exception:  # noqa: BLE001 — сбой разбора URL не должен «проносить» прогон
+        return False
+    return "test" in name or "ci" in name
+
+
+if not _is_test_database(SQLALCHEMY_DATABASE_URL) and os.getenv("TH_ALLOW_LIVE_DB") != "1":
+    raise RuntimeError(
+        "pytest настроен на изолированную тестовую БД, а DATABASE_URL указывает на "
+        f"не тестовую (DB={make_url(SQLALCHEMY_DATABASE_URL).database!r}).\n"
+        "Запустите тесты так: ./scripts/test_backend.sh\n"
+        "(осознанный обход для ручной диагностики: TH_ALLOW_LIVE_DB=1)"
+    )
+
 from models import (  # noqa: E402
     Account,
     Apartment,
@@ -46,8 +76,11 @@ TEST_SERVICE_PREFIX = "__test_"
 
 @pytest.fixture(autouse=True)
 def _cleanup_test_services():
-    """После каждого теста удаляет тестовые виды услуг (по префиксу) и их
-    зависимости (тарифы, счётчики, показания), чтобы не засорять справочник."""
+    """После каждого теста удаляет тестовые сущности, чтобы они не «переползали»
+    в следующие тесты и не ломали подсчёты (изоляция прогона, ТД-3):
+      - тестовые виды услуг (по префиксу `__test_`) и их зависимости;
+      - забытые тестовые контрагенты `__test_%`, не привязанные к квартирам.
+    """
     yield
     session = SessionLocal()
     try:
@@ -64,6 +97,11 @@ def _cleanup_test_services():
                 session.execute(text("DELETE FROM meter_readings WHERE meter_id = :x"), {"x": mid})
             session.execute(text("DELETE FROM meters WHERE services_type_id = :s"), {"s": sid})
         session.execute(text("DELETE FROM services_type WHERE services_type LIKE :p"), {"p": prefix})
+        # Страховка от утечек: тестовые контрагенты без квартиры (у квартирных ФК RESTRICT).
+        session.execute(text(
+            "DELETE FROM counterparties c WHERE c.full_name LIKE :p "
+            "AND NOT EXISTS (SELECT 1 FROM apartments a WHERE a.owner_id = c.id)"
+        ), {"p": prefix})
         session.commit()
     except Exception:
         # Не даём ошибке очистки замаскировать результат самого теста.

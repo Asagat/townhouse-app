@@ -3,12 +3,15 @@
 Документированный процесс установки/обновления окружения.
 Принцип: **весь код и схема — только через git; настройки и секреты — только через `.env`.**
 
-> **Актуальная модель эксплуатации (08.09.2026).** Серверов `staging`/`production` на выделенных VPS нет:
-> проект работает в локальном docker-стеке на домашнем ПК, обновление/распространение между рабочими ПК —
-> дампами БД через зеркальную синхронизацию (`scripts/dump_to_sync.sh`/`refresh_from_backups.sh`, §7.2–7.5),
-> git/GitHub — источник/бэкап. SSH-выкат на сервер (`deploy.yml`/`.github/actions/deploy`) **удалён** и к текущей
-> эксплуатации не применяется; разделы ниже про VPS (`setup_vps.sh`/§11) — справочные на случай будущего
-> выделенного хост-сервера.
+> **Актуальная модель эксплуатации (27.09.2026).** Действуют два контура: **прод — NAS Synology**
+> (Container Manager, 3 контейнера `postgres`+`backend`+`frontend`, HTTPS — обратный прокси DSM,
+> `fth.sagacloud.synology.me`; порядок — §7.6) и **демо-копия** там же (`demo.sagacloud.synology.me`,
+> автономная папка `deploy/demo/`; §8). Выкат на прод — **вручную из CLI** по релизному тегу
+> (`docker compose pull && up -d` + `alembic upgrade head`). Локальный docker-стек на домашнем ПК —
+> **dev/пред-прод**; обмен данными между рабочими ПК — дампами БД через зеркальную синхронизацию
+> (`scripts/dump_to_sync.sh`/`refresh_from_backups.sh`, §7.2–7.5), git/GitHub — источник/бэкап.
+> SSH-выкат на сервер (`deploy.yml`/`.github/actions/deploy`) **удалён**; разделы ниже про VPS
+> (`setup_vps.sh`/§11) — справочные на случай будущего выделенного хост-сервера.
 
 ---
 
@@ -313,12 +316,20 @@ cd ..
 backend — `alembic upgrade head` → `init_data.py` → `python -m pytest tests/ -q`
 против disposable PostgreSQL 16; frontend — `npm ci` → `npm run build` (`tsc` + Vite).
 
-Локально то же самое:
+Локально бэкенд гоняется против **одноразовой** БД, а не «живой», чтобы тесты не трогали
+рабочие/прод-данные (задача ТД-3):
 
 ```bash
-cd backend && python -m pytest tests/ -q   # тесты бэкенда
-cd frontend && npx tsc --noEmit             # проверка типов фронтенда
+./scripts/test_backend.sh                        # postgres-test (tmpfs) → alembic → init_data → pytest → удаление контейнера
+cd frontend && npx tsc --noEmit                  # проверка типов фронтенда
+docker compose exec -T frontend npx vitest run   # фронт-тесты (vitest + RTL)
 ```
+
+`docker-compose.test.yml` поднимает сервис `postgres-test` (данные в tmpfs), а `tests/conftest.py`
+страхует от прогона по рабочей БД: если имя БД не содержит `test`/`ci`, коллекция прерывается
+с подсказкой (обход — `TH_ALLOW_LIVE_DB=1`). Актуальный результат локального прогона
+(27.09.2026) — **95 passed, 16 skipped, 0 failed** (рабочая dev-БД не задействована);
+фронт — **232 теста в 43 файлах** (`npm run build` теперь реально типизирует `src/` через `tsc -b`).
 
 ---
 
@@ -707,10 +718,12 @@ refresh сообщает «дамп уже применён / новых нет�
 
 ### 7.6 Прод-развёртывание на NAS Synology (Container Manager)
 
-> **Актуальная прод-модель (11.09.2026).** Прод работает как три контейнера в
+> **Актуальная прод-модель (27.09.2026).** Прод работает как три контейнера в
 > Synology Container Manager: `postgres` + `backend` + `frontend` (nginx внутри
 > образа). Наружу открыт только фронтенд; HTTPS терминируется на DSM
 > («Обратный прокси» → `fth.sagacloud.synology.me` → `http://<NAS>:8080`).
+> **Текущее состояние:** прод-тег `TOWNHOUSE_TAG=1.1.7`; к выкату готовится `v1.1.8`
+> (в нём — миграции `0021–0027`, на проде ещё **не применены**).
 > Домашний docker-стек на ПК (§7.1–7.5) и зеркала остаются **dev/пред-прод**.
 
 **Файлы прод-стека (в репозитории):**
@@ -736,7 +749,7 @@ refresh сообщает «дамп уже применён / новых нет�
 > git-тег `v1.0.1` → образы `:1.0.1` и `:1.0`. Именно это значение (без `v`) идёт в
 > `TOWNHOUSE_TAG`; при `TOWNHOUSE_TAG=v1.0.1` `docker compose pull` упадёт с `manifest unknown`.
 
-На NAS указываем **конкретный релизный тег** в `.env` (`TOWNHOUSE_TAG=1.0.0`):
+На NAS указываем **конкретный релизный тег** в `.env` (`TOWNHOUSE_TAG=1.1.7`):
 выкат = смена тега + `up -d`, откат = возврат прежнего тега. Без `TOWNHOUSE_TAG`
 compose намеренно не стартует (защита от случайной подстановки `main`, где может
 оказаться устаревший dev-образ фронтенда).
@@ -901,8 +914,8 @@ curl -s http://localhost:8080/api/auth/me | head -1  # ожидаем 401 (жи�
 > (перед любой такой операцией — бэкап, §7). Container Manager держим для мониторинга
 > и логов, а обновление делаем из CLI.
 
-1. Дев-машина: `git tag v1.0.4 && git push origin v1.0.4` (дождаться сборки образа в ghcr.io);
-2. На NAS (**от root**, `sudo -i`): в `.env` сменить `TOWNHOUSE_TAG=1.0.4` (docker-тег без `v`);
+1. Дев-машина: `git tag v1.1.8 && git push origin v1.1.8` (дождаться сборки образа в ghcr.io);
+2. На NAS (**от root**, `sudo -i`): в `.env` сменить `TOWNHOUSE_TAG=1.1.8` (docker-тег без `v`);
    либо один раз поставить `TOWNHOUSE_TAG=latest` — тогда шаг 2 больше не нужен (см. п.1);
 3. Выкат — **`pull` обязателен** (иначе `up -d` поднимет старый локальный образ при том же
    теге — особенно важно для `latest`):
@@ -922,18 +935,18 @@ curl -s http://localhost:8080/api/auth/me | head -1  # ожидаем 401 (жи�
    в образе это, напр., `v1.1.7`) — по нему удобно убедиться, что живёт именно ожидаемый релиз.
    Подробнее про переменную — §11 (CI/CD).
 4. **Миграции сами не накатываются** (`CMD` backend-образа — только `uvicorn`). Если релиз
-   содержит миграцию схемы (как в шаге В):
+   содержит миграцию схемы (как в шаге В) — а для `v1.1.8` это обязательно (миграции `0021–0027`):
 
    ```bash
    docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
    ```
 5. **Разовые правки данных**, если они есть в релизе, выполняются штатными скриптами
    `backend/migrations/*` (dry-run → `--apply`), а не вручную в БД (правило из `AGENTS.md`).
-   Пример — пересчёт `balance_after` строк без лицевого счёта (появился в `v1.1.0`):
+   Пример — пересчёт остатка по кассе (`cash_register.balance_after`):
 
    ```bash
-   docker compose -f docker-compose.prod.yml exec backend python migrations/recalc_cash_register_balance.py
-   docker compose -f docker-compose.prod.yml exec backend python migrations/recalc_cash_register_balance.py --apply
+   docker compose -f docker-compose.prod.yml exec backend python migrations/recalc_cash_register_unified.py
+   docker compose -f docker-compose.prod.yml exec backend python migrations/recalc_cash_register_unified.py --apply
    ```
 
 > Опционально: `pull_policy: always` у сервисов в `docker-compose.prod.yml` заставит тянуть
@@ -1039,11 +1052,11 @@ docker compose -f docker-compose.demo.yml exec backend python migrations/seed_de
 Обновление версии — только из CLI (`pull` + `up -d` + `alembic upgrade head`); кнопки
 «Обновить» в Container Manager нет, «Очистить» использовать нельзя (уносит volume).
 
-Упрощение до 2 контейнеров (SPA отдаёт backend, без nginx) — отдельная задача,
-`ROADMAP.md` в разделе «Технический долг» (ТД-5).
+Упрощение до 2 контейнеров (SPA отдаёт backend, без nginx) — задача снята (27.09.2026).
 
-**Состояние (26.09.2026):** контур развёрнут и наполнен демо-данными; тег образов —
-плавающий `latest` (на 26.09.2026 — `v1.1.0`), наружу — `APP_PORT=8081`, HTTPS терминирует
+**Состояние (27.09.2026):** контур развёрнут и наполнен демо-данными; тег образов —
+плавающий `latest` (на 27.09.2026 — `v1.1.7`; двигается только релизными тегами `v*`),
+наружу — `APP_PORT=8081`, HTTPS терминирует
 DSM-«Обратный прокси». Обновление — `pull` + `up -d` + `alembic upgrade head`, затем (при наличии
 в релизе) разовые скрипты `backend/migrations/*` в режиме dry-run → `--apply`. Актуальная версия
 демо-данных — та, что даёт генератор из `deploy/demo/seed_demo_data.py`.
@@ -1160,6 +1173,7 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 | `./scripts/setup_vps.sh` | Полная установка на НОВОМ VPS (пакеты, clone, .env, БД, systemd, build) |
 | `./scripts/deploy_vps.sh [ref]` | Обновление VPS (fetch, при `ref` — фиксация ветки/тега/SHA, alembic, справочники, админ, сборка фронтенда, restart). Без аргумента — авто-выкат `git pull` (main); вызывается из GitHub Actions (см. §11) |
 | `./scripts/restore_townhouse.sh` | Восстановление БД из дампов (см. §9.2): `data [--fresh] <файл.sql>`, `roles [--force] <файл.sql>`, `all ...`; `--yes` — без запроса (для автоматизации) |
+| `./scripts/test_backend.sh` | Локальный прогон тестов бэкенда на **одноразовой** БД (сервис `postgres-test` из `docker-compose.test.yml`, tmpfs) — изоляция от рабочей/прод-БД (ТД-3) |
 | `./scripts/refresh_from_backups.sh [--yes]` | Зеркальный ПК: импорт свежих дампов из `DB_MIRROR_BACKUPS` + догон схемы (маркер `.git/db_refresh.state`); отбор — только канонические `townhouse_ГГГГММДД_ЧЧММСС.sql` |
 | `./scripts/update_db_after_pull.sh` | После `git pull`: догон схемы + зеркальные дампы (вызывается hook-ом post-merge) |
 | `./scripts/dump_to_sync.sh` | Активный ПК: выгрузить дамп БД в синхронизируемую папку (`DB_MIRROR_BACKUPS`) и обновить маркер |
@@ -1173,18 +1187,19 @@ PGPASSWORD=... docker exec -i townhouse-postgres psql -U townhouse_user -d postg
 
 > Задача 3.3 роадмапа. Код, успешно прошедший проверки, автоматически публикуется как docker-образы
 > (push/тег). **Автоматический SSH-выкат на сервер не используется** (08.09.2026): `deploy.yml` и
-> `.github/actions/deploy/` удалены — серверов `staging`/`production` нет. Распространение между ПК —
-> дампами БД. Ниже — справочно о выкате `deploy_vps.sh` на случай будущего VPSхост-сервера.
+> `.github/actions/deploy/` удалены — разделы ниже про `deploy_vps.sh` справочные. Распространение
+> между ПК — дампами БД. Выкат на прод-NAS — **вручную из CLI** по релизному тегу (DEPLOY §7.6);
+> автоматизация этого шага вынесена в «Идеи по развитию» (ROADMAP → **И7**).
 
 ### 11.1 Что в репозитории
 
 | Файл | Что делает |
 |---|---|
-| `.github/workflows/ci.yml` | Автопроверка на push/PR в `main`. Job `backend`: disposable-сервис `postgres:16` → `alembic upgrade head` → `init_data.py` → `python -m pytest tests/ -q` (`DATABASE_URL` и `AUTH_SECRET_KEY` задаются на job). Job `frontend`: `npm ci` → `npm run build` (= tsc + vite). Job `images-build` (матрица frontend/backend) собирает **прод-образы** (`frontend/Dockerfile.prod`, `backend/Dockerfile`) без публикации + smoke-тест фронтенд-контейнера (контейнер должен стартовать и отдавать SPA) — ловит ошибки, которые не видны при сборке на хосте (например, права `/app` при `USER node` или падение nginx без рантайм-resolver). Сводный **нематричный** job `images` с фиксированным именем — именно он является required-чеком: у матричного job'а GitHub дописывает к имени чек-рана суффикс «(значения матрицы)», поэтому базовое имя required-чеком стать не может (вечно `expected`). |
+| `.github/workflows/ci.yml` | Автопроверка на push/PR в `main`. Job `backend`: disposable-сервис `postgres:16` → `alembic upgrade head` → `init_data.py` → `python -m pytest tests/ -q` (`DATABASE_URL` и `AUTH_SECRET_KEY` задаются на job). Job `frontend`: `npm ci` → `npm run build` (= tsc -b + vite; реальная проверка типов `src/`). Job `images-build` (матрица frontend/backend) собирает **прод-образы** (`frontend/Dockerfile.prod`, `backend/Dockerfile`) без публикации + smoke-тест фронтенд-контейнера (контейнер должен стартовать и отдавать SPA) — ловит ошибки, которые не видны при сборке на хосте (например, права `/app` при `USER node` или падение nginx без рантайм-resolver). Сводный **нематричный** job `images` с фиксированным именем — именно он является required-чеком: у матричного job'а GitHub дописывает к имени чек-рана суффикс «(значения матрицы)», поэтому базовое имя required-чеком стать не может (вечно `expected`). |
 | `.github/workflows/docker-build.yml` | Авто-сборка и публикация прод-docker-образов (`backend/Dockerfile`, **`frontend/Dockerfile.prod`** — nginx+dist) в `ghcr.io/asagat/townhouse-app-{backend,frontend}`: push в `main` → тег `main`; релизный тег `v*` → semver-теги `1.2.3` и `1.2` (**без** префикса `v`); можно запустить вручную. Именно эти образы потребляет прод-стек NAS (`docker-compose.prod.yml`, `TOWNHOUSE_TAG` — тоже без `v`). |
 | ~~`.github/workflows/deploy.yml` + `.github/actions/deploy/`~~ | **Удалены (08.09.2026)** — SSH-выкат на сервер был по тегу `v*` → `production` или вручную; серверов `staging`/`production` нет. При появлении хост-сервера процедуру можно восстановить по этому разделу. |
 
-**Текущий релиз:** `v1.1.0` (контрагент в «Приход/Расход»; «остаток на конец» в отчёте по кассе; `balance_after` для строк без л/с + бэкфилл-скрипт). История: `v1.0.9` — исправлен драйвер PostgreSQL (см. примечание ниже); **`v1.0.8` использовать нельзя** (не поднимается против БД из-за SQLAlchemy 2.1); `v1.0.7` — Swagger/ReDoc закрыты в проде через `ENABLE_DOCS`. В ghcr — `1.1.0` и `1.1` (плюс плавающий `latest`); ранее — `v1.0.0`…`v1.0.10`.
+**Текущий релиз:** прод — `v1.1.7` (колонка ID скрываемая/переставляемая; панель действий записи во всех списках; отчёт по должникам без «Начислено»/«Оплачено»); к выкату готовится **`v1.1.8`** — номер релиза в навигации + понятное сообщение об истёкшей сессии, а также ещё не выкаченные изменения (`0021–0027`: права доступа, тип «Касса/Счёт», остаток по кассе, ЛК-блок, «Префиксы», жильцы и др.; см. ROADMAP «Статус уже сделанного»). История: `v1.1.5` — «К оплате» квитанции = баланс на конец периода (по дате документа); `v1.1.0` — контрагент в «Приход/Расход» + «остаток на конец» в отчёте по кассе + `balance_after` для строк без л/с; `v1.0.9` — исправлен драйвер PostgreSQL (ADR-002); **`v1.0.8` использовать нельзя** (не поднимается против БД из-за SQLAlchemy 2.1); `v1.0.7` — Swagger/ReDoc закрыты в проде через `ENABLE_DOCS`.
 
 > **Дрейф зависимостей (26.09.2026):** `backend/requirements.txt` был unpinned — в свежей сборке подтянулся
 > SQLAlchemy 2.1, где дефолтный драйвер для `postgresql://` сменился на psycopg (v3), из-за чего образ падал

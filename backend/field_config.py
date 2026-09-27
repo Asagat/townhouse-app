@@ -20,7 +20,9 @@ from models import (
     AnalyticArticle,
     AnalyticKind,
     Apartment,
+    ApartmentResident,
     CashPoint,
+    CashPointKind,
     CashRegister,
     Meter,
     MeterReading,
@@ -28,6 +30,7 @@ from models import (
     Counterparty,
     ReceiptDocument,
     ReceiptItem,
+    ResidentRole,
     ServiceType,
     Tariff,
     TariffType,
@@ -41,6 +44,7 @@ from models import (
 MODEL_MAP = {
     "owners": Counterparty,
     "apartments": Apartment,
+    "apartment_residents": ApartmentResident,
     "accounts": Account,
     "cash_points": CashPoint,
     "analytic_articles": AnalyticArticle,
@@ -87,8 +91,33 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
             "required": True,
         },
     ],
+    "apartment_residents": [
+        {
+            "name": "apartment_id",
+            "label": "Квартира",
+            "type": "reference",
+            "reference": "apartments",
+            "required": True,
+        },
+        {"name": "full_name", "label": "ФИО", "type": "string", "required": True},
+        {"name": "birth_date", "label": "Дата рождения", "type": "date"},
+        {
+            "name": "role",
+            "label": "Статус",
+            "type": "enum",
+            "enum_class": ResidentRole,
+            "required": True,
+        },
+        {"name": "date_from", "label": "Проживает с", "type": "date"},
+        {"name": "date_to", "label": "Проживает по", "type": "date"},
+    ],
     "accounts": [
-        {"name": "account_number", "label": "№ счёта", "type": "string", "required": True},
+        {
+            "name": "account_number",
+            "label": "№ счёта (пусто — сгенерируется)",
+            "type": "string",
+            "required": False,
+        },
         {"name": "account_name", "label": "Наименование", "type": "string", "required": True},
         {"name": "is_active", "label": "Активен", "type": "boolean"},
         {
@@ -101,6 +130,13 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
     ],
     "cash_points": [
         {"name": "name", "label": "Наименование", "type": "string", "required": True},
+        {
+            "name": "kind",
+            "label": "Тип",
+            "type": "enum",
+            "enum_class": CashPointKind,
+            "required": True,
+        },
         {"name": "is_active", "label": "Активна", "type": "boolean"},
     ],
     "analytic_articles": [
@@ -348,7 +384,7 @@ FIELD_CONFIG: dict[str, list[dict[str, Any]]] = {
         },
         {"name": "income", "label": "Приход", "type": "decimal"},
         {"name": "expense", "label": "Расход", "type": "decimal"},
-        {"name": "balance_after", "label": "Баланс после", "type": "decimal"},
+        {"name": "balance_after", "label": "Остаток по кассе", "type": "decimal"},
     ],
     "accrual_documents": [
         {"name": "id", "label": "ID документа", "type": "integer", "required": False},

@@ -86,18 +86,24 @@ export const authedFetch = async (input: RequestInfo | URL, init: RequestInit = 
 };
 
 /**
- * Открывает/скачивает защищённый PDF.
+ * Скачивает защищённый файл (PDF, Excel/CSV-экспорт и т.п.).
  *
- * JWT передаётся только заголовком Authorization (см. authedFetch), поэтому нельзя
- * просто `window.open(url)` на рендпоинт — заголовок в новой вкладке не добавить
- * (был бы 401). Поэтому запрашиваем blob через authedFetch и скачиваем его как файл
- * <a download href=blob:…> в рамках текущей страницы. Это даёт при нажатии "PDF"
- * именно скачивание документа, и работает и в iOS-браузерах, и на десктопе.
+ * JWT передаётся только заголовком Authorization, поэтому нельзя просто `window.open(url)` —
+ * заголовок в новой вкладке не добавить. Поэтому запрашиваем blob через authedFetch и
+ * скачиваем его как файл <a download href=blob:…> в рамках текущей страницы. Работает и на
+ * десктопе, и в iOS-браузерах.
+ *
+ * options.kindLabel — как называть файл в сообщениях об ошибке (напр. «PDF», «Excel-файл»).
+ * options.expectSubstring — если задан, проверяем MIME-тип blob: не совпало — не скачиваем мусор.
  */
-export const downloadAuthorizedPdf = async (url: string, fallbackName = "document.pdf") => {
+export const downloadAuthorizedFile = async (
+    url: string,
+    fallbackName = "document",
+    options: { kindLabel?: string; expectSubstring?: string } = {},
+) => {
+    const kind = options.kindLabel ?? "Файл";
     let blobUrl: string | null = null;
-    // Таймаут на генерацию/загрузку отчёта, чтобы кнопка «PDF» не висела
-    // бесконечно, если бэкенд падает при сборке файла или соединение зависло.
+    // Таймаут на генерацию/загрузку, чтобы кнопка не висела бесконечно.
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), 60_000);
     try {
@@ -108,7 +114,7 @@ export const downloadAuthorizedPdf = async (url: string, fallbackName = "documen
             return;
         }
         if (!resp.ok) {
-            let detail = `Не удалось загрузить PDF (${resp.status})`;
+            let detail = `Не удалось загрузить ${kind} (${resp.status})`;
             try {
                 const body = await resp.json();
                 if (body?.detail) detail = String(body.detail);
@@ -119,20 +125,21 @@ export const downloadAuthorizedPdf = async (url: string, fallbackName = "documen
             return;
         }
         const blob = await resp.blob();
-        // Предохранитель: если сервер вернул не-PDF (часто это HTML/504/ошибка),
+        // Предохранитель: если сервер вернул не то, что ожидали (часто это HTML/504/ошибка),
         // не скачиваем мусор — показываем внятное сообщение.
         const type = (blob.type || "").toLowerCase();
-        if (blob.size === 0 || (type && !type.includes("pdf")) && resp.status === 200) {
-            message.error("PDF не сформирован (пустой/некорректный ответ). Попробуйте позже.");
+        if (blob.size === 0) {
+            message.error(`${kind} не сформирован (пустой ответ). Попробуйте позже.`);
             return;
         }
-        // Экспонируем blob как файл-ссылку и скачиваем её из текущей страницы.
-        // Никаких window.open/about:blank: скачивание идёт только по пользовательской
-        // кнопке и не зависит от новых вкладок (работает и в iOS/WebView).
+        if (options.expectSubstring && type && !type.includes(options.expectSubstring)) {
+            message.error(`${kind} не сформирован (некорректный ответ). Попробуйте позже.`);
+            return;
+        }
         blobUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = blobUrl;
-        a.download = fallbackName || "document.pdf";
+        a.download = fallbackName || "document";
         a.style.display = "none";
         document.body.appendChild(a);
         a.click();
@@ -145,15 +152,27 @@ export const downloadAuthorizedPdf = async (url: string, fallbackName = "documen
         const aborted = e instanceof DOMException && e.name === "AbortError";
         message.error(
             aborted
-                ? "Не удалось сформировать PDF: превышен таймаут. Повторите попытку."
+                ? `Не удалось сформировать ${kind}: превышен таймаут. Повторите попытку.`
                 : e instanceof Error
                   ? e.message
-                  : "Не удалось загрузить PDF",
+                  : `Не удалось загрузить ${kind}`,
         );
     } finally {
         window.clearTimeout(timer);
     }
 };
+
+/**
+ * Открывает/скачивает защищённый PDF (обёртка над downloadAuthorizedFile).
+ *
+ * JWT передаётся только заголовком Authorization (см. authedFetch), поэтому нельзя
+ * просто `window.open(url)` на рендпоинт — заголовок в новой вкладке не добавить
+ * (был бы 401). Поэтому запрашиваем blob через authedFetch и скачиваем его как файл
+ * <a download href=blob:…> в рамках текущей страницы. Это даёт при нажатии "PDF"
+ * именно скачивание документа, и работает и в iOS-браузерах, и на десктопе.
+ */
+export const downloadAuthorizedPdf = async (url: string, fallbackName = "document.pdf") =>
+    downloadAuthorizedFile(url, fallbackName, { kindLabel: "PDF", expectSubstring: "pdf" });
 
 /**
  * Скачивает защищённый PDF (синоним downloadAuthorizedPdf) — чтобы не править все
